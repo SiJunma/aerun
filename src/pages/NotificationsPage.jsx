@@ -22,8 +22,6 @@ import { refreshUnreadCounts } from '../api/dms';
 const TYPE_META = {
   new_registration: {
     icon: <UserCheck size={18} />,
-    labelEn: 'New registration',
-    labelRu: 'Новая регистрация',
     labelKey: 'notifications.types.new_registration',
     color: 'primary'
   },
@@ -64,7 +62,7 @@ const TYPE_META = {
 
 const NotificationsPage = () => {
   const { profile, recordActivity, isRootAdmin } = useAuth();
-  const { t, lang } = useI18n();
+  const { t } = useI18n();
   const { showToast } = useToast();
   const [deletingId, setDeletingId] = useState(null);
 
@@ -77,8 +75,8 @@ const NotificationsPage = () => {
   const { setPageTitle } = usePageTitle();
 
   useEffect(() => {
-    setPageTitle(t('notifications.title', 'Уведомления'));
-  }, [setPageTitle, t, lang]);
+    setPageTitle(t('notifications.title'));
+  }, [setPageTitle, t]);
 
   useEffect(() => {
     if (!profile?.uid) return;
@@ -299,7 +297,7 @@ const NotificationsPage = () => {
                         const typeLabel = meta?.labelKey ? t(meta.labelKey) : n.type;
                         return (
                           <>
-                            {typeLabel} {lang === 'ru' ? 'в теме ' : 'in topic '}
+                            {typeLabel} {t('notifications.in_topic')}
                             <Link 
                               to={`/topic/${payload.topic_id}?post=${payload.post_id || ''}`}
                               className="text-decoration-none hover-underline"
@@ -325,8 +323,8 @@ const NotificationsPage = () => {
                         // The phrase comes from the dictionary, not a hardcoded
                         // ternary, so a third locale needs no change here.
                         const typeLabel = meta?.labelKey
-                          ? t(meta.labelKey, 'Direct message')
-                          : (lang === 'ru' ? 'Личное сообщение' : 'Direct message');
+                          ? t(meta.labelKey, t('notifications.direct_message'))
+                          : t('notifications.direct_message');
                         const preview = (payload?.preview || '').trim();
                         return (
                           <>
@@ -433,7 +431,7 @@ const NotificationsPage = () => {
                       className="text-decoration-none small fw-bold text-primary"
                       onClick={() => !n.read && handleMarkRead(null, n.id)}
                     >
-                      {lang === 'ru' ? 'Перейти к сообщению →' : 'Go to message →'}
+                      {t('notifications.go_to_message')}
                     </Link>
 
                     {!n.read && (
@@ -458,7 +456,7 @@ const NotificationsPage = () => {
                       className="text-decoration-none small fw-bold text-primary"
                       onClick={() => !n.read && handleMarkRead(null, n.id)}
                     >
-                      {lang === 'ru' ? 'Перейти к сообщению →' : 'Go to message →'}
+                      {t('notifications.go_to_message')}
                     </Link>
 
                     {!n.read && (

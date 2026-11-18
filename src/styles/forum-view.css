@@ -1,0 +1,513 @@
+/**
+ * Aerun Forum View — /category/:id topic list page.
+ *
+ * DOM (SPEC_forum-and-members-theme-dom.md §2-§3):
+ *   <main id="forum-view" class="forum-view" data-forum-id="{id}">
+ *     <nav id="forum-breadcrumbs-top">…</nav>
+ *     <header id="forum-view-header" class="category-header">
+ *       <div class="category-header-heading">
+ *         <h1 class="category-header-title">…</h1>
+ *         <p class="category-header-description">…</p>
+ *         <div class="category-header-meta">…</div>
+ *       </div>
+ *       <div class="category-header-actions">…</div>
+ *     </header>
+ *     <div id="forum-actions-top">…</div>
+ *     <nav id="forum-pagination-top">…</nav>
+ *     <section id="forum-topic-list">
+ *       <div class="category-subtitle [has-check] [has-category]">
+ *         <span class="category-col--topic">…</span>
+ *         <span class="category-col--category">…</span>
+ *         <span class="category-col--replies">…</span>
+ *         <span class="category-col--lastpost">…</span>
+ *       </div>
+ *       <div class="topic-list">
+ *         <article class="topic-item" data-topic-id="…">…</article>
+ *       </div>
+ *     </section>
+ *     <nav id="forum-pagination-bottom">…</nav>
+ *     <div id="forum-actions-bottom">…</div>
+ *     <nav id="forum-breadcrumbs-bottom">…</nav>
+ *   </main>
+ *
+ * TopicRow itself lives in topic-row.css (shared across list pages).
+ */
+
+#forum-view,
+.forum-view {
+  width: 100%;
+}
+
+/* ── Page header (.category-header) ───────────────────────────
+   Shared by the category page and the three topic list pages:
+   title + description on the left, action buttons on the right,
+   no card chrome (heading sits on the page background). */
+#forum-view-header,
+.category-header {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem 1.5rem;
+  background-color: var(--category-header-bg);
+  border: 1px solid var(--category-header-border);
+  border-radius: 0;
+  padding: var(--category-header-padding);
+  margin-bottom: var(--category-header-margin-bottom);
+}
+
+.category-header-heading {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.category-header-title {
+  margin: 0 0 0.25rem 0;
+  color: var(--category-header-title-color);
+  font-size: var(--category-header-title-size);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.category-header-description {
+  color: var(--category-header-description-color);
+  font-size: 0.875rem;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.category-header-skeleton {
+  margin-top: 0.5rem;
+}
+
+.category-header-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+  color: var(--category-header-description-color);
+  font-size: 0.875rem;
+  flex-wrap: wrap;
+}
+
+/* ── Actions (create topic / manage) ────────────────────────── */
+#forum-actions-top,
+#forum-actions-bottom,
+.category-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  margin-bottom: 0;
+}
+
+#forum-actions-bottom {
+  margin-top: 1rem;
+}
+
+.forum-view-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.9rem;
+  border-radius: 0.375rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+.forum-view-action-btn:disabled {
+  opacity: 0.75;
+  cursor: not-allowed;
+}
+
+.forum-view-action-btn--primary {
+  background-color: var(--forum-view-btn-primary-bg);
+  color: var(--forum-view-btn-primary-text);
+  border: 1px solid var(--forum-view-btn-primary-border);
+}
+
+.forum-view-action-btn--primary:hover:not(:disabled),
+.forum-view-action-btn--primary:focus {
+  color: var(--forum-view-btn-ghost-hover-text);
+  background-color: var(--forum-view-btn-ghost-hover-bg);
+}
+
+.forum-view-action-btn--secondary {
+  background-color: var(--forum-view-btn-ghost-bg);
+  color: var(--forum-view-btn-ghost-text);
+  border: 1px solid var(--forum-view-btn-ghost-border);
+}
+
+.forum-view-action-btn--secondary:hover:not(:disabled),
+.forum-view-action-btn--secondary:focus {
+  color: var(--forum-view-btn-ghost-hover-text);
+  background-color: var(--forum-view-btn-ghost-hover-bg);
+  border-color: var(--forum-view-btn-ghost-border);
+}
+
+.forum-view-action-btn--danger {
+  background-color: var(--forum-view-btn-danger-bg);
+  color: var(--forum-view-btn-danger-text);
+  border: 1px solid var(--forum-view-btn-danger-bg);
+}
+
+.forum-view-action-btn--danger:hover:not(:disabled),
+.forum-view-action-btn--danger:focus {
+  background-color: var(--forum-view-btn-danger-hover-bg);
+  border-color: var(--forum-view-btn-danger-hover-bg);
+}
+
+/* Button text: icon-only below 992px, icon + label from 992px up
+   (replaces the Bootstrap d-none d-lg-inline pair on the span). */
+.forum-view-action-label {
+  display: none;
+}
+
+@media (min-width: 992px) {
+  .forum-view-action-label {
+    display: inline;
+  }
+}
+
+/* ── Pagination wrappers ────────────────────────────────────── */
+/* The pagination look lives in forum-pagination.css (.forum-pagination,
+   modifier .forum-pagination-view). Any page-level #id wrapper only
+   carries placement/margin, never its own colors/fonts. */
+/* #forum-pagination-top / #forum-pagination-bottom are the legacy
+   page-level landmarks; #*-page pages keep them for theme hooks. */
+#forum-pagination-top .forum-pagination,
+#forum-pagination-bottom .forum-pagination {
+  margin: 0 auto;
+}
+
+/* ── Topic list card ────────────────────────────────────────── */
+#forum-topic-list,
+.forum-topic-list {
+  background-color: var(--forum-view-card-bg);
+  /* border: 1px solid var(--forum-view-card-border); */
+  border-radius: var(--forum-view-card-radius);
+  box-shadow: var(--forum-view-card-shadow);
+  overflow: hidden;
+}
+
+/* ── Category subtitle (columns strip of every topic list) ─────
+   One block class carries the grid AND the visual. The design is the
+   GROUP HEADER look (not the small-caps strip of the main page):
+   colors come from --category-subtitle-* tokens, geometry lives here.
+   Columns per page (grid from the row variants below):
+     category page : topic | replies | last post        (+check)
+     active/new/subs: topic | category | replies | last post
+   State modifiers: .has-check (manage mode), .has-category (lists). */
+.category-subtitle {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 100px minmax(200px, 35%);
+  align-items: center;
+  column-gap: 30px;
+  padding: 0.75rem 1rem;
+  background-color: var(--category-subtitle-bg);
+  color: var(--category-subtitle-text);
+  font-size: 0.9rem;
+  font-weight: 700;
+  border-bottom: 1px solid var(--category-border);
+}
+
+.category-subtitle.has-category {
+  grid-template-columns: minmax(260px, 1fr) 140px 100px minmax(200px, 35%);
+  column-gap: 0.75rem;
+}
+
+/* Manage mode: fixed-width leading column for the select-all checkbox.
+   The checkbox never changes size, so the column is a constant 40px. */
+.category-subtitle.has-check {
+  grid-template-columns: 32px minmax(260px, 1fr) 100px minmax(200px, 35%);
+  column-gap: 10px;
+}
+
+.category-subtitle.has-check.has-category {
+  grid-template-columns: 32px minmax(260px, 1fr) 140px 100px minmax(200px, 35%);
+  column-gap: 0.75rem;
+}
+
+/* Select-all checkbox cell: same fixed width as the row checkboxes. */
+.category-subtitle-check {
+  width: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── Medium viewport (<993px): narrower counters ───────────────
+   Mirrors the .forum-item--topic / .topic-item row grids so the
+   subtitle and the rows never disagree mid-range. Source order:
+   placed after every base .category-subtitle rule. */
+@media screen and (max-width: 993px) {
+
+  .category-subtitle {
+    grid-template-columns: minmax(220px, 1fr) 80px minmax(200px, 35%);
+    column-gap: 30px;
+  }
+
+  .category-subtitle.has-category {
+    grid-template-columns: minmax(220px, 1fr) 140px 80px minmax(200px, 35%);
+    column-gap: 0.75rem;
+  }
+
+  .category-subtitle.has-check {
+    grid-template-columns: 32px minmax(220px, 1fr) 80px minmax(200px, 35%);
+    column-gap: 10px;
+  }
+
+  .category-subtitle.has-check.has-category {
+    grid-template-columns: 32px minmax(220px, 1fr) 140px 80px minmax(200px, 35%);
+    column-gap: 0.75rem;
+  }
+}
+
+.topic-list {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Empty state ────────────────────────────────────────────── */
+.forum-view-empty {
+  padding: 3rem 1rem;
+  text-align: center;
+  color: var(--forum-view-empty-color);
+  font-size: 0.95rem;
+}
+
+/* ── Back link (btn-outline-secondary) ──────────────────────── */
+.forum-view-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: var(--forum-view-back-padding);
+  color: var(--forum-view-back-color);
+  text-decoration: none;
+  font-size: 0.95rem;
+  font-weight: 600;
+  border: 1px solid var(--forum-view-back-border);
+  border-radius: var(--forum-view-back-radius);
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.forum-view-back:hover,
+.forum-view-back:focus {
+  color: var(--forum-view-btn-ghost-hover-text);
+  background-color: var(--forum-view-btn-ghost-hover-bg);
+  border-color: var(--forum-view-btn-ghost-hover-bg);
+}
+
+.forum-view-footer {
+  margin-top: 1.5rem;
+}
+
+/* ── Page-level wrappers ────────────────────────────────────── */
+/* Error card wrapper (replaces p-3). */
+.forum-view-error {
+  padding: 1rem;
+}
+
+/* Bottom pagination wrapper inside the list card (replaces
+   p-3 d-flex justify-content-center border-top). */
+.forum-view-pagination {
+  display: flex;
+  justify-content: center;
+  padding: 1rem;
+  border-top: 1px solid var(--forum-view-card-border);
+}
+
+/* Create-topic button under the empty state. */
+.forum-view-empty-actions {
+  display: flex;
+  justify-content: center;
+  padding-bottom: 1.5rem;
+}
+
+/* ── Management Toolbar (CategoryPage manage mode) ────────────
+   Moved from utilities.css: visual rules now live here with forum-view,
+   colours driven by --management-toolbar-* tokens (dark/light/neutral).
+   The fixed-bottom behaviour and slide-up animation are unchanged. */
+.management-toolbar {
+  position: fixed;
+  bottom: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1050;
+  background: var(--management-toolbar-bg);
+  color: var(--management-toolbar-text);
+  border: 1px solid var(--management-toolbar-border);
+  border-radius: 1rem;
+  padding: 0.75rem 1.5rem;
+  box-shadow: var(--management-toolbar-shadow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  width: max-content;
+  max-width: 95vw;
+  gap: 1rem;
+  user-select: none;
+  animation: toolbarSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.management-toolbar .forum-view-action-btn {
+  white-space: nowrap;
+}
+
+.management-toolbar-count {
+  margin-right: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.management-toolbar-divider {
+  align-self: stretch;
+  width: 1px;
+  margin: 0 0.5rem;
+  background-color: currentColor;
+  opacity: 0.25;
+}
+
+/* Instruction shown while manage mode is on and nothing is ticked yet.
+   It sits at the end of the action bar, so the bar itself now explains what to
+   do instead of leaving the page silent after "Manage" was pressed. */
+.management-toolbar-hint {
+  opacity: var(--management-toolbar-hint-opacity);
+  font-style: italic;
+  font-size: 0.875rem;
+  white-space: normal;
+  max-width: 22rem;
+  line-height: 1.25;
+}
+
+@keyframes toolbarSlideUp {
+  from {
+    transform: translate(-50%, 100%);
+    opacity: 0;
+  }
+
+  to {
+    transform: translate(-50%, 0);
+    opacity: 1;
+  }
+}
+
+@media (max-width: 768px) {
+  .management-toolbar {
+    padding: 0.5rem 0.75rem;
+    gap: 0.6rem;
+    border-radius: 0.75rem;
+    bottom: 1rem;
+  }
+
+  .management-toolbar-divider {
+    display: none;
+  }
+
+  .management-toolbar-hint {
+    max-width: 100%;
+    text-align: center;
+  }
+}
+
+/* ── Skeletons, loading spinner, empty state ──────────────────
+   Replaces Bootstrap spacing utilities (mb-1/mb-2/mt-2/me-2) and the
+   empty-state inline styles on the Forum View list pages. */
+.topic-skeleton-title {
+  margin-bottom: 0.5rem;
+}
+
+.topic-skeleton-last {
+  margin-bottom: 0.25rem;
+}
+
+.forum-view-skeleton-desc {
+  margin-top: 0.5rem;
+}
+
+.forum-view-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.forum-view-spinner {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  color: var(--loading-spinner-color);
+  animation: aerun-spin 0.9s linear infinite;
+}
+
+.forum-view-empty-icon {
+  font-size: var(--forum-view-empty-icon-size);
+  opacity: var(--forum-view-empty-icon-opacity);
+}
+
+.forum-view-empty-note {
+  font-size: var(--forum-view-empty-note-size);
+}
+
+/* Native checkbox in topic select columns (replaces react-bootstrap
+   Form.Check). Fully custom: themed border + fill, white check mark. */
+.topic-select-input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 1.1rem;
+  height: 1.1rem;
+  margin: 0;
+  border: 2px solid var(--topic-check-border);
+  border-radius: 0.25rem;
+  background-color: var(--topic-check-bg);
+  cursor: pointer;
+  display: inline-block;
+  vertical-align: middle;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.topic-select-input:checked {
+  background-color: var(--topic-check-checked-bg);
+  border-color: var(--topic-check-checked-bg);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23ffffff' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 8.5 6.5 12 13 4.5'/%3E%3C/svg%3E");
+  background-size: 0.7rem;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.topic-select-input:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
+/* ── Mobile ─────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .category-subtitle {
+    display: none;
+  }
+
+  #forum-view-header,
+  .category-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .category-header-title {
+    font-size: var(--category-header-title-size-mobile, 2rem);
+  }
+
+  #forum-actions-top,
+  .category-header-actions {
+    align-self: flex-start;
+  }
+}

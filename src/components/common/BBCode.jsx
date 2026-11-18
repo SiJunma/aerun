@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ChevronDown, ChevronRight, Dices, EyeOff, Reply } from 'lucide-react';
+import { ChevronDown, ChevronRight, Copy, Dices, EyeOff, Reply } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
+import { useToast } from '../../contexts/ToastProvider';
 import { ALL_SMILES_MAP } from '../../config/smiles';
 
 /**
@@ -35,7 +36,7 @@ import { ALL_SMILES_MAP } from '../../config/smiles';
  *    standard Bootstrap text-alignment classes.
  */
 
-const BBCodeSpoiler = ({ title, children }) => {
+const BBCodeSpoiler = ({ title, children, t }) => {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
@@ -46,7 +47,7 @@ const BBCodeSpoiler = ({ title, children }) => {
         style={{ cursor: 'pointer' }}
       >
         <span className="spoiler-title fw-bold small">
-          {title || ((localStorage.getItem('language') || localStorage.getItem('i18nextLng')) === 'ru' ? 'Спойлер' : 'Spoiler')}
+          {title || t('bbcode.spoiler_default')}
         </span>
         <span className="spoiler-icon opacity-50">
           {isOpen ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
@@ -101,6 +102,91 @@ const ColumnsStacker = ({ children, stackAt }) => {
   );
 };
 
+/**
+ * isTrustedAdminRole — is this role id entitled to raw `[html]` execution
+ * (SEC-02, owner-approved role model)?
+ *
+ * This is the ONLY allowlist: `root` and `admin` — the trusted roles.
+ * Custom roles are deliberately NOT included: a granted permission is
+ * revocable state, while the role id here is who the account was authored
+ * as. The earlier implementation compared against the VIEWER's own role
+ * (profile) rather than the AUTHOR's, so any member who could view a post
+ * could also see its raw script execution.
+ */
+const isTrustedAdminRole = (roleId) => {
+  return roleId === 'root' || roleId === 'admin';
+};
+
+// --- SEC-02: strict, whitelist-based sanitisation of `[html]` content ---
+//
+// The old walk trusted arbitrary tags from anyone: it only skipped `script`
+// and `noscript`, and it passed through `on*` handlers after stripping the
+// `javascript:` prefix from a handful of URL attributes. A player could
+// inject `<style>` to redraw the forum layout, `<iframe src="...">` to
+// embed an arbitrary page, or `<img onerror>` routed through a `data:` URL.
+// DOMParser makes the traversal total, so the correct shape is a WHITELIST:
+// a tag or attribute that is not listed is dropped, never evaluated.
+//
+//   - ALLOWED_TAGS: presentational tags a role-play forum legitimately
+//     needs. Everything raw-active (script, style, iframe, object, embed,
+//     meta, link, form, input, button, textarea, select, base, audio, video,
+//     source, track, svg, math, template) is simply not in the list.
+//   - ALLOWED_ATTRS: the presentation surface only (class, id, href, src,
+//     alt, title, width, height, style, colspan, rowspan, type). No event
+//     handler, no `srcdoc`, no `formaction`, no `xlink:href`.
+//   - URL attributes (href/src) go through isSafeUrl: a non-allowlisted
+//     scheme is dropped (javascript:, vbscript:, data:text/html, blob:,
+//     file:, ftp:, mailto:, tel: …). `data:image/*` is allowed for inline
+//     images ONLY because the avatar pipeline stores them.
+//   - `style` values are parsed by parseStyleString AND filtered: a value
+//     containing expression(), a bare url(, or a javascript: token is
+//     dropped, so the CSS parser never sees an execution attempt.
+const ALLOWED_TAGS = new Set([
+  'div', 'span', 'p', 'br', 'hr',
+  'b', 'strong', 'i', 'em', 'u', 's', 'del', 'strike', 'small', 'sub', 'sup',
+  'a', 'img', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th',
+  'ul', 'ol', 'li', 'dl', 'dt', 'dd',
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'blockquote', 'pre', 'code', 'q', 'cite',
+  'section', 'article', 'header', 'footer', 'main', 'figure', 'figcaption'
+]);
+const ALLOWED_ATTRS = new Set([
+  'class', 'id', 'href', 'src', 'alt', 'title', 'width', 'height',
+  'colspan', 'rowspan', 'type', 'style'
+]);
+const URL_ATTRS = new Set(['href', 'src']);
+
+/**
+ * isSafeUrl(value) — is this attribute value safe to render as href/src?
+ *
+ * The raw scheme is tested, never resolved against a base URI: trim,
+ * case-fold, then allow http/https, a relative path, or a data:image/*
+ * image. Everything else (javascript:, vbscript:, data:text/html, blob:,
+ * file:, ftp:, mailto:, tel:, …) is dropped — the attribute is removed,
+ * not the tag.
+ */
+const isSafeUrl = (value) => {
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (/^(?:\/|\.\/|\.\.\/)/.test(trimmed)) return true;
+  const schemeMatch = trimmed.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):/);
+  if (!schemeMatch) return true; // no scheme — a relative path or bare host
+  const scheme = schemeMatch[1].toLowerCase();
+  if (scheme === 'http' || scheme === 'https') return true;
+  if (scheme === 'data') {
+    return /^data:image\/(?:png|jpe?g|webp|gif);base64,/i.test(trimmed);
+  }
+  return false;
+};
+
+/**
+ * parseStyleString(styleStr) — parse a style attribute into a React style
+ * object, dropping declarations whose VALUE would smuggle execution
+ * (expression(, url(, javascript:) rather than passing the raw string to
+ * React. The old version handed the whole value through unexamined, so
+ * `style="x:expression(alert(1))"` reached the DOM.
+ */
 const parseStyleString = (styleStr) => {
   if (!styleStr) return {};
   const styleObj = {};
@@ -112,14 +198,66 @@ const parseStyleString = (styleStr) => {
     if (colonIdx === -1) return;
     const property = trimmed.substring(0, colonIdx).trim();
     const value = trimmed.substring(colonIdx + 1).trim();
+    if (!property || !value) return;
+
+    const lowerValue = value.toLowerCase();
+    if (lowerValue.includes('expression(') || lowerValue.includes('url(') || lowerValue.includes('javascript:')) {
+      return; // offending declaration — drop it, keep the rest of the style
+    }
+
     const camelProperty = property.replace(/-([a-z])/g, (g) => g[1].toUpperCase());
     styleObj[camelProperty] = value;
   });
   return styleObj;
 };
 
-const safeHtmlToReact = (htmlStr, index) => {
-  if (typeof window === 'undefined') return htmlStr;
+/**
+ * safeHtmlToReact(htmlStr, index, isAdminAuthor) — render `[html]` content
+ * through the whitelist sanitiser (SEC-02).
+ *
+ *   - `isAdminAuthor === true`: the AUTHOR's role is root/admin, so the post
+ *     may embed script/style/iframe (media, widgets, custom styling). The
+ *     whitelist still applies to attributes: even trusted JS must arrive as
+ *     a tag, not as an `on*` handler or a javascript: URL trick.
+ *   - otherwise: strict whitelist. A tag not in ALLOWED_TAGS drops its
+ *     whole subtree — there is no safe way to grow content out of an
+ *     unlisted wrapper, and the children of a removed node are never
+ *     re-walked.
+ *
+ * Failure mode: if the parser throws, render NOTHING rather than the raw
+ * string. Returning raw HTML on error was the old fallback and re-opened
+ * the injection window precisely when the sanitiser was unavailable.
+ */
+const safeHtmlToReact = (htmlStr, index, isAdminAuthor) => {
+  if (typeof htmlStr !== 'string') return null;
+  if (typeof window === 'undefined') return null;
+
+  const admin = isAdminAuthor === true;
+
+  // [html] — сырой HTML. Переносы строк между тегами не имеют визуального
+  // смысла (браузер их схлопывает), но при рендере в React они становятся
+  // текстовыми узлами, которые могут быть прямыми детьми <tr>, <table>,
+  // <ul> и т.д. — это ломает hydration. Удаляем все whitespace-only
+  // текстовые узлы из дерева (кроме <pre>, <textarea>, <script>, <style>,
+  // где переносы значимы).
+  const stripWhitespaceTextNodes = (node) => {
+    if (node.nodeType === 1) {
+      const tagName = node.tagName.toLowerCase();
+      const preserveWhitespace = ['pre', 'textarea', 'script', 'style'].includes(tagName);
+      if (!preserveWhitespace) {
+        for (let i = node.childNodes.length - 1; i >= 0; i--) {
+          const child = node.childNodes[i];
+          if (child.nodeType === 3 && /^\s*$/.test(child.textContent)) {
+            node.removeChild(child);
+          } else {
+            stripWhitespaceTextNodes(child);
+          }
+        }
+      }
+    }
+    return node;
+  };
+
   try {
     const parser = new DOMParser();
     const doc = parser.parseFromString(htmlStr, 'text/html');
@@ -132,9 +270,23 @@ const safeHtmlToReact = (htmlStr, index) => {
       // Element Node
       if (domNode.nodeType === 1) {
         const tagName = domNode.tagName.toLowerCase();
-        if (tagName === 'script' || tagName === 'noscript') {
-          return null;
+
+        // Trusted roles: style/script/iframe pass through verbatim.
+        if (admin && tagName === 'style') {
+          return <style key={key} dangerouslySetInnerHTML={{ __html: domNode.textContent }} />;
         }
+        if (admin && tagName === 'script') {
+          return <script key={key} dangerouslySetInnerHTML={{ __html: domNode.textContent }} />;
+        }
+        if (admin && tagName === 'iframe') {
+          const src = domNode.getAttribute('src') || '';
+          if (!isSafeUrl(src)) return null;
+          const title = domNode.getAttribute('title') || 'embedded media';
+          return <iframe key={key} src={src} title={title} />;
+        }
+
+        // Everyone else (and the tags above when not admin):
+        if (!ALLOWED_TAGS.has(tagName)) return null;
 
         const attribs = { key };
         for (let i = 0; i < domNode.attributes.length; i++) {
@@ -142,15 +294,10 @@ const safeHtmlToReact = (htmlStr, index) => {
           const attrName = attr.name.toLowerCase();
           const attrValue = attr.value;
 
-          if (attrName.startsWith('on')) {
-            continue;
-          }
-          if (['href', 'src', 'action', 'formaction'].includes(attrName)) {
-            const sanitizedVal = attrValue.trim().toLowerCase();
-            if (sanitizedVal.startsWith('javascript:') || sanitizedVal.startsWith('data:text/html')) {
-              continue;
-            }
-          }
+          if (attrName.startsWith('on')) continue;
+          if (!ALLOWED_ATTRS.has(attrName)) continue;
+
+          if (URL_ATTRS.has(attrName) && !isSafeUrl(attrValue)) continue;
 
           let reactAttrName = attrName;
           if (attrName === 'class') reactAttrName = 'className';
@@ -168,28 +315,68 @@ const safeHtmlToReact = (htmlStr, index) => {
         const childNodes = Array.from(domNode.childNodes);
         const reactChildren = childNodes.map((child, i) => domNodeToReact(child, `${key}-${i}`)).filter(Boolean);
 
-        if (tagName === 'style') {
-          return <style key={key} dangerouslySetInnerHTML={{ __html: domNode.textContent }} />;
-        }
-
         return React.createElement(tagName, attribs, ...reactChildren);
       }
       return null;
     };
 
-    const bodyChildren = Array.from(doc.body.childNodes);
+    const bodyChildren = Array.from(doc.body.childNodes).map(node =>
+      stripWhitespaceTextNodes(node)
+    );
     const elements = bodyChildren.map((child, i) => domNodeToReact(child, `${index}-${i}`)).filter(Boolean);
     return <React.Fragment key={index}>{elements}</React.Fragment>;
   } catch (err) {
-    console.error('Error parsing HTML tag in BBCode:', err);
-    return htmlStr;
+    console.error('HTML parse error:', err);
+    return null;
   }
 };
 
-const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
+/**
+ * Одиночный блок кода [code][/code] со своим состоянием копирования.
+ * Каждый экземпляр имеет независимое состояние `copied`, поэтому нажатие
+ * на одну кнопку не затрагивает остальные блоки кода в том же посте.
+ */
+const CodeBlock = ({ rawText, t, showToast }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(rawText);
+      setCopied(true);
+      showToast(t('bbcode.code_copied', 'Код скопирован'), 'success');
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      showToast(t('bbcode.code_copy_failed', 'Не удалось скопировать'), 'error');
+    }
+  };
+
+  return (
+    <div className="bbcode-code-wrapper">
+      <pre className="bbcode-code">
+        {rawText}
+      </pre>
+      <button
+        type="button"
+        onClick={handleCopy}
+        className="bbcode-copy-btn"
+        aria-label={t('bbcode.code_copy', 'Копировать код')}
+        title={copied ? t('bbcode.code_copied', 'Код скопирован') : t('bbcode.code_copy', 'Копировать код')}
+      >
+        {copied ? (
+          <span className="bbcode-copy-check">✓</span>
+        ) : (
+          <Copy size={13} strokeWidth={1.8} />
+        )}
+      </button>
+    </div>
+  );
+};
+
+const BBCode = ({ children, rolls = {}, isDM = false, authorId, authorRole }) => {
   const navigate = useNavigate();
   const { user, profile, hasPermission, PERMISSIONS, settings } = useAuth() || {};
-  const { t, lang } = useI18n();
+  const { t } = useI18n();
+  const { showToast } = useToast();
   if (typeof children !== 'string') return children;
 
   // 0. Preprocess text to wrap smile shortcodes into [smile] tags
@@ -233,7 +420,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
   // 2. Build a tree structure using a stack
   const root = { type: 'root', children: [] };
   const stack = [root];
-  const supportedTags = ['b', 'i', 'u', 's', 'strike', 'del', 'quote', 'list', '*', 'url', 'img', 'color', 'size', 'columns', 'col', 'dice', 'roll', 'spoiler', 'video', 'youtube', 'media', 'hide', 'hide_secured', 'hr', 'smile', 'code', 'sup', 'sub', 'abbr', 'html', 'left', 'center', 'right', 'justify'];
+  const supportedTags = ['b', 'i', 'u', 's', 'strike', 'del', 'quote', 'list', '*', 'url', 'img', 'color', 'size', 'columns', 'col', 'dice', 'roll', 'spoiler', 'video', 'youtube', 'media', 'hide', 'hide_secured', 'hr', 'smile', 'code', 'sup', 'sub', 'abbr', 'html', 'align', 'left', 'center', 'right', 'justify', 'table', 'tr', 'td'];
 
   tokens.forEach(token => {
     let parent = stack[stack.length - 1];
@@ -284,20 +471,36 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
   });
 
   // 3. Spacing Optimization (Absorption of newlines around block tags)
-  const blockTags = ['quote', 'list', '*', 'columns', 'col', 'spoiler', 'dice', 'roll', 'video', 'youtube', 'media', 'hr', 'left', 'center', 'right', 'justify', 'code', 'html', 'hide', 'hide_secured'];
-  function preprocessNodes(nodes) {
+  // `dice` and `roll` are DELIBERATELY ABSENT here: they are self-closing
+  // inline-block chips, not block containers. Absorbing the newline after
+  // them glued the following text to the chip (the "[dice=6]\nтекст" report):
+  // with white-space:pre-wrap the break must survive, so a tag authored on
+  // its own line keeps its own line.
+  const blockTags = ['quote', 'list', '*', 'columns', 'col', 'spoiler', 'video', 'youtube', 'media', 'hr', 'align', 'left', 'center', 'right', 'justify', 'code', 'html', 'hide', 'hide_secured', 'table', 'tr'];
+  // `insideCode` — когда мы внутри [code][/code], переносы строк и пустые
+  // строки являются значимым содержимым и НЕ должны вырезаться.
+  function preprocessNodes(nodes, insideCode = false) {
     const result = [...nodes];
     for (let i = 0; i < result.length; i++) {
       const node = result[i];
       if (typeof node !== 'string' && blockTags.includes(node.name)) {
-        // Absorption: remove ONE newline after the block tag
-        if (i < result.length - 1 && typeof result[i + 1] === 'string') {
-          result[i + 1] = result[i + 1].replace(/^\r?\n/, '');
+        // Absorption: remove ONE newline after the block tag — never inside [code]
+        // Never absorb the newline between two [code] blocks, otherwise text
+        // sitting between them gets swallowed.
+        if (!insideCode && i < result.length - 1 && typeof result[i + 1] === 'string') {
+          const nextIsCodeBlock =
+            i < result.length - 2 &&
+            typeof result[i + 2] !== 'string' &&
+            result[i + 2].name === 'code';
+          if (!nextIsCodeBlock) {
+            result[i + 1] = result[i + 1].replace(/^\r?\n/, '');
+          }
         }
       }
       // Recursively preprocess children of tags
       if (typeof node !== 'string' && node.children) {
-        if (blockTags.includes(node.name)) {
+        const isBlockOrTd = blockTags.includes(node.name) || node.name === 'td';
+        if (isBlockOrTd && !insideCode) {
           // Remove leading newlines only (preserving indent spaces)
           if (node.children.length > 0 && typeof node.children[0] === 'string') {
             node.children[0] = node.children[0].replace(/^[\r\n]+/, '');
@@ -308,14 +511,62 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
             node.children[lastIdx] = node.children[lastIdx].replace(/[\r\n]+$/, '');
           }
         }
-        node.children = preprocessNodes(node.children);
+        node.children = preprocessNodes(node.children, insideCode || node.name === 'code');
       }
     }
-    // Filter out truly empty strings to prevent "phantom" spans/lines
-    return result.filter(n => typeof n !== 'string' || n.length > 0);
+    // Never drop empty strings on the top level: text between two [code]
+    // blocks (including a bare newline) must survive to the renderer.
+    return result;
   }
 
   const processedTree = preprocessNodes(root.children);
+
+  // Extract text nodes that are direct children of <table> or <tr> (not inside <td>).
+  // HTML does not allow text as a direct child of <tr>, so MyBB moves such text
+  // before the table. We do the same here to avoid hydration errors and wrong placement.
+  let orphanTexts = [];
+  // Та же причина, что и в preprocessNodes: внутри [code] переносы и пустые
+  //строки — значимое содержимое, а не «осиротевший» текст таблицы.
+  function extractTableOrphanText(nodes, insideCode = false) {
+    for (const node of nodes) {
+      if (typeof node === 'string') continue;
+      if (node.name === 'table') {
+        const kept = [];
+        for (const child of node.children) {
+          if (typeof child === 'string') {
+            if (insideCode) {
+              kept.push(child);
+            } else if (child.trim().length > 0) {
+              orphanTexts.push(child);
+            }
+          } else if (child.name === 'tr') {
+            const keptTd = [];
+            for (const grandchild of child.children) {
+              if (typeof grandchild === 'string') {
+                if (insideCode) {
+                  keptTd.push(grandchild);
+                } else if (grandchild.trim().length > 0) {
+                  orphanTexts.push(grandchild);
+                }
+              } else if (grandchild.name === 'td') {
+                keptTd.push(grandchild);
+              } else {
+                keptTd.push(grandchild);
+              }
+            }
+            child.children = keptTd;
+            kept.push(child);
+          } else {
+            kept.push(child);
+          }
+        }
+        node.children = kept;
+      } else {
+        extractTableOrphanText(node.children, insideCode || node.name === 'code');
+      }
+    }
+  }
+  extractTableOrphanText(processedTree);
 
   // 4. Render the tree to React elements
   function getTextContent(node) {
@@ -327,6 +578,15 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
     if (typeof node === 'string') return node;
     const inner = (node.children || []).map(getRawContent).join('');
     const closing = node.name !== 'dice' && node.name !== 'roll' && node.name !== 'hr';
+    // Alignment tags are always serialized in the new [align=<value>] format
+    // (MyBB compatibility), regardless of the original syntax ([center] / [align=center]).
+    const alignNames = { left: 'left', center: 'center', right: 'right', justify: 'justify' };
+    if (node.name === 'align' || node.name in alignNames) {
+      const value = node.name === 'align' ? (node.rawParams || 'left') : alignNames[node.name];
+      const valid = ['left', 'center', 'right', 'justify'].includes(value) ? value : 'left';
+      const openTag = `[align=${valid}]`;
+      return `${openTag}${inner}${closing ? '[/align]' : ''}`;
+    }
     const openTag = node.rawTag || `[${node.name}]`;
     return `${openTag}${inner}${closing ? `[/${node.name}]` : ''}`;
   }
@@ -438,13 +698,13 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
                     className="text-decoration-none d-flex align-items-center gap-1"
                     style={{ color: 'inherit', userSelect: 'text', cursor: 'pointer' }}
                     draggable="false"
-                    title={lang === 'ru' ? 'Перейти к сообщению' : 'Go to message'}
+                    title={t('bbcode.goto_message')}
                     onClick={(e) => {
                       e.preventDefault();
                       const el = document.getElementById(`post-${postId}`);
                       if (el) {
                         // Post is on this page — just scroll, no navigation
-                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
                         el.classList.add('highlight-new-post');
                         setTimeout(() => el.classList.remove('highlight-new-post'), 2000);
                       } else {
@@ -494,7 +754,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
         const isGif = imgUrl.toLowerCase().split('?')[0].endsWith('.gif');
 
         if (isGif && settings?.allowGifInPosts === false) {
-          return <a key={index} href={imgUrl} target="_blank" rel="noopener noreferrer" className="small text-muted italic">[{lang === 'ru' ? 'GIF-изображение' : 'GIF Image'}: {imgUrl}]</a>;
+          return <a key={index} href={imgUrl} target="_blank" rel="noopener noreferrer" className="small text-muted italic">[{t('bbcode.gif_image')}: {imgUrl}]</a>;
         }
 
         const imgStyle = {};
@@ -549,6 +809,14 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
       case 'center': return <div key={index} className="text-center">{content}</div>;
       case 'right': return <div key={index} className="text-end">{content}</div>;
       case 'justify': return <div key={index} style={{ textAlign: 'justify' }}>{content}</div>;
+      case 'align': {
+        const value = (params.default || 'left').toLowerCase();
+        if (value === 'left') return <div key={index} className="text-start">{content}</div>;
+        if (value === 'center') return <div key={index} className="text-center">{content}</div>;
+        if (value === 'right') return <div key={index} className="text-end">{content}</div>;
+        if (value === 'justify') return <div key={index} style={{ textAlign: 'justify' }}>{content}</div>;
+        return <div key={index} className="text-start">{content}</div>;
+      }
       case 'dice': {
         const sides = params.default || '20';
         return (
@@ -563,7 +831,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
             <div className="d-flex align-items-center gap-2">
               <Dices size={18} style={{ color: 'var(--secondary-color)' }} />
               <div className="small fw-bold" style={{ color: 'var(--input-text)' }}>
-                {lang === 'ru' ? `Бросок d${sides} (в ожидании...)` : `d${sides} Roll (pending...)`}
+                {t('bbcode.dice_roll_pending', { sides })}
               </div>
             </div>
           </div>
@@ -572,7 +840,10 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
       case 'roll': {
         const rollId = params.default;
         // Use baked-in values if available (for quotes/permanence if original post is deleted)
-        const roll = rolls[rollId] || (params.value ? {
+        // rolls can legitimately be null (an optimistic row built before the
+        // throws resolve) — the default {} parameter only covers undefined,
+        // and a null access here crashed the whole page.
+        const roll = (rolls && rolls[rollId]) || (params.value ? {
           value: params.value,
           sides: params.sides,
           type: params.type
@@ -588,7 +859,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
               <div className="d-flex align-items-center gap-2">
                 <EyeOff size={18} style={{ color: 'var(--secondary-color)' }} />
                 <div className="small fw-bold" style={{ color: 'var(--input-text)', opacity: 0.8 }}>
-                  {lang === 'ru' ? 'Мастерский бросок (скрыто)' : 'Master Roll (hidden)'}
+                  {t('bbcode.master_roll_hidden')}
                 </div>
               </div>
             </div>
@@ -611,8 +882,8 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
                   {roll.value}
                 </span>
                 <span style={{ fontSize: '0.7rem', color: 'var(--secondary-color)' }}>
-                  {lang === 'ru' ? `из ${roll.sides}` : `of ${roll.sides}`}
-                  {isMaster && (lang === 'ru' ? ' • Мастерский' : ' • Master')}
+                  {t('bbcode.of_sides', { sides: roll.sides })}
+                  {isMaster && t('bbcode.master_badge')}
                 </span>
               </div>
             </div>
@@ -620,7 +891,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
         );
       }
       case 'spoiler': {
-        return <BBCodeSpoiler key={index} title={params.default}>{content}</BBCodeSpoiler>;
+        return <BBCodeSpoiler key={index} title={params.default} t={t}>{content}</BBCodeSpoiler>;
       }
       case 'video':
       case 'youtube':
@@ -659,7 +930,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
         let hint = t('forum.hide_moderator_only');
         if (threshold.startsWith('@')) {
           const nickText = params.nick ? `: ${params.nick}` : '';
-          hint = lang === 'ru' ? `Скрыто (только для адресата${nickText})` : `Hidden (for addressee${nickText})`;
+          hint = t('bbcode.hidden_for_addressee', { nickText });
         } else if (threshold !== 'hidden') {
           const thresholdNum = parseInt(threshold, 10);
           const userPosts = profile?.post_count || profile?.postCount || user?.post_count || user?.postCount || 0;
@@ -718,7 +989,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
               <div className="bbcode-hide-header">
                 <EyeOff size={14} /> {t('forum.hidden_content')}
                 {isVisible && user && user.uid !== authorId && (hasPermission && hasPermission(PERMISSIONS.BYPASS_HIDE_TAGS)) && <span className="opacity-50 ms-1">(Admin View)</span>}
-                {threshold.startsWith('@') && <span className="opacity-50 ms-1 text-primary">({lang === 'ru' ? 'Адресно' : 'Addressed'}{params.nick ? `: ${params.nick}` : ''})</span>}
+                {threshold.startsWith('@') && <span className="opacity-50 ms-1 text-primary">({t('bbcode.addressed', { nick: params.nick ? `: ${params.nick}` : '' })})</span>}
               </div>
               <div className="bbcode-hide-content">
                 {node.children.map(renderNode)}
@@ -731,7 +1002,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
           let hint = t('forum.hide_moderator_only');
           if (threshold.startsWith('@')) {
             const nickText = params.nick ? `: ${params.nick}` : '';
-            hint = lang === 'ru' ? `Скрыто (только для адресата${nickText})` : `Hidden (for addressee${nickText})`;
+            hint = t('bbcode.hidden_for_addressee', { nickText });
           }
           else if (threshold !== 'hidden') {
             hint = remainingPosts > 0
@@ -781,18 +1052,94 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
         );
       }
       case 'code': {
+        // Render code block content as raw text: nothing inside [code][/code]
+        // is interpreted — neither nested BBCode tags, nor HTML markup.
+        // Plain text chunks pass through verbatim, and nested tag nodes are
+        // serialised back to their literal BBCode text (e.g. [b]…[/b]),
+        // so the block shows exactly what was typed between [code] and [/code].
+        // React escapes the resulting text when it hits the DOM, so any HTML
+        // inside is displayed literally and never rendered as markup.
+        const rawText = (node.children || []).map((child) =>
+          typeof child === 'string' ? child : getRawContent(child)
+        ).join('');
+
         return (
-          <pre key={index} className="bbcode-code p-3 my-2 rounded font-monospace shadow-sm">
-            {content}
-          </pre>
+          <CodeBlock key={index} rawText={rawText} t={t} showToast={showToast} />
         );
       }
       case 'html': {
         const rawHtml = (node.children || []).map(getRawContent).join('');
+        // The AUTHOR's role, not the viewer's: a member who happens to be
+        // viewing must not get the author's script execution, and an
+        // author's own post must not execute when a non-admin views it.
+        const isAdminAuthor = isTrustedAdminRole(authorRole);
         return (
           <div key={index} className="custom-html-content">
-            {safeHtmlToReact(rawHtml, index)}
+            {safeHtmlToReact(rawHtml, index, isAdminAuthor)}
           </div>
+        );
+      }
+      case 'table': {
+        const layout = params.layout ? String(params.layout).trim() : 'auto';
+        const width = params.width ? String(params.width).trim() : undefined;
+        const border = params.border ? String(params.border).trim() : undefined;
+        const cellspacing = params.cellspacing ? String(params.cellspacing).trim() : undefined;
+        const noBorders = border === '0' || border === 'none' || border === 'false';
+        const tableStyle = {
+          width: width ? width : '100%',
+          borderCollapse: 'collapse',
+        };
+        if (!noBorders && border) tableStyle.border = `1px solid ${border}`;
+        if (cellspacing !== undefined) tableStyle.borderSpacing = cellspacing;
+        // table-layout CSS property: fixed, auto, revert
+        const validLayouts = ['fixed', 'auto', 'revert'];
+        if (validLayouts.includes(layout)) {
+          tableStyle.tableLayout = layout;
+        }
+        // Убираем whitespace-строки (переносы между BBCode-тегами), которые
+        // не могут быть прямыми детьми <table>/<tbody> в HTML.
+        const tableContent = content.filter(
+          c => typeof c !== 'string' || c.trim().length > 0
+        );
+        const tableClass = noBorders ? 'bbcode-table bbcode-table-no-borders' : 'bbcode-table';
+        return (
+          <table key={index} className={tableClass} style={tableStyle}>
+            <tbody>{tableContent}</tbody>
+          </table>
+        );
+      }
+      case 'tr': {
+        // Убираем whitespace-строки между [td] — HTML не допускает текстовые
+        // узлы как прямых детей <tr>.
+        const trContent = content.filter(
+          c => typeof c !== 'string' || c.trim().length > 0
+        );
+        return <tr key={index} className="bbcode-tr">{trContent}</tr>;
+      }
+      case 'td': {
+        const bgcolor = params.bgcolor ? String(params.bgcolor).trim() : undefined;
+        const width = params.width ? String(params.width).trim() : undefined;
+        const height = params.height ? String(params.height).trim() : undefined;
+        const valign = params.valign ? String(params.valign).trim() : undefined;
+        const align = params.align ? String(params.align).trim() : undefined;
+        const colspan = params.colspan ? parseInt(String(params.colspan), 10) : undefined;
+        const rowspan = params.rowspan ? parseInt(String(params.rowspan), 10) : undefined;
+        const tdStyle = {};
+        if (bgcolor) tdStyle.backgroundColor = bgcolor;
+        if (width) tdStyle.width = width;
+        if (height) tdStyle.height = height;
+        if (valign) tdStyle.verticalAlign = valign;
+        if (align) tdStyle.textAlign = align;
+        return (
+          <td
+            key={index}
+            className="bbcode-td"
+            style={tdStyle}
+            colSpan={colspan}
+            rowSpan={rowspan}
+          >
+            {content}
+          </td>
         );
       }
       default: return <span key={index}>{content}</span>;
@@ -801,6 +1148,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
 
   return (
     <div className="bbcode-content" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', width: '100%' }}>
+      {orphanTexts.map((text, i) => renderNode(text, i))}
       {processedTree.map((node, i) => renderNode(node, i))}
     </div>
   );

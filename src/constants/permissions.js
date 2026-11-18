@@ -558,7 +558,7 @@ export const MAX_ROLE_PERMISSIONS = {
   admin: Object.values(PERMISSIONS)
 };
 
-export const resolveUserRoleId = (userEmail, roleId) => {
+export const resolveUserRole = (userEmail, roleId) => {
   // The ROLE decides. The email is a fallback for the case where the role is
   // not known at all (an old DTO, a row read before the role column was
   // populated) — NOT a way to override a role that IS known.
@@ -586,7 +586,7 @@ export const resolveUserRoleId = (userEmail, roleId) => {
 
 export const isChiefAdmin = (userEmail, roleId) => {
   // The role decides, and the email is only a fallback for a missing role —
-  // the same reasoning as resolveUserRoleId above, and for the same reason:
+  // the same reasoning as resolveUserRole above, and for the same reason:
   // the chief-admin role is transferable, so an address that used to hold it
   // must stop conferring it the moment the role moves.
   if (roleId) return roleId === CHIEF_ADMIN_ID;

@@ -35,12 +35,13 @@ const AuthorMeta = ({
   const resolvedUserId = authorId ?? author?.user_id;
   const resolvedIsCharacter = isCharacter ?? (author?.kind === 'account' && !!author?.character_id);
 
+  const avatarSize = 20;
+
   return (
-    <div className={`d-flex align-items-center gap-2 text-muted ${className}`} style={{ fontSize: '0.875rem' }}>
-      <span className="text-nowrap">{formatTime(date)}</span>
-      <span className="d-none d-sm-inline">·</span>
-      
-      <div className="d-flex align-items-center gap-2">
+    <div className={`author-meta ${className}`}>
+      <span className="author-meta__date">{formatTime(date)}</span>
+
+      <span className="author-meta__identity">
         {showAvatar && (
           <ForumAuthorAvatar
             author={author}
@@ -49,18 +50,18 @@ const AuthorMeta = ({
             isCharacter={resolvedIsCharacter}
             fallbackName={resolvedName}
             initialAvatar={resolvedAvatar}
-            size={20}
+            size={avatarSize}
             roundedCircle={true}
-            className="shadow-sm"
+            className="author-meta__avatar"
           />
         )}
         <ForumAuthorName
           author={author}
           fallbackName={resolvedName}
-          className="fw-semibold text-secondary"
+          className="author-meta__name"
           onClick={onClick}
         />
-      </div>
+      </span>
     </div>
   );
 };

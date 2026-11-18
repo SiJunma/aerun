@@ -24,7 +24,7 @@ const ForumAuthorAvatar = ({
   className = '',
   isOnline = false,
 }) => {
-  const { lang } = useI18n();
+  const { t } = useI18n();
   const { settings } = useAuth();
 
   // The DTO carries the resolved ids; fall back to the explicit props so
@@ -61,22 +61,26 @@ const ForumAuthorAvatar = ({
   }
   const finalAvatar = resolveAvatarUrl(avatarSource) || placeholder;
 
-  // Dot size scales with avatar: small avatars get a smaller dot
-  const dotSize = size >= 80 ? 12 : size >= 48 ? 10 : 8;
-  // Negative offset to push it outside the avatar bounding box
-  const dotOffset = size >= 80 ? -4 : size >= 48 ? -3 : -2;
+  const dotSizeClass = size >= 80
+    ? 'author-avatar__dot--lg'
+    : size >= 48
+      ? 'author-avatar__dot--md'
+      : 'author-avatar__dot--sm';
+
+  // roundedCircle is accepted for backward compatibility with call sites
+  // that still pass it; the round shape is now the module default
+  // (.author-avatar__img { border-radius: 50% }).
+  void roundedCircle;
 
   return (
-    <div style={{ position: 'relative', display: 'inline-block', width: size, height: size }}>
+    <span className="author-avatar author-avatar__wrap">
       <Image
         src={finalAvatar}
-        roundedCircle={roundedCircle}
         width={size}
         height={size}
         loading="lazy"
         decoding="async"
-        className={className}
-        style={{ objectFit: 'cover', display: 'block' }}
+        className={`author-avatar__img ${className}`.trim()}
         alt={fallbackName || 'Avatar'}
         referrerPolicy="no-referrer"
         onError={(e) => {
@@ -86,12 +90,11 @@ const ForumAuthorAvatar = ({
       />
       {isOnline && (
         <span
-          className="online-status-dot"
-          style={{ width: dotSize, height: dotSize, bottom: dotOffset, right: dotOffset }}
-          title={lang === 'ru' ? 'В сети' : 'Online'}
+          className={`online-status-dot author-avatar__dot ${dotSizeClass}`}
+          title={t('avatar.online')}
         />
       )}
-    </div>
+    </span>
   );
 };
 

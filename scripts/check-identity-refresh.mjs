@@ -27,6 +27,7 @@ const profilePage = read('../src/pages/ProfilePage.jsx');
 const app = read('../src/App.jsx');
 const presence = read('../src/api/rtdb-presence.js');
 const presenceGo = read('../backend/internal/platform/pocketbase/presence.go');
+const realtimeGo = read('../backend/internal/platform/pocketbase/realtime_signals.go');
 const runGo = read('../backend/internal/platform/pocketbase/run.go');
 const forumStats = read('../src/components/layout/ForumStats.jsx');
 const adminPage = read('../src/pages/AdminPage.jsx');
@@ -40,18 +41,85 @@ const check = (ok, message) => {
   if (!ok) failures.push(message);
 };
 
+// Comments must be stripped first when a gate asserts the ABSENCE of a code
+// shape: the files still NAME the old shapes while explaining why they are
+// gone, and a gate that failed on its own documentation would be deleted
+// rather than obeyed.
+const stripComments = (src) =>
+  src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+
+// ── Presence must NOT re-beat on every profile identity change ─────────────
+// initRtdbPresence immediately sends one heartbeat, so depending the presence
+// effect on the whole `profile` object re-ran it on every refreshOwnProfile
+// write (snapshot -> fresh -> ...) and tripled heartbeat on cold start. It
+// must depend only on the primitives that actually change presence: uid and
+// restored (guest/member switch), and read profile from profileRef.
+check(
+  !/\[user\?\.uid, profile, getOrCreateGuestId, restored\]/.test(authProvider),
+  'the presence effect must not depend on the whole profile object — that re-beats on every profile write'
+);
+check(
+  /\[user\?\.\uid, restored, getOrCreateGuestId\]/.test(authProvider),
+  'the presence effect must depend only on uid, restored and the stable guest-id getter'
+);
+check(
+  /initRtdbPresence\(user\.uid, profileRef\.current/.test(authProvider),
+  'the presence effect must read the current profile via profileRef, not via the effect deps'
+);
+// recordActivity (App.jsx ActivityTracker -> POST heartbeat) must not change
+// identity on every profile write either — it is a plain function now keyed
+// only by uid, reading profile from the ref.
+check(
+  /const recordActivity = useCallback\(\(\) => \{\s+const now = Date\.now\(\);\s+lastActivityRef\.current = now;[\s\S]*?setLastActivityAt\(now\);[\s\S]*?if \(user\?\.\uid && profileRef\.current\)/.test(authProvider),
+  'recordActivity must publish the click to the shared last-activity clock and read profile via profileRef'
+);
+// Click tracking has NO identity gate (AUDIT §1 п.1/§6.2): the old
+// `if (!user?.uid || !profile) return` excluded guests entirely, so a
+// guest's clicks were never tracked and the guest stayed counted long
+// after they stopped doing anything.
+check(
+  !/useEffect\(\(\) => \{\s+if \(!user\?\.\uid \|\| !profile\) return;/.test(authProvider),
+  'click tracking must not gate on identity — guests must be tracked too'
+);
+check(
+  /useEffect\(\(\) => \{[\s\S]*?window\.addEventListener\('click'/.test(authProvider),
+  'click/keypress listeners must be registered'
+);
+// The presence effect must not fall through to the guest branch while the
+// profile is still loading (AUDIT §3.1 factor B / §6.2).
+check(
+  /if \(user\?\.\uid\) \{[\s\S]*?guestPresenceStartedRef\.current = false;[\s\S]*?return initRtdbPresence\(user\.uid/.test(authProvider),
+  'the presence effect must branch on uid alone — a null profile must not open a guest row for a member'
+);
+// Multi-tab sync: a login/logout in another tab must switch this tab's
+// presence role without a reload (AUDIT §1 п.4).
+check(
+  /window\.addEventListener\('storage', onStorage\)/.test(authProvider),
+  'AuthProvider must listen for pocketbase_auth storage changes to sync identity across tabs'
+);
+// ActivityTracker must skip its mount beat: presence already beats on cold
+// start, so a mount recordActivity is a guaranteed duplicate.
+check(
+  /mountedRef\.current = true;\s+return;/.test(app),
+  'ActivityTracker must skip the mount render — the presence loop already beats on cold start'
+);
+
 // ── The forum re-reads when the identity changes ────────────────────────────
 // A role or status change alters what the server will return WITHOUT changing
 // who is asking, so the key must carry all three parts.
 check(
-  /const identityKey = `\$\{user\?\.uid \|\| ''\}\|\$\{profile\?\.role_id \|\| ''\}\|\$\{profile\?\.status \|\| ''\}`/.test(authProvider),
+  /const identityKey = `\$\{user\?\.uid \|\| ''\}\|\$\{profile\?\.role \|\| ''\}\|\$\{profile\?\.status \|\| ''\}`/.test(authProvider),
   'AuthProvider must key the forum refresh on uid AND role AND status — a role change ' +
     'changes what /categories returns without changing who is asking'
 );
 check(
-  /\[identityKey, refreshForumState\]/.test(authProvider),
-  'the refresh effect must depend on identityKey, or it runs on mount only and the forum ' +
-    'state is frozen at whichever identity was signed in when the provider mounted'
+  /\[identityKey, refreshForumState, restored\]/.test(authProvider),
+  'the refresh effect must depend on identityKey AND the restored gate — without identityKey it ' +
+    'runs on mount only and the forum state is frozen at whichever identity was signed in when ' +
+    'the provider mounted, and without restored it fires once for the pre-restore guest key ' +
+    "('|') and again for the member key, doubling forum-index and forum-stats on every cold start"
 );
 check(
   /refreshForumState\(true\)/.test(authProvider),
@@ -146,18 +214,92 @@ check(
     'never the body, so there is nothing to remove without one'
 );
 
+// ── Presence is counted from the last CLICK, not the last beat ─────────────
+// AUDIT §1 п.1/§6.1: the server accepts last_active_at from both heartbeats,
+// stores LastActiveAt, and evicts 15 minutes after the last click.
+check(
+  /LastActiveAt json\.RawMessage `json:"last_active_at"`/.test(presenceGo),
+  'heartbeatForm must accept last_active_at — without it the server cannot count from the last click'
+);
+check(
+  /func parseLastActiveAt\(raw json\.RawMessage, now time\.Time\) time\.Time/.test(presenceGo),
+  'last_active_at must be resolved through parseLastActiveAt (clamped to the online window)'
+);
+check(
+  /lastActiveAt := parseLastActiveAt\(form\.LastActiveAt, now\)/.test(presenceGo),
+  'the member heartbeat must store the click moment, not the beat moment'
+);
+check(
+  /func activeMembersAt\(now time\.Time, app \.\.\.core\.App\)/.test(presenceGo) &&
+    /lastActiveAt := presenceActivityTime\(member\)/.test(presenceGo),
+  'activeMembersAt must evict by the last click (presenceActivityTime), not by the last beat'
+);
+check(
+  /writeMemberLastSeenAt\(app\[0\], member\.id, member\.lastActiveAt\)/.test(presenceGo),
+  'eviction must write the exact click moment to users.last_seen, not the eviction moment'
+);
+check(
+  /upsertGuestPresence\(e\.App, form\.GuestID, parseLastActiveAt\(form\.LastActiveAt, now\), now\)/.test(presenceGo),
+  'the guest heartbeat must store the click moment in guest_presence.last_seen'
+);
+check(
+  /publishPresenceSignal\(app\[0\]\)/.test(presenceGo) &&
+    /realtimeSignalPresenceUpdate = "presence\.update"/.test(realtimeGo) &&
+    /func publishPresenceSignal\(app core\.App\)/.test(realtimeGo) &&
+    /notifyStaffOfRegistration\(e\.App, record, adminMessage\)[\s\S]{0,300}publishPresenceSignal\(e\.App\)/.test(read('../backend/internal/platform/pocketbase/register.go')),
+  'registration must publish a debounced presence.update signal so forumStats re-reads'
+);
+// The client half of the same contract.
+check(
+  /last_active_at: lastActivityAt \|\| Date\.now\(\)/.test(presence) &&
+    /body: \{ guest_id: guestId, last_active_at:/.test(presence),
+  'both heartbeats must send last_active_at with the last click'
+);
+check(
+  /if \(!heartbeatTimer\) \{[\s\S]*?heartbeatTimer = setInterval\(\(\) => \{\s+sendHeartbeat\(currentActiveCharacter\);/.test(presence),
+  'setRtdbOnline must restart the heartbeat timer on wake — otherwise the member vanishes 2 minutes after waking'
+);
+check(
+  !/sendGuestLeaveBeacon/.test(stripComments(presence)) && !/pagehide/.test(stripComments(presence)),
+  'there must be no pagehide beacon: a closed tab is counted 15 minutes after its last click, ' +
+    'exactly like an open one'
+);
+check(
+  /topic === 'presence\.update'/.test(presence),
+  'the status poll must re-read on presence.update instead of waiting for the next tick'
+);
+check(
+  /topic === 'topic\.post' \|\| topic === 'presence\.update'/.test(authProvider),
+  'the forum-state realtime subscription must re-read on presence.update as well as topic.post — ' +
+    'registration publishes presence.update, and without it the latest-registered row stays stale until a post'
+);
+// No local guest masking (AUDIT §3.1): the server removes the guest row on
+// login, so whatever remains is a real guest. A client-side hide only works
+// on the tab sharing the same localStorage.
+check(
+  !/g\.id === currentGuestId/.test(stripComments(forumStats)) &&
+    !/localStorage\.getItem\('guest_id'\)/.test(stripComments(forumStats)),
+  'ForumStats must not mask the browser own guest row — it only worked on one tab and counted ' +
+    'the same guest elsewhere'
+);
+
 // ── One guest per browser, not one per tab ──────────────────────────────────
 // guest_id is a PER-BROWSER identity in shared localStorage, but tabs run
 // independent JavaScript: a get-then-set there is a race, so a simultaneous
 // logout in two tabs minted two ids and counted one person as two guests.
 // The re-read after the write is what makes both tabs converge on one value.
+// The key is storage-scoped (src/utils/storageScope.js): the code writes and
+// re-reads makeStorageKey('guest_id', 'guest'), not the literal 'guest_id'.
+// The gate below matches the scoped form; the pre-scoping literal form no
+// longer exists in AuthProvider, which is why the old regex failed on correct
+// code.
 check(
-  /localStorage\.setItem\('guest_id', candidate\);[\s\S]{0,120}return localStorage\.getItem\('guest_id'\)/.test(authProvider),
+  /localStorage\.setItem\(makeStorageKey\('guest_id', 'guest'\), candidate\);[\s\S]{0,120}return localStorage\.getItem\(makeStorageKey\('guest_id', 'guest'\)\)/.test(authProvider),
   'getOrCreateGuestId must re-read guest_id after writing it — a plain get-then-set races ' +
     'between tabs and one browser ends up counted as several guests'
 );
 check(
-  !/removeRtdbGuestPresence\(guestId\);\s*\n\s*localStorage\.removeItem\('guest_id'\)/.test(authProvider),
+  !/removeRtdbGuestPresence\(guestId\);\s*\n\s*localStorage\.removeItem\((?:'guest_id'|makeStorageKey\('guest_id', 'guest'\))\)/.test(authProvider),
   'signing in must NOT delete the stored guest_id: the id is per-browser, and every open tab ' +
     'mints a fresh one on its next logout, which is how two tabs became two guests'
 );
@@ -168,14 +310,8 @@ check(
 // had already left. It is a 24h window over users.last_seen, served by
 // /forum-stats, and presence cannot answer it: the map is windowed to 75s and
 // is empty after a restart.
-// Comments must be stripped first. Both files still NAME the old export while
-// explaining why it is gone, and a gate that failed on its own documentation
-// would be deleted rather than obeyed — which is exactly what happened the
-// first time this check was written elsewhere in this repo.
-const stripComments = (src) =>
-  src
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+// (stripComments is defined at the top of this file; comments must be
+// stripped before absence-gates, or a gate fails on its own documentation.)
 
 check(
   !/subscribeToDailyActiveUsers/.test(stripComments(forumStats)) &&
@@ -197,6 +333,41 @@ check(
   /dailyActiveWindow = 24 \* time\.Hour/.test(categoryAccessGo),
   'the daily window must be 24h on the server — a shorter one would silently answer a different ' +
     'question than the label states'
+);
+
+// ── Staff colour on the daily row ──────────────────────────────────────────
+// "Visited today" colours a name by `role` (admin/root red, moderator green)
+// so a staff member is recognisable at a glance. The backend used to emit
+// `role_id` in the daily and newest-user rows while the frontend read
+// `.role`: the comparison was `undefined === 'admin'`, so every name fell
+// back to the default colour and nothing crashed -- the bug on the
+// screenshot. No Go test caught it because the test struct mirrored the
+// wrong key and nobody asserted the value.
+//
+// Both halves of that mismatch are pinned, not just the colour ternary:
+// the server handler must SEND `role` (a frontend-only guard would be
+// unguarded the moment the server changes again, and vice versa).
+check(
+  /"dailyActiveUsers":\s*daily/.test(categoryAccessGo) &&
+    /users := make\(\[\]map\[string\]any/.test(categoryAccessGo) &&
+    /"role":\s*record\.GetString\("role"\)/.test(categoryAccessGo),
+  'dailyActiveMembers must emit the role under `role`, not `role_id`: ForumStats colours the name ' +
+    'off .role, and a role_id key leaves every name in the default colour'
+);
+check(
+  /"role":\s*newestRecord\.GetString\("role"\)/.test(categoryAccessGo),
+  'newestUser must emit the role under `role`, not `role_id`: it is coloured by the same ' +
+    '`.role === ...` ternary as the online and daily rows'
+);
+check(
+  /u\.role === 'admin'/.test(forumStats) && /u\.role === 'moderator'/.test(forumStats),
+  'ForumStats must colour by .role (as presence/activeUsers do), not by a legacy .role_id key ' +
+    'that the server no longer sends for these rows'
+);
+check(
+  !/u\.role_id/.test(stripComments(forumStats)) && !/newestUser\.role_id/.test(stripComments(forumStats)),
+  'ForumStats must not read .role_id off a user row: users rows carry `role` (users.role); ' +
+    'role_id is the key of the roles collection, so the read is always undefined'
 );
 
 // ── Every rendered icon is imported ─────────────────────────────────────────
@@ -366,7 +537,7 @@ assert.deepEqual(
 // is what let the card and the inputs disagree indefinitely, and it is why the
 // reload reproduced the bug instead of healing it.
 check(
-  /const buildAccountForm = \(source\) => \(\{/.test(profilePage) &&
+  /const buildAccountForm = (?:useCallback\()?\(source\) =>\s*\(\{/.test(profilePage) &&
     /JSON\.stringify\(next\)/.test(profilePage),
   'ProfilePage must re-seed the account form when the server-side values change — seeding once ' +
     'per uid freezes the inputs at whatever the snapshot held'
@@ -431,7 +602,7 @@ const runRefreshWith = async ({ record, fetchImpl }) => {
     async uid => { calls.fetch += 1; return fetchImpl(uid); },
     rec => ({ ...rec, nickname: rec.nickname }),
     () => { calls.setUser += 1; },
-    p => { calls.setProfile.push(p); },
+    p => { calls.setProfile.push(typeof p === 'function' ? p(null) : p); },
     { warn: () => { calls.warn += 1; } }
   );
   return { refreshOwnProfile, calls, refreshRef };

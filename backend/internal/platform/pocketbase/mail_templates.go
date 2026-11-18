@@ -83,7 +83,7 @@ var verificationTemplate = core.EmailTemplate{
 <p>Welcome to ` + phAppName + `.</p>
 <p>One click and your account is fully active — your profile becomes visible to the forum and you can take part in discussions and private messages.</p>
 <p style="margin:24px 0;">
-  <a class="btn" href="{{ .AppURL }}/_/#/auth/confirm-verification/` + phToken + `" target="_blank" rel="noopener">Verify my email</a>
+  <a class="btn" href="{{ .AppURL }}/auth/confirm-verification/` + phToken + `" target="_blank" rel="noopener">Verify my email</a>
 </p>
 <p style="color:#64748b;font-size:13px;line-height:1.5;">
   If you did not create an account on ` + phAppName + `, you can safely ignore this message — nothing will happen without the button above.
@@ -99,10 +99,10 @@ var resetPasswordTemplate = core.EmailTemplate{
 <p>Hello,</p>
 <p>We received a request to reset the password for your ` + phAppName + ` account. Click the button below to choose a new one.</p>
 <p style="margin:24px 0;">
-  <a class="btn" href="{{ .AppURL }}/_/#/auth/confirm-password-reset/` + phToken + `" target="_blank" rel="noopener">Choose a new password</a>
+  <a class="btn" href="{{ .AppURL }}/auth/confirm-password-reset/` + phToken + `" target="_blank" rel="noopener">Choose a new password</a>
 </p>
 <p style="color:#64748b;font-size:13px;line-height:1.5;">
-  The link is valid for a short time and can be used once. If you did not ask for this, ignore this email — your current password stays in place and nothing changes.
+  The link is valid for 30 minutes and can be used once. If you did not ask for this, ignore this email — your current password stays in place and nothing changes.
 </p>
 <p style="margin-top:20px;">Thanks,<br/>The ` + phAppName + ` team</p>
 `,
@@ -124,7 +124,7 @@ var confirmEmailChangeTemplate = core.EmailTemplate{
 <p>Someone asked to change the email address on this ` + phAppName + ` account to:</p>
 <div class="highlight-box">` + phNewEmail + `</div>
 <p style="margin:24px 0;">
-  <a class="btn" href="{{ .AppURL }}/_/#/auth/confirm-email-change/` + phToken + `" target="_blank" rel="noopener">Confirm new address</a>
+  <a class="btn" href="{{ .AppURL }}/auth/confirm-email-change/` + phToken + `" target="_blank" rel="noopener">Confirm new address</a>
 </p>
 <p style="color:#64748b;font-size:13px;line-height:1.5;">
   If you did not request this change, ignore this email — the address on your account stays as it is.

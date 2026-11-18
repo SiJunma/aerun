@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
-import { Container, Card, Table, Button, Badge, Row, Col, Form } from 'react-bootstrap';
-import { Trash2, Move, Settings, PinOff, Pin, Lock, PlusCircle, Search, MessageSquare, Clock, Filter, FolderInput, Unlock, CheckCircle } from 'lucide-react';
+import { Trash2, Move, Settings, PinOff, Pin, Lock, MessageSquare, Unlock } from 'lucide-react';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { 
@@ -11,27 +10,33 @@ import {
   moveTopics
 } from '../api/forum';
 import ForumAuthorName from '../components/common/ForumAuthorName';
+import ForumEmptyState from '../components/common/ForumEmptyState';
 import ForumPagination from '../components/common/ForumPagination';
+import LastPostInfo from '../components/common/LastPostInfo';
+import AuthorMeta from '../components/common/AuthorMeta';
+import TopicMiniPagination from '../components/common/TopicMiniPagination';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
-import TopicRow from '../components/common/TopicRow';
 import MoveTopicsModal from '../components/modals/MoveTopicsModal';
 import ConfirmModal from '../components/common/ConfirmModal';
 import Skeleton from '../components/common/Skeleton';
 import ErrorCard from '../components/common/ErrorCard';
 import { resolveField } from '../utils/text';
+import { toMillis, unreadFloor } from '../utils/dates';
 import { useToast } from '../contexts/ToastProvider';
 import { usePageTitle } from '../contexts/TitleProvider';
 
 const CategoryPage = () => {
   const { id } = useParams();
   const { t, lang } = useI18n();
-  const { user, hasPermission, PERMISSIONS, categories, settings, scheduleForumStateRefresh, applyForumState } = useAuth();
+  const { user, profile, readMap, hasPermission, PERMISSIONS, categories, settings, scheduleForumStateRefresh, applyForumState } = useAuth();
   const { showToast } = useToast();
   const { setPageTitle } = usePageTitle();
   const [searchParams, setSearchParams] = useSearchParams();
   const [category, setCategory] = useState(null);
   const [pinnedTopics, setPinnedTopics] = useState([]);
   const [regularTopics, setRegularTopics] = useState([]);
+  const [categoryRestricted, setCategoryRestricted] = useState(false);
+  const [categoryRestrictedMessage, setCategoryRestrictedMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
 
@@ -51,6 +56,17 @@ const CategoryPage = () => {
     setLoadError(null);
     try {
       const result = await fetchSecuredTopics(id, currentPage, ITEMS_PER_PAGE);
+      // The server answers 200 with restricted: true when the caller's role
+      // is not in the category's allowed_roles — render "access denied"
+      // instead of an empty topic list.
+      if (result.restricted) {
+        setCategoryRestricted(true);
+        setCategoryRestrictedMessage(result.message || '');
+        setPinnedTopics([]);
+        setRegularTopics([]);
+        return;
+      }
+      setCategoryRestricted(false);
       setPinnedTopics(result.pinned || []);
       setRegularTopics(result.topics || []);
     } catch (err) {
@@ -107,9 +123,7 @@ const CategoryPage = () => {
     if (selectedTopicIds.length === 0) return;
     try {
       await batchUpdateTopics(selectedTopicIds, { is_pinned: pinned }, user.uid);
-      showToast(lang === 'ru' 
-          ? (pinned ? 'Темы закреплены' : 'Темы откреплены') 
-          : (pinned ? 'Topics pinned' : 'Topics unpinned'), 'success');
+      showToast(t(pinned ? 'forum.topics_pinned' : 'forum.topics_unpinned'), 'success');
       loadTopics();
     } catch (error) {
       showToast(error.message, 'danger');
@@ -120,9 +134,7 @@ const CategoryPage = () => {
     if (selectedTopicIds.length === 0) return;
     try {
       await batchUpdateTopics(selectedTopicIds, { is_locked: locked }, user.uid);
-      showToast(lang === 'ru' 
-          ? (locked ? 'Темы закрыты' : 'Темы открыты') 
-          : (locked ? 'Topics locked' : 'Topics unlocked'), 'success');
+      showToast(t(locked ? 'forum.topics_locked' : 'forum.topics_unlocked'), 'success');
       loadTopics();
     } catch (error) {
       showToast(error.message, 'danger');
@@ -138,7 +150,7 @@ const CategoryPage = () => {
       } else {
         scheduleForumStateRefresh();
       }
-      showToast(lang === 'ru' ? 'Темы удалены' : 'Topics deleted', 'success');
+      showToast(t('forum.topics_deleted'), 'success');
       setSelectedTopicIds([]);
       loadTopics();
     } catch (error) {
@@ -155,7 +167,7 @@ const CategoryPage = () => {
       } else {
         scheduleForumStateRefresh();
       }
-      showToast(lang === 'ru' ? 'Темы перенесены' : 'Topics moved', 'success');
+      showToast(t('forum.topics_moved'), 'success');
       setSelectedTopicIds([]);
       setIsManaging(false);
       loadTopics();
@@ -163,170 +175,266 @@ const CategoryPage = () => {
       showToast(error.message, 'danger');
     }
   };
-  if (!loading && category && !hasPermission(PERMISSIONS.VIEW_FORUM, { category })) {
+  if (!loading && categoryRestricted) {
     return (
-      <Container className="py-5 text-center">
-        <h3 className="text-muted">{lang === 'ru' ? 'Категория не найдена или доступ запрещён' : 'Category not found or access denied'}</h3>
-      </Container>
+      <ErrorCard
+        title={t('forum.access_denied')}
+        message={categoryRestrictedMessage || undefined}
+        error={null}
+        hideTechnicalDetails
+        onRetry={undefined}
+      />
     );
   }
 
   return (
-    <Container className="py-4 position-relative">
-      <ForumBreadcrumbs 
-        items={[{ label: categoryTitle, active: true }]} 
-      />
+    <main id="forum-view" className="forum-view" data-forum-id={id}>
+      <nav id="forum-breadcrumbs-top" aria-label="breadcrumb">
+        <ForumBreadcrumbs
+          items={[{ label: categoryTitle, active: true }]}
+        />
+      </nav>
 
-      <div className="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center gap-3 mb-4">
-        <div>
-          <h2 className="mb-1">{categoryTitle}</h2>
+      <header id="forum-view-header" className="category-header">
+        <div className="category-header-heading">
+          <h1 className="category-header-title">{categoryTitle}</h1>
           {!category ? (
-            <Skeleton width={250} height="1rem" className="mt-2" />
+            <Skeleton width={250} height="1rem" className="category-header-skeleton" />
           ) : resolveField(category.description, lang) && (
-            <div className="text-muted mb-0" style={{ lineHeight: 1.2, fontSize: '0.875rem' }}>
+            <div className="category-header-description">
               {resolveField(category.description, lang)}
             </div>
           )}
         </div>
-        <div className="d-flex gap-2 flex-wrap">
+        <div className="category-header-actions">
           {loading ? (
-             <Skeleton width={120} height="2.5rem" />
+            <Skeleton width={120} height="2.5rem" />
           ) : (
             <>
               {isStaff && (
-                <Button 
-                  variant={isManaging ? "secondary" : "outline-primary"}
+                <button
+                  type="button"
+                  className="forum-view-action-btn forum-view-action-btn--secondary"
                   onClick={() => {
                     setIsManaging(!isManaging);
                     setSelectedTopicIds([]);
                   }}
-                  className="d-flex align-items-center gap-2"
                 >
                   <Settings size={18} />
-                  {lang === 'ru' ? (isManaging ? 'Готово' : 'Управление') : (isManaging ? 'Done' : 'Manage')}
-                </Button>
+                  {t(isManaging ? 'forum.done' : 'forum.manage')}
+                </button>
               )}
               {hasPermission(PERMISSIONS.CREATE_TOPIC, { category }) && (
-                <Button as={Link} to={`/category/${id}/new-topic`} variant="primary">
+                <Link
+                  to={`/category/${id}/new-topic`}
+                  className="forum-view-action-btn forum-view-action-btn--primary"
+                >
                   {t('forum.create_topic')}
-                </Button>
+                </Link>
               )}
             </>
           )}
         </div>
-      </div>
+      </header>
 
-      <Card className={`mb-4 overflow-hidden forum-group-card ${!loading && currentTopics.length === 0 ? '' : 'border-0 bg-transparent shadow-none'}`}>
+      <section id="forum-topic-list" className="forum-topic-list">
         {loading ? (
-          <div className="p-0">
-            <Table hover responsive className="mb-0 align-middle forum-table">
-              <thead>
-                <tr>
-                  <th style={{ width: '50%' }}>{t('forum.topic')}</th>
-                  <th className="text-center" style={{ width: '100px', whiteSpace: 'nowrap' }}>{t('forum.replies')}</th>
-                  <th style={{ minWidth: 180 }}>{t('forum.last_post')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...Array(5)].map((_, i) => (
-                  <tr key={i}>
-                    <td className="py-3 px-4">
-                      <div className="d-flex align-items-center gap-3">
-                        <Skeleton variant="avatar" width={40} height={40} className="rounded-circle" />
-                        <div className="flex-grow-1">
-                          <Skeleton width="60%" height="1.1rem" className="mb-2" />
-                          <Skeleton width="30%" height="0.8rem" />
-                        </div>
-                      </div>
-                    </td>
-                    <td className="text-center p-3">
-                      <Skeleton width={30} height="1rem" className="mx-auto" />
-                    </td>
-                    <td className="p-3">
-                      <div className="d-flex align-items-center gap-2">
-                        <Skeleton variant="avatar" width={32} height={32} className="rounded-circle" />
-                        <div className="flex-grow-1">
-                          <Skeleton width="80%" height="0.8rem" className="mb-1" />
-                          <Skeleton width="50%" height="0.7rem" />
-                        </div>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          </div>
+          <>
+            <div className="category-subtitle">
+              <span className="category-col--topic">{t('forum.topic')}</span>
+              <span className="category-col--replies">{t('forum.replies')}</span>
+              <span className="category-col--lastpost">{t('forum.last_post')}</span>
+            </div>
+            <div className="topic-list">
+              {[...Array(5)].map((_, i) => (
+                <article key={i} className="forum-item forum-item--topic forum-skeleton-row">
+                  <div className="forum-info">
+                    <h3 className="forum-title">
+                      <Skeleton width="60%" height="1.1rem" className="forum-skeleton-gap" />
+                      <Skeleton width="30%" height="0.8rem" />
+                    </h3>
+                  </div>
+                  <div className="forum-posts" data-value={0}>
+                    <Skeleton width={30} height="1rem" className="forum-skeleton-stat" />
+                  </div>
+                  <div className="forum-last-post last-post-strip" data-label={t('forum.last_post')}>
+                    <Skeleton width="50%" height="0.9rem" className="forum-skeleton-gap" />
+                    <Skeleton width="80%" height="0.7rem" />
+                  </div>
+                </article>
+              ))}
+            </div>
+          </>
         ) : loadError ? (
-          <div className="p-3">
+          <div className="forum-view-error">
             <ErrorCard
-              title={lang === 'ru' ? 'Не удалось загрузить темы' : 'Failed to load topics'}
+              title={t('forum.failed_load_topics')}
               error={loadError}
               onRetry={() => loadTopics(true)}
             />
           </div>
         ) : currentTopics.length === 0 ? (
-          <div className="p-5 text-center">
-            <div className="mb-3" style={{ fontSize: '3rem', opacity: 0.3 }}>💬</div>
-            <h5 className="text-muted mb-2">
-              {lang === 'ru' ? 'Тем пока нет' : 'No topics yet'}
-            </h5>
-            <p className="text-muted mb-4" style={{ fontSize: '0.875rem' }}>
-              {lang === 'ru'
-                ? 'Будь первым — создай тему!'
-                : 'Be the first to start a discussion!'}
-            </p>
+          <>
+            <ForumEmptyState
+              className="forum-view-empty-state"
+              icon={MessageSquare}
+              title={t('forum.no_topics_yet')}
+              description={t('forum.be_first')}
+            />
             {hasPermission(PERMISSIONS.CREATE_TOPIC, { category }) && (
-              <Button as={Link} to={`/category/${id}/new-topic`} variant="primary">
-                {t('forum.create_topic')}
-              </Button>
+              <div className="forum-view-empty-actions">
+                <Link
+                  to={`/category/${id}/new-topic`}
+                  className="forum-view-action-btn forum-view-action-btn--primary"
+                >
+                  {t('forum.create_topic')}
+                </Link>
+              </div>
             )}
-          </div>
+          </>
         ) : (
           <>
-            <Table hover responsive className="mb-0 align-middle forum-table">
-              <thead>
-                <tr>
-                  {isManaging && (
-                    <th style={{ width: '40px' }}>
-                      <Form.Check 
-                        type="checkbox"
-                        checked={selectedTopicIds.length === currentTopics.length && currentTopics.length > 0}
-                        onChange={selectAll}
-                      />
-                    </th>
-                  )}
-                  <th style={{ width: '50%' }}>{t('forum.topic')}</th>
-                  <th className="text-center" style={{ width: '100px', whiteSpace: 'nowrap' }}>{t('forum.replies')}</th>
-                  {/* <th className="text-center">{t('forum.views')}</th> */}
-                  <th style={{ minWidth: 180 }}>{t('forum.last_post')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {currentTopics.map(topic => (
-                  <TopicRow 
-                    key={topic.id}
-                    topic={topic}
-                    user={user}
-                    lang={lang}
-                    isManaging={isManaging}
-                    isSelected={selectedTopicIds.includes(topic.id)}
-                    onSelect={toggleSelect}
+            <div className={`category-subtitle${isManaging ? ' has-check' : ''}`}>
+              {isManaging && (
+                <span className="category-subtitle-check">
+                  <input
+                    type="checkbox"
+                    className="topic-select-input"
+                    checked={selectedTopicIds.length === currentTopics.length && currentTopics.length > 0}
+                    onChange={selectAll}
                   />
-                ))}
-              </tbody>
-            </Table>
+                </span>
+              )}
+              <span className="category-col--topic">{t('forum.topic')}</span>
+              <span className="category-col--replies">{t('forum.replies')}</span>
+              {/* <span className="category-col--views">{t('forum.views')}</span> */}
+              <span className="category-col--lastpost">{t('forum.last_post')}</span>
+            </div>
+            <div className="topic-list">
+              {currentTopics.map(topic => {
+                const stateClasses = [
+                  topic.is_pinned ? 'is-pinned' : '',
+                  topic.is_locked ? 'is-locked' : '',
+                  isManaging ? 'is-managing' : '',
+                ].filter(Boolean).join(' ');
+
+                // Same read-state predicate as MainPage.renderCategoryRows and
+                // TopicRow: a topic is unread only if the server considers it
+                // unread AND this device has not visited it since the last post.
+                // `topic.unread` is stamped server-side by listForumIndexHandler
+                // for category cards; listTopicsHandler (used here) does not
+                // stamp it, so serverUnread is null and we fall back to the
+                // localStorage read-map via isLocallyRead.
+                const lastVisitRaw = readMap[topic.id];
+                const lastVisitValue = lastVisitRaw?.timestamp || lastVisitRaw;
+                const effectiveLastVisitMs = unreadFloor(lastVisitValue, profile?.created_at);
+                const lastPostMs = toMillis(topic.last_post_at);
+                const serverUnread = typeof topic.unread === 'boolean' ? topic.unread : null;
+                const isLocallyRead = effectiveLastVisitMs >= lastPostMs;
+                const isUnreadByServer = serverUnread !== null ? serverUnread : true;
+                const hasUnread = !!user &&
+                  profile?.role !== 'pending' &&
+                  topic.last_post_author_ref?.user_id !== user?.uid &&
+                  isUnreadByServer &&
+                  !isLocallyRead;
+
+                return (
+                  <article
+                    key={topic.id}
+                    className={'forum-item forum-item--topic ' + stateClasses}
+                    id={'topic-' + topic.id}
+                    data-topic-id={topic.id}
+                  >
+                    {isManaging && (
+                      <div className="topic-select">
+                        <input
+                          type="checkbox"
+                          className="topic-select-input"
+                          checked={selectedTopicIds.includes(topic.id)}
+                          onChange={() => toggleSelect(topic.id)}
+                        />
+                      </div>
+                    )}
+                    <div className="forum-info">
+                      <h3 className="forum-title">
+                        {/* State icons sit INLINE with the title, bullet-like —
+                            never on their own line above it. */}
+                        {topic.is_pinned && (
+                          <span className="topic-icon topic-pinned" aria-hidden="true">
+                            <Pin size={14} fill="currentColor" />
+                          </span>
+                        )}
+                        {topic.is_locked && (
+                          <span className="topic-icon topic-locked" aria-hidden="true">
+                            <Lock size={14} />
+                          </span>
+                        )}
+                        <Link
+                          to={'/topic/' + topic.id}
+                          className="cat-link"
+                          title={t('stats.to_first_post')}
+                        >
+                          {topic.title}
+                        </Link>
+                        <TopicMiniPagination topic={topic} />
+                      </h3>
+                      {topic.description && (
+                        <div className="forum-description cat-desc">
+                          {topic.description}
+                        </div>
+                      )}
+                      {/* Creation meta (date · author) under the title,
+                          same as the TopicRow reference render. */}
+                      <div className="topic-author">
+                        <AuthorMeta
+                          date={topic.created_at}
+                          author={topic.author}
+                          showAvatar={false}
+                          lang={lang}
+                        />
+                      </div>
+                      <div className="forum-mobile-stats">
+                        <span className="forum-mobile-stat">
+                          <MessageSquare size={12} />
+                          {' '}
+                          {Math.max(0, (topic.posts_count || 1) - 1)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="forum-posts" data-value={topic.posts_count}>
+                      {topic.posts_count || 0}
+                    </div>
+                    {/* Last post on the category page: timestamp + author only —
+                        the topic title is already in the first column. */}
+                    <div className="forum-last-post last-post-strip" data-label={t('forum.last_post')}>
+                      <LastPostInfo
+                        topicId={topic.id}
+                        lastPostAt={topic.last_post_at}
+                        author={topic.last_post_author_ref}
+                        hasUnread={hasUnread}
+                        lastReadOffset={
+                          readMap[topic.id]?.offset ?? null
+                        }
+                        postsCount={topic.posts_count}
+                        lang={lang}
+                      />
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
             {totalPages > 1 && (
-              <div className="p-3 d-flex justify-content-center border-top">
+              <nav id="forum-pagination-bottom" className="forum-view-pagination">
                 <ForumPagination
                   currentPage={currentPage}
                   totalPages={totalPages}
                   onPageChange={handlePageChange}
                 />
-              </div>
+              </nav>
             )}
           </>
         )}
-      </Card>
+      </section>
 
       {/* Management Toolbar */}
       {/* The toolbar is shown for the WHOLE manage mode, not only once topics
@@ -338,39 +446,35 @@ const CategoryPage = () => {
           first. The bar now states the instruction itself, and its buttons are
           disabled until there is something to act on. */}
       {isManaging && (
-        <div className="management-toolbar user-select-none">
-          <div className="me-2 small fw-bold">
-            {lang === 'ru'
-              ? `Выбрано: ${selectedTopicIds.length}`
-              : `Selected: ${selectedTopicIds.length}`}
+        <div className="management-toolbar">
+          <div className="management-toolbar-count">
+            {t('forum.selected_count', { count: selectedTopicIds.length })}
           </div>
-          <div className="vr d-none d-md-block mx-2"></div>
-          <Button variant="outline-light" size="sm" className="d-flex align-items-center gap-1" onClick={() => handleBatchPin(true)} disabled={selectedTopicIds.length === 0}>
-            <Pin size={16} /> <span className="d-none d-lg-inline">{lang === 'ru' ? 'Закрепить' : 'Pin'}</span>
-          </Button>
-          <Button variant="outline-light" size="sm" className="d-flex align-items-center gap-1" onClick={() => handleBatchPin(false)} disabled={selectedTopicIds.length === 0}>
-            <PinOff size={16} /> <span className="d-none d-lg-inline">{lang === 'ru' ? 'Открепить' : 'Unpin'}</span>
-          </Button>
-          <Button variant="outline-light" size="sm" className="d-flex align-items-center gap-1" onClick={() => handleBatchLock(true)} disabled={selectedTopicIds.length === 0}>
-            <Lock size={16} /> <span className="d-none d-lg-inline">{lang === 'ru' ? 'Закрыть' : 'Lock'}</span>
-          </Button>
-          <Button variant="outline-light" size="sm" className="d-flex align-items-center gap-1" onClick={() => handleBatchLock(false)} disabled={selectedTopicIds.length === 0}>
-            <Unlock size={16} /> <span className="d-none d-lg-inline">{lang === 'ru' ? 'Открыть' : 'Unlock'}</span>
-          </Button>
-          <Button variant="outline-light" size="sm" className="d-flex align-items-center gap-1" onClick={() => setShowMoveModal(true)} disabled={selectedTopicIds.length === 0}>
-            <Move size={16} /> <span className="d-none d-lg-inline">{lang === 'ru' ? 'Перенести' : 'Move'}</span>
-          </Button>
-          <Button variant="danger" size="sm" className="d-flex align-items-center gap-1" onClick={() => setShowDeleteModal(true)} disabled={selectedTopicIds.length === 0}>
-            <Trash2 size={16} /> <span className="d-none d-lg-inline">{lang === 'ru' ? 'Удалить' : 'Delete'}</span>
-          </Button>
+          <div className="management-toolbar-divider"></div>
+          <button type="button" className="forum-view-action-btn forum-view-action-btn--secondary" onClick={() => handleBatchPin(true)} disabled={selectedTopicIds.length === 0}>
+            <Pin size={16} /> <span className="forum-view-action-label">{t('forum.pin')}</span>
+          </button>
+          <button type="button" className="forum-view-action-btn forum-view-action-btn--secondary" onClick={() => handleBatchPin(false)} disabled={selectedTopicIds.length === 0}>
+            <PinOff size={16} /> <span className="forum-view-action-label">{t('forum.unpin')}</span>
+          </button>
+          <button type="button" className="forum-view-action-btn forum-view-action-btn--secondary" onClick={() => handleBatchLock(true)} disabled={selectedTopicIds.length === 0}>
+            <Lock size={16} /> <span className="forum-view-action-label">{t('forum.lock')}</span>
+          </button>
+          <button type="button" className="forum-view-action-btn forum-view-action-btn--secondary" onClick={() => handleBatchLock(false)} disabled={selectedTopicIds.length === 0}>
+            <Unlock size={16} /> <span className="forum-view-action-label">{t('forum.unlock')}</span>
+          </button>
+          <button type="button" className="forum-view-action-btn forum-view-action-btn--secondary" onClick={() => setShowMoveModal(true)} disabled={selectedTopicIds.length === 0}>
+            <Move size={16} /> <span className="forum-view-action-label">{t('forum.move')}</span>
+          </button>
+          <button type="button" className="forum-view-action-btn forum-view-action-btn--danger" onClick={() => setShowDeleteModal(true)} disabled={selectedTopicIds.length === 0}>
+            <Trash2 size={16} /> <span className="forum-view-action-label">{t('forum.delete')}</span>
+          </button>
           {/* The instruction itself. It replaces the toolbar's role as the only
               thing on screen, and it disappears the moment the first topic is
               ticked, so the two states are never both talking at once. */}
           {selectedTopicIds.length === 0 && (
-            <div className="small management-toolbar-hint">
-              {lang === 'ru'
-                ? 'Отметьте темы галочками слева, чтобы применить действия'
-                : 'Tick the topics on the left to apply actions'}
+            <div className="management-toolbar-hint">
+              {t('forum.tick_topics')}
             </div>
           )}
         </div>
@@ -380,12 +484,9 @@ const CategoryPage = () => {
         show={showDeleteModal}
         onHide={() => setShowDeleteModal(false)}
         onConfirm={handleBatchDelete}
-        title={lang === 'ru' ? 'Удалить темы?' : 'Delete topics?'}
-        message={lang === 'ru' 
-          ? `Вы уверены, что хотите навсегда удалить выбранные темы (${selectedTopicIds.length})? Это действие нельзя отменить.` 
-          : `Are you sure you want to permanently delete the selected topics (${selectedTopicIds.length})? This action cannot be undone.`
-        }
-        confirmText={lang === 'ru' ? 'Удалить' : 'Delete'}
+        title={t('forum.delete_topics_title')}
+        message={t('forum.delete_topics_message', { count: selectedTopicIds.length })}
+        confirmText={t('forum.delete_confirm')}
       />
 
       <MoveTopicsModal 
@@ -396,14 +497,14 @@ const CategoryPage = () => {
         excludeCategoryId={id}
       />
 
-      <div className="mt-4">
-        <Link to="/" className="btn btn-outline-secondary">
+      <div className="forum-view-footer">
+        <Link to="/" className="forum-view-back">
           &larr; {t('forum.back_to_categories')}
         </Link>
       </div>
 
 
-    </Container>
+    </main>
   );
 };
 

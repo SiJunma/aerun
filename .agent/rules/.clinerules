@@ -5,5 +5,5 @@ Do not run `dir /s /b` or recursive list commands without filtering.
 ## Email templates (global email template rule)
 - ALL outgoing transactional emails (verification, password reset, email change, DMs, and ANY future email types like mentions/quotes/notifications) MUST go through the shared global email template resolved via `loadEmailTemplates` (see `backend/internal/platform/pocketbase/mail_templates.go`).
 - Never send an email with a bespoke HTML body that bypasses the shared template. Wrap every email body in the resolved template.
-- Default template is seeded from `functions/email.js` (`wrapEmailTemplate`) into `forum_settings.email_templates`; DB value (forum admin UI) always overrides the file default and is never overwritten on restart (same scheme as SMTP settings).
+- The shared global email template's design mirrors the legacy `functions/email.js` wrapper (Firebase era, file since removed); the template machinery lives in `backend/internal/platform/pocketbase/mail_templates.go` and is seeded into `forum_settings.email_templates`.
 - Test email endpoint must restrict `recipient` to the account's own email to prevent abuse/spam.

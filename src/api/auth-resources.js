@@ -4,7 +4,7 @@
 // `settings` server-side, where the collection read could not. Re-adding the
 // import is how that regression comes back, so its absence is asserted by
 // scripts/check-forum-read-contract.mjs.
-import { sendApi } from './pocketbase';
+import { sendApi, pbUrl } from './pocketbase';
 // normalizeTopic is imported, not re-implemented: the topic lists here must
 // render the same rows as the category page, and a second copy of this mapping
 // is exactly how the two drifted apart in the first place.
@@ -15,18 +15,17 @@ import { sharedPoll } from './shared-poll';
 // ── User profile normalisation ──────────────────────────────────────────────
 
 /**
- * normalizeUserProfile maps a PocketBase `users` record onto the field names the
- * pages actually speak.
+ * normalizeUserProfile maps a PocketBase `users` record onto the field names
+ * the pages speak.
  *
  * WHY THIS EXISTS. The pages predate the backend and read the Firestore
- * vocabulary: `role_id`, `post_count`, `uid`. PocketBase spells the same facts
- * `role`, `posts_count` and (only) `id`, and nothing in between renames them.
- * Two independent mappers then read different fields and missed different ones:
+ * vocabulary for the facts PocketBase spells differently: `uid` and
+ * `post_count` here mean `id` and `posts_count` on the wire. Two independent
+ * mappers once read different fields and missed different ones:
  *
- *   - subscribeToUser spread the raw record, so every `role_id` read was
- *     undefined. `resolveUserRoleId(undefined)` falls back to 'player', which is
- *     why a member with a custom role was badged "Player"; `post_count` was
- *     undefined for the same reason, so the profile card read 0 posts.
+ *   - subscribeToUser spread the raw record, so every `uid` read was
+ *     undefined and the profile card read 0 posts; a member with a custom
+ *     role was badged "Player" for the same shape reason.
  *   - AuthProvider built the signed-in user's profile from a hand-written
  *     whitelist that listed neither the profile block (bio, location, birthday,
  *     occupation, interests, contacts) nor the real counter names, so opening
@@ -36,6 +35,14 @@ import { sharedPoll } from './shared-poll';
  * One mapper, used by both, is what stops them drifting apart a second time.
  * The `??` chains read the PocketBase name first and fall back to the legacy
  * one, so a row written before the rename keeps rendering.
+ *
+ * THE ROLE AXIS NEEDS NO MAPPING. The `users` column is `role`, the staff
+ * DTO, `/me`, the profile route and the presence snapshot all spell it
+ * `role`, and the pages do too. The old client-side rename into the Firestore
+ * `role_id` is gone: that name survives only where the SERVER uses it — the
+ * key of the `roles` collection (`roles.role_id`, `base_role_id`) and the
+ * users companion column `custom_role_id`. A reader that asks a user row for
+ * `role_id` is reading a field that does not exist.
  *
  * `status` is carried through unchanged: `banned` and `pending` are ACCOUNT
  * STATUSES, not roles (internal/auth), and a caller that tests them against the
@@ -52,10 +59,11 @@ export const normalizeUserProfile = (rec) => {
     // removed (see backend soft-delete). A deleted account keeps its baked
     // nickname/avatar/counters so its profile and posts keep rendering.
     deleted: rec.deleted ?? false,
-    // The join key on `users` is `role`; `role_id` only exists on `roles`.
-    role_id: rec.role ?? rec.role_id ?? 'player',
-    // `custom_role_id` is the derived-role companion column. Exposed under the
-    // legacy name so a caller never has to know the pair.
+    // The join key on `users` is `role`; `role_id` only exists on the
+    // `roles` collection. No legacy fallback: the server always names it.
+    role: rec.role || 'player',
+    // `custom_role_id` is the derived-role companion column, under its own
+    // server name — that IS the column, not a rename of it.
     custom_role_id: rec.custom_role_id ?? '',
     avatar_url: recordAvatarUrl(rec) || resolveAvatarUrl(rec.avatar_url),
     post_count: rec.posts_count ?? rec.post_count ?? 0,
@@ -86,10 +94,59 @@ export const normalizeUserProfile = (rec) => {
 // read". Collapsing them into one would put a network round trip in front of a
 // button that must feel instant, or keep the count wrong on the second device.
 
-const getReadMapKey = (uid) => `aerun_readmap_${uid}`;
+export const getStorageScope = () => {
+  try {
+    const raw = pbUrl || (typeof window !== 'undefined' ? window.location.origin : 'default');
+    const url = new URL(raw, typeof window !== 'undefined' ? window.location.href : 'http://127.0.0.1:8090');
+    const port = url.port || (url.protocol === 'https:' ? '443' : '80');
+    return `${url.hostname}_${port}`.replace(/[^a-zA-Z0-9_]/g, '_');
+  } catch {
+    return 'default';
+  }
+};
+
+export const getReadMapKey = (uid) => `aerun_readmap_${getStorageScope()}_${uid}`;
+
+// The legacy key (pre-scoping) used before migration 3.1. Kept as a constant so
+// the migration can target it precisely.
+const LEGACY_READ_MAP_KEY_PREFIX = 'aerun_readmap_';
+
+// migrateLegacyReadMap moves any data left under the old unscoped key
+// `aerun_readmap_${uid}` onto the new scoped key `aerun_readmap_${scope}_${uid}`,
+// then deletes the old key. It runs once per (uid, scope) on first read after
+// the upgrade. Phantom offsets that exceed the real topic post count are not
+// removed here (the server doesn't know posts_count at migration time); they are
+// neutralized client-side by the loadedPage guard + offset clamp in Effect 15
+// and by the backward-guard isTopicEnd exemption in AuthProvider.markTopicRead.
+export const migrateLegacyReadMap = (uid) => {
+  if (!uid || typeof localStorage === 'undefined') return;
+  try {
+    const legacyKey = `${LEGACY_READ_MAP_KEY_PREFIX}${uid}`;
+    const raw = localStorage.getItem(legacyKey);
+    if (!raw) return;
+    const legacyMap = JSON.parse(raw);
+    if (!legacyMap || typeof legacyMap !== 'object' || Object.keys(legacyMap).length === 0) {
+      // Nothing to migrate; clean up the stale key anyway.
+      localStorage.removeItem(legacyKey);
+      return;
+    }
+    const newKey = getReadMapKey(uid);
+    const existingRaw = localStorage.getItem(newKey);
+    const existingMap = existingRaw ? JSON.parse(existingRaw) : {};
+    const merged = { ...existingMap, ...legacyMap };
+    localStorage.setItem(newKey, JSON.stringify(merged));
+    localStorage.removeItem(legacyKey);
+  } catch (err) {
+    console.warn('[migrateLegacyReadMap] failed', err);
+  }
+};
 
 export const recordTopicVisit = async (uid, topicId, offset = null, lastVisiblePostId = null) => {
-  if (!uid || !topicId) return;
+  if (!uid || !topicId) return false;
+  // Returns whether the SERVER write completed. The caller (markTopicRead)
+  // records the pinned cursor only from a completed write, so a failed POST
+  // stays retryable instead of being remembered as done.
+  let recorded = false;
   try {
     // Server first: this is the write that makes the badge correct elsewhere. It is
     // awaited but not allowed to block the caller — a failed read-state write must
@@ -102,6 +159,7 @@ export const recordTopicVisit = async (uid, topicId, offset = null, lastVisibleP
       method: 'POST',
       body: { last_visible_post_id: lastVisiblePostId || '' },
     });
+    recorded = true;
   } catch (err) {
     console.warn('[recordTopicVisit] server read state failed', err);
   }
@@ -115,6 +173,7 @@ export const recordTopicVisit = async (uid, topicId, offset = null, lastVisibleP
   } catch (err) {
     console.warn('[recordTopicVisit err]', err);
   }
+  return recorded;
 };
 
 export const subscribeToReadMap = (uid, callback) => {
@@ -124,7 +183,20 @@ export const subscribeToReadMap = (uid, callback) => {
   }
   try {
     const key = getReadMapKey(uid);
-    const raw = localStorage.getItem(key);
+    let raw = localStorage.getItem(key);
+    if (!raw) {
+      // Legacy un-scoped key fallback for smooth transition across deploys
+      const legacyKey = `aerun_readmap_${uid}`;
+      const legacyRaw = localStorage.getItem(legacyKey);
+      if (legacyRaw) {
+        raw = legacyRaw;
+        try {
+          localStorage.setItem(key, legacyRaw);
+        } catch {
+          // ignore quota issues
+        }
+      }
+    }
     const map = raw ? JSON.parse(raw) : {};
     callback(map);
   } catch {
@@ -281,7 +353,17 @@ export const subscribeToUnreadTopics = (callback, page = 1, pageSize = 20) => {
 // the next 20s tick.
 export const refreshUnreadTopics = () => {
   try {
-    unreadTopicsPolls.forEach((poll) => poll?.refresh());
+    unreadTopicsPolls.forEach((poll) => {
+      // A poll whose page nobody renders must not be woken. markTopicRead's
+      // debounced refresh runs on the TOPIC page — the /new-replies screen
+      // that subscribed this poll unmounted when the member navigated away —
+      // and a refresh on a stopped resource still costs the network GET while
+      // delivering the answer to zero subscribers. Every path back to the
+      // feed re-subscribes, and a subscribe re-reads (this resource opts out
+      // of restartFreshMs), so the skipped refresh loses nothing.
+      if (poll?.getTransport() === 'idle') return;
+      poll?.refresh();
+    });
   } catch {
     // Same contract as the counters refresh: best effort, never throws.
   }
@@ -397,15 +479,50 @@ export const isAbortedRequest = (err) =>
 // cancelled this one is the answer the caller wants. Every OTHER failure still
 // throws, because `subscribeToUser` renders nothing at all for a caller it could
 // not answer.
+// Single-flight per uid: two callers reaching for the same row while a read
+// is still in the air join one GET instead of doubling it. The shared promise
+// is stored until it settles; a caller joining a live request shares its
+// outcome instead of issuing a rival one. A settled request is NOT cached: the
+// next caller after it settles reads fresh, which is what keeps a mutation
+// from being shadowed by the pre-write answer. In practice the two callers
+// here are AuthProvider's own-profile refresh and ProfilePage's subscribeToUser
+// when they happen to read the SAME account.
+const _profileFlights = new Map();
+
+// A settled profile snapshot is kept for a short window so a remount that
+// happens moments later (ProfilePage's effect re-running because `t` changed
+// identity after AuthProvider's own-profile write) reuses the last answer
+// instead of paying a second identical GET. The window is intentionally
+// short — a mutation is never responsible for the STALENESS here, because a
+// caller that WRITES and then needs the row re-reads through a fresh flight
+// once this cache expires.
+const _profileCache = new Map();
+const PROFILE_CACHE_MS = 30_000;
+
 export const fetchUserProfile = async (uid) => {
   if (!uid) return null;
-  try {
-    const record = await sendApi(`/api/aerun/users/${uid}`);
-    return normalizeUserProfile({ ...record });
-  } catch (err) {
-    if (isAbortedRequest(err)) return null;
-    throw err;
-  }
+  // Short-TTL hit: a remount that arrives right after a successful read gets
+  // the cached snapshot instead of a second identical GET.
+  const cached = _profileCache.get(uid);
+  if (cached && Date.now() - cached.at < PROFILE_CACHE_MS) return cached.value;
+  const live = _profileFlights.get(uid);
+  if (live) return live;
+  const flight = (async () => {
+    try {
+      const record = await sendApi(`/api/aerun/users/${uid}`);
+      const value = normalizeUserProfile({ ...record });
+      _profileCache.set(uid, { value, at: Date.now() });
+      return value;
+    } catch (err) {
+      if (isAbortedRequest(err)) return null;
+      throw err;
+    }
+  })();
+  _profileFlights.set(uid, flight);
+  flight.finally(() => {
+    if (_profileFlights.get(uid) === flight) _profileFlights.delete(uid);
+  });
+  return flight;
 };
 
 // A single read of one account, delivered once.
@@ -426,7 +543,23 @@ export const fetchUserProfile = async (uid) => {
 // always rendered from this one read. If the profile ever gets a signal-based
 // refresh, this is the place the subscription comes back — carrying the same
 // DTO as the read, never the record.
-export const subscribeToUser = (uid, callback) => {
+// The profile page's subscribe and AuthProvider's own-profile refresh for the
+// SAME account share one read through fetchUserProfile's single-flight above
+// only when they happen to read the same uid. When they do not — the normal
+// case, a member viewing somebody else's profile — this fires its own GET and
+// stays independent of the viewer's own uid. The promise is joined, not
+// cached: after it settles the next caller reads fresh, so a rename elsewhere
+// is never masked by a prior answer.
+// subscribeToUser resolves the profile for uid and hands it to callback.
+//
+// The error, when there is one, goes to errorCallback and the callback is
+// still called with null — the two channels are independent on purpose.
+// The profile page needs the error to render the retryable ErrorCard
+// (RES-01) instead of an endless skeleton, while existing callers that
+// only pass `callback` keep the original "profile could not be read"
+// shape. A 404 and a network failure therefore surface differently only
+// when the caller reads the second argument.
+export const subscribeToUser = (uid, callback, errorCallback) => {
   if (!uid) {
     callback(null);
     return () => {};
@@ -437,8 +570,13 @@ export const subscribeToUser = (uid, callback) => {
     if (isSubscribed) {
       callback(record);
     }
-  }).catch(() => {
-    if (isSubscribed) callback(null);
+  }).catch((err) => {
+    if (isSubscribed) {
+      if (errorCallback) {
+        errorCallback(err);
+      }
+      callback(null);
+    }
   });
 
   return () => {
@@ -471,28 +609,61 @@ export const subscribeToUser = (uid, callback) => {
 // It is polled rather than subscribed because /me is a projection: it changes when
 // the role registry or the account's status changes, which is a moderator's action
 // in another session, not a row write this tab can observe.
+// It is polled rather than subscribed because /me is a projection: it changes when
+// the role registry or the account's status changes, which is a moderator's action
+// in another session, not a row write this tab can observe.
+//
+// The poll carries the whole /me answer the client needs — the effective
+// permission set AND the stored role beside it — so a consumer of either
+// never pays a second read for the other half: the admin panel ranks its
+// role gates off the same answer that feeds `hasPermission`.
 export const subscribeToEffectivePermissions = (uid, callback) => {
   const key = uid || 'guest';
-  const poll = sharedPoll(`effective-permissions:${key}`, {
+  const poll = sharedPoll(`me-projection:${key}`, {
     fetch: async () => {
       const me = await sendApi('/api/aerun/me');
-      return Array.isArray(me?.permissions) ? me.permissions : [];
+      return {
+        permissions: Array.isArray(me?.permissions) ? me.permissions : [],
+        role: me?.role || '',
+        status: me?.status || '',
+      };
     },
     // Slow on purpose: this is a moderator's action in another browser, and a
     // 30s stale window is invisible next to a 20s presence poll.
     intervalMs: 30000,
-    // An empty list is NOT the same as "no permissions", and the two must not look
-    // alike: it is the honest "we have not asked yet" value, and hasPermission
+    // null is NOT the same as "no permissions", and the two must not look
+    // alike: it is the honest "we have not asked yet" value. Consumers keep
+    // their previous value until the first answer lands; hasPermission then
     // falls back to the compiled matrix rather than locking every control.
-    initialValue: [],
+    initialValue: null,
     onError: (err) => console.warn('[effective permissions]', err),
   });
 
-  return poll.subscribe((perms) => callback(perms));
+  return poll.subscribe((me) => callback(me));
 };
 
 // Presence subscriptions (active users / guest ids / daily actives) moved to
 // ./rtdb-presence, which reads the consolidated heartbeat/status snapshots.
+
+/**
+ * Reads ONE page of the public member board: GET /users?page=N&search=…&sort=…&order=…
+ *
+ * The server caps a page at 30 (and clamps perPage), narrows and orders BEFORE
+ * the page is cut, and answers with the envelope {items, page, perPage,
+ * totalItems, totalPages} — the same one the staff list uses. One request
+ * renders one page; fetching the whole board to sort and filter it locally
+ * (the old walk: page=1, page=2, … until totalPages) is precisely what this
+ * replaces.
+ *
+ * @param {{page?: number, search?: string, sort?: string, order?: string}} [query]
+ */
+export const fetchMembers = async ({ page = 1, search = '', sort = '', order = '' } = {}) => {
+  const params = new URLSearchParams({ page: String(page) });
+  if (search) params.set('search', search);
+  if (sort) params.set('sort', sort);
+  if (order) params.set('order', order);
+  return await sendApi(`/api/aerun/users?${params.toString()}`);
+};
 
 /**
  * Reads the member list for a screen that renders it.
@@ -518,80 +689,90 @@ export const subscribeToEffectivePermissions = (uid, callback) => {
  * and the console error was the visible half of a design that reaches around the
  * command layer for this screen entirely.
  *
- * `{ staff: true }` is passed only by AdminPage, which is itself behind the admin
- * gate and genuinely needs the staff DTO (status and verified are on that route
- * and nowhere else). Its fallback to the SDK read is kept: an admin whose
- * `/admin/users` call fails for a transport reason should still see a table.
+ * No current caller passes `{ staff: true }`: AdminPage — the only consumer
+ * entitled to the staff DTO (`status` and `verified` are on that route and
+ * nowhere else) — reads the paged list through `fetchAdminUsers` (src/api/
+ * admin.js) instead, normalising each row through the SAME `toMembersRow`
+ * the single-page read uses. The staff branch stays because scripts/check-forum-read-
+ * contract.mjs pins the explicit-staff contract: the next staff consumer
+ * must opt into it visibly rather than inherit it silently.
  */
+
+// The pages still speak the legacy vocabulary: MembersPage renders its
+// JOINED column from `created_at`, and sorts by it. PocketBase names its
+// autodate columns `created`/`updated`, so both sources are normalized to the
+// legacy names here instead of teaching every consumer about the rename.
+//
+// PocketBase serializes a DateTime as "2006-01-02 15:04:05.999Z" — a space
+// where ISO 8601 wants "T". V8 parses it, but it is not a format every
+// browser guarantees to accept, so it is normalized on the way out. Only
+// `created_at` is mapped: `updated_at` is a record *edit* time, and on this
+// backend it moves whenever an import or a settings write touches the row,
+// which would make it actively misleading.
+//
+// `last_seen` is normalized for the same reason and is NOT the same thing as
+// `updated_at`: it is the durable last-visit clock (migration 1767300000),
+// written only by the heartbeat and by account creation. It is what the
+// members table falls back to once a member is no longer in the live
+// presence map.
+const isoFromPB = (value) => (typeof value === 'string' ? value.replace(' ', 'T') : value);
+
+// Exported for the paged admin read: one mapper for both routes is what
+// stops the row shapes drifting apart.
+export const withLegacyDates = (u) => {
+  const created = u.created_at ?? u.created;
+  return {
+    ...u,
+    created_at: isoFromPB(created),
+    last_seen: isoFromPB(u.last_seen),
+  };
+};
+
+// toMembersRow is the single shape the members table and the admin user
+// table consume, and it is an explicit whitelist on purpose: neither source
+// row is spread into page state. The staff endpoint does not serve email at
+// all any more, and the public record carries columns (legacy_firebase_uid
+// is hidden, but settings and the profile block are not) that have no
+// business in a shared table.
+//
+// `created` is listed explicitly because withLegacyDates reads it from this
+// literal — drop it and the JOINED column silently empties.
+//
+// `last_seen` is the durable last-visit timestamp (backend migration
+// 1767300000). It is listed for the same reason as `created`: the staff DTO
+// must be naming it, or the members table loses its only offline answer and
+// degrades to "..." for everyone who is not currently connected.
+//
+// The counters are normalised to the legacy singular names the pages already
+// sort and render on (`post_count`), because the two sources spell them
+// differently: the admin DTO already emits post_count/topics_count, while a
+// public record carries the raw posts_count/topics_count columns.
+//
+// `role` is NOT normalised: both sources spell it `role` (the `users` column
+// and the staff DTO agree), so the row carries the server name verbatim.
+export const toMembersRow = (u) => ({
+  id: u.id,
+  nickname: u.nickname,
+  avatar_url: u.avatar_url,
+  role: u.role,
+  status: u.status,
+  // The one-line status under the nickname. MembersPage renders it
+  // (`u.status_line && <small>…`), and this mapper did not carry it, so the
+  // column was permanently empty for every member on a public page — the
+  // server sent the value and the client threw it away one line above where it
+  // is read. It is a public profile field (it is already denormalised onto
+  // every post as `author_status_line`), so serving it here exposes nothing new.
+  status_line: u.status_line,
+  post_count: u.post_count ?? u.posts_count ?? 0,
+  topics_count: u.topics_count ?? 0,
+  reputation: u.reputation ?? 0,
+  verified: u.verified,
+  created: u.created,
+  last_seen: u.last_seen
+});
+
 export const subscribeToAllUsers = (callback, { staff = false } = {}) => {
   let isSubscribed = true;
-
-  // The pages still speak the legacy vocabulary: MembersPage renders its
-  // JOINED column from `created_at`, and sorts by it. PocketBase names its
-  // autodate columns `created`/`updated`, so both sources are normalized to the
-  // legacy names here instead of teaching every consumer about the rename.
-  //
-  // PocketBase serializes a DateTime as "2006-01-02 15:04:05.999Z" — a space
-  // where ISO 8601 wants "T". V8 parses it, but it is not a format every
-  // browser guarantees to accept, so it is normalized on the way out. Only
-  // `created_at` is mapped: `updated_at` is a record *edit* time, and on this
-  // backend it moves whenever an import or a settings write touches the row,
-  // which would make it actively misleading.
-  //
-  // `last_seen` is normalized for the same reason and is NOT the same thing as
-  // `updated_at`: it is the durable last-visit clock (migration 1767300000),
-  // written only by the heartbeat and by account creation. It is what the
-  // members table falls back to once a member is no longer in the live
-  // presence map.
-  const isoFromPB = (value) => (typeof value === 'string' ? value.replace(' ', 'T') : value);
-  const withLegacyDates = (u) => {
-    const created = u.created_at ?? u.created;
-    return {
-      ...u,
-      created_at: isoFromPB(created),
-      last_seen: isoFromPB(u.last_seen),
-    };
-  };
-
-  // toMembersRow is the single shape the members table and the admin user
-  // table consume, and it is an explicit whitelist on purpose: neither source
-  // row is spread into page state. The staff endpoint does not serve email at
-  // all any more, and the public record carries columns (legacy_firebase_uid
-  // is hidden, but settings and the profile block are not) that have no
-  // business in a shared table.
-  //
-  // `created` is listed explicitly because withLegacyDates reads it from this
-  // literal — drop it and the JOINED column silently empties.
-  //
-  // `last_seen` is the durable last-visit timestamp (backend migration
-  // 1767300000). It is listed for the same reason as `created`: the staff DTO
-  // must be naming it, or the members table loses its only offline answer and
-  // degrades to "..." for everyone who is not currently connected.
-  //
-  // The counters are normalised to the legacy singular names the pages already
-  // sort and render on (`post_count`), because the two sources spell them
-  // differently: the admin DTO already emits post_count/topics_count, while a
-  // public record carries the raw posts_count/topics_count columns.
-  const toMembersRow = (u) => ({
-    id: u.id,
-    nickname: u.nickname,
-    avatar_url: u.avatar_url,
-    role_id: u.role_id ?? u.role,
-    status: u.status,
-    // The one-line status under the nickname. MembersPage renders it
-    // (`u.status_line && <small>…`), and this mapper did not carry it, so the
-    // column was permanently empty for every member on a public page — the
-    // server sent the value and the client threw it away one line above where it
-    // is read. It is a public profile field (it is already denormalised onto
-    // every post as `author_status_line`), so serving it here exposes nothing new.
-    status_line: u.status_line,
-    post_count: u.post_count ?? u.posts_count ?? 0,
-    topics_count: u.topics_count ?? 0,
-    reputation: u.reputation ?? 0,
-    verified: u.verified,
-    created: u.created,
-    last_seen: u.last_seen
-  });
 
   // THE PUBLIC READ, AND WHY THE SERVER OWNS THE WHITELIST.
   //
@@ -607,8 +788,11 @@ export const subscribeToAllUsers = (callback, { staff = false } = {}) => {
   //
   // The staff path is untouched: it goes through `/admin/users`, which assembles
   // its own whitelist and additionally serves the moderation columns. Both
-  // routes answer with the same envelope, so ONE loop walks both — two paginators
-  // would be two things to keep in step.
+  // routes answer with the same envelope — and one of them is read ONE PAGE at
+  // a time by its own page now (MembersPage fetches a single page per render),
+  // so no hop collection loop exists here any more. A fallback to the full
+  // list would therefore be a REGRESSION: it is the old walk returning through
+  // the back door.
   //
   // `fetchPage` is a CALLBACK rather than a path string, and that is not
   // stylistic. scripts/audit-endpoints.mjs resolves routes by reading the string
@@ -616,35 +800,16 @@ export const subscribeToAllUsers = (callback, { staff = false } = {}) => {
   // reduced both routes to an opaque placeholder and the audit reported them as
   // calls with no backend route — exactly the signal it exists to raise. The URLs
   // therefore stay literal at their call sites below.
-  const collectEveryPage = async (fetchPage) => {
-    const rows = [];
-    let page = 1;
-    for (;;) {
-      const res = await fetchPage(page);
-      if (!isSubscribed) return null;
-      const items = res?.items || [];
-      rows.push(...items.map(toMembersRow));
-      const totalPages = res?.totalPages ?? 1;
-      if (page >= totalPages || items.length === 0) break;
-      page += 1;
-    }
-    return rows.map(withLegacyDates);
-  };
-
-  const readPublicMembers = async () => {
-    const rows = await collectEveryPage(
-      (page) => sendApi(`/api/aerun/users?page=${page}`)
-    );
-    if (rows !== null && isSubscribed) callback(rows);
-  };
-
   const load = async () => {
     // A guest, and every member without `admin_access`, must not issue the staff
     // call at all: it is refused before it is sent, so trying it only to catch
     // the rejection is a guaranteed red entry in the network tab.
+    // (MembersPage, the only current caller, always takes the public branch:
+    // it fetches one page per render.)
     if (!staff) {
       try {
-        await readPublicMembers();
+        const res = await sendApi('/api/aerun/users?page=1');
+        if (isSubscribed) callback((res?.items || []).map(toMembersRow).map(withLegacyDates));
       } catch {
         if (isSubscribed) callback([]);
       }
@@ -652,28 +817,10 @@ export const subscribeToAllUsers = (callback, { staff = false } = {}) => {
     }
 
     try {
-      // The staff endpoint caps a page at 30 (server-side: perPage above the
-      // cap is clamped, not honoured). The members table sorts and filters the
-      // WHOLE board client-side, so asking for one big page is not an option —
-      // the pages are walked instead and the result is the same. The walk is
-      // bounded by the server's own totalPages, so it cannot loop forever on a
-      // board that grows mid-request.
-      //
-      // A null result means the subscription was cancelled mid-walk, not a
-      // failure: only a real request error reaches the fallback below.
-      const users = await collectEveryPage(
-        (page) => sendApi(`/api/aerun/admin/users?page=${page}`)
-      );
-      if (users === null) return;
-      callback(users);
+      const res = await sendApi('/api/aerun/admin/users?page=1');
+      if (isSubscribed) callback((res?.items || []).map(toMembersRow).map(withLegacyDates));
     } catch {
-      // Staff only, and a genuine transport failure: an admin whose staff call
-      // fails should still see a populated table rather than an empty one.
-      try {
-        await readPublicMembers();
-      } catch {
-        if (isSubscribed) callback([]);
-      }
+      if (isSubscribed) callback([]);
     }
   };
 
@@ -681,12 +828,12 @@ export const subscribeToAllUsers = (callback, { staff = false } = {}) => {
 
   // `.refresh` rides on the unsubscribe function rather than on a second
   // exported symbol, because there is exactly ONE way to re-read this resource —
-  // through the `load` closure that owns `staff`, the pagination walk and the
-  // public/staff fallback. A standalone `refreshAllUsers()` would have to either
-  // duplicate that logic or guess which of the two branches is in play, and
-  // MembersPage asks for a refresh exactly when a member wonders whether the
-  // board is current: a refresh that silently lost the staff flag would answer
-  // the admin's question with the public list.
+  // through the `load` closure that owns `staff` and the public/staff choice.
+  // A standalone `refreshAllUsers()` would have to either duplicate that logic
+  // or guess which of the two branches is in play, and MembersPage asks for a
+  // refresh exactly when a member wonders whether the board is current: a
+  // refresh that silently lost the staff flag would answer the admin's question
+  // with the public list.
   const unsubscribe = () => { isSubscribed = false; };
   unsubscribe.refresh = () => { load(); };
   return unsubscribe;

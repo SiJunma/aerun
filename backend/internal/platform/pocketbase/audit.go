@@ -42,7 +42,7 @@ func recordAuditLog(txApp core.App, actionType, performerID string, details any)
 	return nil
 }
 
-func auditLogPayload(record *core.Record) map[string]any {
+func auditLogPayload(record *core.Record, performerNicknames map[string]string) map[string]any {
 	var details any
 	rawDetails := record.Get("details")
 	if rawDetails != nil {
@@ -60,8 +60,13 @@ func auditLogPayload(record *core.Record) map[string]any {
 		"id":           record.Id,
 		"action_type":  record.GetString("action_type"),
 		"performer_id": record.GetString("performer_id"),
-		"details":      details,
-		"created":      record.GetDateTime("created").String(),
+		// The staff table used to name performers by scanning its own
+		// (unpaginated) user list client-side; the list is paged now, so the
+		// nickname travels with the row. Only the NICKNAME — the email stays
+		// a credential and never enters an audit payload.
+		"performer_nickname": performerNicknames[record.GetString("performer_id")],
+		"details":            details,
+		"created":            record.GetDateTime("created").String(),
 	}
 }
 
@@ -113,9 +118,38 @@ func adminListAuditLogsHandler(e *core.RequestEvent) error {
 		nextCursor = fmt.Sprintf("%s|%s", lastRec.GetDateTime("created").String(), lastRec.Id)
 	}
 
+	// The panel renders the performer column by NAME, but the row carries
+	// only the id. Resolve this page's performers in ONE batched read rather
+	// than one lookup per row; a performer whose account is gone (or a read
+	// that fails) answers empty, and the client keeps its raw-id fallback.
+	performerIDs := make([]string, 0, len(records))
+	seen := make(map[string]bool, len(records))
+	for _, r := range records {
+		pid := r.GetString("performer_id")
+		if pid != "" && !seen[pid] {
+			seen[pid] = true
+			performerIDs = append(performerIDs, pid)
+		}
+	}
+	performerNicknames := make(map[string]string, len(performerIDs))
+	if len(performerIDs) > 0 {
+		values := make([]any, len(performerIDs))
+		for i, pid := range performerIDs {
+			values[i] = pid
+		}
+		var performers []*core.Record
+		if err := e.App.RecordQuery(usersCollectionName).
+			AndWhere(dbx.In("id", values...)).
+			All(&performers); err == nil {
+			for _, p := range performers {
+				performerNicknames[p.Id] = p.GetString("nickname")
+			}
+		}
+	}
+
 	items := make([]map[string]any, len(records))
 	for i, r := range records {
-		items[i] = auditLogPayload(r)
+		items[i] = auditLogPayload(r, performerNicknames)
 	}
 
 	return e.JSON(http.StatusOK, map[string]any{

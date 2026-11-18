@@ -62,6 +62,7 @@ export const ToastProvider = ({ children }) => {
             <Toast.Header
               closeButton
               className="border-bottom-0 bg-transparent py-2 px-3 d-flex align-items-center"
+              style={{ color: 'var(--text-color)' }}
             >
               <div
                 className={`text-${toast.variant} me-2 d-flex align-items-center flex-shrink-0`}
@@ -69,8 +70,8 @@ export const ToastProvider = ({ children }) => {
                 {getIcon(toast.variant)}
               </div>
               <strong
-                className="me-auto text-body fw-bold"
-                style={{ fontSize: '0.9rem', lineHeight: 1.35 }}
+                className="me-auto fw-bold"
+                style={{ color: 'var(--text-color)', fontSize: '0.9rem', lineHeight: 1.35 }}
               >
                 {toast.message}
               </strong>

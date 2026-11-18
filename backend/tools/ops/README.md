@@ -1,4 +1,10 @@
-# `backend/tools/ops` — one-off operational tools
+> ⚠️ **ОТРЕДАКТИВНО / LEGACY FIREBASE**
+> Эти инструменты нацелены наライブ **Firebase** проект (очистка email, кастомные токены и т.п.) и нужны только для завершения миграции.
+> Проект переведён на **Go 1.27 + PocketBase (SQLite)**.
+> **Не использовать для текущих задач разработки.**
+> После закрытия легаси-проекта файлы подлежат удалению (Sprint 9).
+
+# `backend/tools/ops` — one-off operational tools [ОТРЕДАКТИВНО / LEGACY FIREBASE]
 
 These scripts are **not** part of the backend runtime. They exist to close a
 specific audit item against the live Firebase project and are expected to be
@@ -12,7 +18,7 @@ result is idempotent.
 Why it is needed: legacy public Firestore `users` documents still carry a copy
 of the account email while `firestore.rules` grants `allow read: if true` on
 that collection, so those addresses are world readable. Firebase Auth is the
-canonical source for email; see `BACKEND_MIGRATION_AUDIT_AND_SPRINT_PLAN.md`
+canonical source for email; see `markdowns/Archive/DONE_BACKEND_MIGRATION_AUDIT_AND_SPRINT_PLAN.md`
 section "Why the email copy is removed, and what does NOT depend on it".
 
 Why a custom token: the callable requires a real root user session

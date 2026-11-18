@@ -3,6 +3,7 @@ import { Button, Form, Spinner, Alert } from 'react-bootstrap';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
 import { describeAuthError } from '../../utils/auth-errors';
+import { makeStorageKey } from '../../utils/storageScope';
 
 const LoginForm = ({ onSuccess, onForgotPassword }) => {
   const { loginWithGoogle, loginWithEmail, settings } = useAuth();
@@ -15,7 +16,7 @@ const LoginForm = ({ onSuccess, onForgotPassword }) => {
   const [loadingGoogle, setLoadingGoogle] = useState(false);
 
   React.useEffect(() => {
-    const error = sessionStorage.getItem('auth_error');
+    const error = sessionStorage.getItem(makeStorageKey('auth_error', 'guest'));
     if (error === 'registration_disabled') {
       setAuthError(t('auth.error_registration_disabled'));
     } else if (error === 'need_registration') {
@@ -25,7 +26,7 @@ const LoginForm = ({ onSuccess, onForgotPassword }) => {
     }
 
     if (error) {
-      sessionStorage.removeItem('auth_error');
+      sessionStorage.removeItem(makeStorageKey('auth_error', 'guest'));
     }
   }, [t]);
 
@@ -33,7 +34,7 @@ const LoginForm = ({ onSuccess, onForgotPassword }) => {
     try {
       setLoadingGoogle(true);
       setAuthError(null);
-      sessionStorage.removeItem('pending_nickname');
+      sessionStorage.removeItem(makeStorageKey('pending_nickname', 'guest'));
       await loginWithGoogle();
       setLoadingGoogle(false);
       if (onSuccess) onSuccess();
@@ -55,7 +56,7 @@ const LoginForm = ({ onSuccess, onForgotPassword }) => {
     try {
       setLoadingEmail(true);
       setAuthError(null);
-      sessionStorage.removeItem('pending_nickname');
+      sessionStorage.removeItem(makeStorageKey('pending_nickname', 'guest'));
       await loginWithEmail(email.trim(), password);
       setLoadingEmail(false);
       if (onSuccess) onSuccess();

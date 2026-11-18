@@ -1,4 +1,10 @@
-# Updating Smiles & Stickers Maintenance Guide
+> ⚠️ **ОТРЕДАКТИВНО / LEGACY FIREBASE**
+> Этот файл описывает синхронизацию стикеров через **Firebase Storage**, что больше не актуально.
+> Проект переведён на **Go 1.27 + PocketBase (SQLite)**.
+> **Не использовать как руководство для текущих задач.**
+> Актуальная документация: `backend/README.md`, `backend/tools/migration/README.md`.
+
+# Updating Smiles & Stickers Maintenance Guide [ОТРЕДАКТИВНО / LEGACY FIREBASE]
 
 This guide describes how to synchronize sticker packs (smiles) in the forum editor with assets stored in Firebase Storage.
 

@@ -59,18 +59,23 @@ func TestValidateRollsKeepsWhatTheBodyReferences(t *testing.T) {
 	}
 }
 
-// TestValidateRollsDropsUnreferencedRolls: an entry no tag points at is dead
-// weight, and accepting it would let a client stuff the column.
-func TestValidateRollsDropsUnreferencedRolls(t *testing.T) {
+// TestValidateRollsAccumulatesUnreferencedRolls pins the anti-cheat audit
+// trail: the throws map is APPEND-ONLY across edits. A re-roll through an
+// edit (replace [roll=A] with a fresh [dice=6] -> [roll=B]) leaves the
+// superseded throw A in the map, so "Dice thrown: N" counts more throws
+// than the body shows chips — that discrepancy is the tampering evidence
+// the counter exists to surface. Dropping unreferenced entries here would
+// hide every re-roll.
+func TestValidateRollsAccumulatesUnreferencedRolls(t *testing.T) {
 	clean, err := ValidateRolls(rollBody(testRollID), map[string]any{
 		testRollID:  map[string]any{"sides": float64(20), "value": float64(5), "type": "normal"},
 		testRollID2: map[string]any{"sides": float64(6), "value": float64(2), "type": "normal"},
 	})
 	if err != nil {
-		t.Fatalf("unreferenced entries are dropped, not rejected: %v", err)
+		t.Fatalf("unreferenced entries accumulate, not rejected: %v", err)
 	}
-	if _, present := clean[testRollID2]; present {
-		t.Error("a roll no [roll=…] tag references must not be stored")
+	if _, present := clean[testRollID2]; !present {
+		t.Error("the superseded throw must survive in the audit trail")
 	}
 	if _, present := clean[testRollID]; !present {
 		t.Error("the referenced roll must survive")

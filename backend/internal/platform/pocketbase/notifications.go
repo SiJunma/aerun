@@ -93,8 +93,13 @@ func markTopicReadHandler(e *core.RequestEvent) error {
 		if post.GetString("topic_id") != topicID {
 			return forbiddenError("post does not belong to this topic")
 		}
+		postCreated := post.GetDateTime("created")
+		topicLastPostCreated := topic.GetDateTime("last_post_created")
+		if !topicLastPostCreated.IsZero() && postCreated.After(topicLastPostCreated) {
+			return validationError("post creation time cannot exceed topic last post time")
+		}
 		lastReadPostID = post.Id
-		lastReadCreated = post.GetDateTime("created").String()
+		lastReadCreated = postCreated.String()
 		lastReadTiebreakID = post.Id
 	} else {
 		// No post id supplied: fall back to "now" so legacy clients still
@@ -132,10 +137,7 @@ func upsertTopicReadState(app core.App, userID, topicID, lastReadPostID, lastRea
 		dbx.Params{"user": userID, "topic": topicID},
 	)
 	if err == nil && existing != nil {
-		existing.Set("last_read_post_id", lastReadPostID)
-		existing.Set("last_read_created", lastReadCreated)
-		existing.Set("last_read_post_tiebreak_id", lastReadTiebreakID)
-		return app.Save(existing)
+		return applyTopicReadStateUpdate(app, existing, lastReadPostID, lastReadCreated, lastReadTiebreakID)
 	}
 
 	col, err := app.FindCollectionByNameOrId(topicReadStatesCollectionName)
@@ -149,15 +151,59 @@ func upsertTopicReadState(app core.App, userID, topicID, lastReadPostID, lastRea
 	rec.Set("last_read_created", lastReadCreated)
 	rec.Set("last_read_post_tiebreak_id", lastReadTiebreakID)
 	if err := app.Save(rec); err != nil {
-		// The concurrent writer's row already says the same thing. Two tabs
-		// opening the same topic race here, and the loser must not see an error.
-		if strings.Contains(err.Error(), "UNIQUE constraint failed") ||
-			strings.Contains(err.Error(), "validation_not_unique") {
+		// The insert can lose a race: a concurrent write (two tabs opening
+		// the same cold topic, or one page double-firing its mark effect)
+		// committed the row after the lookup above had already read
+		// "absent". PocketBase v0.40 surfaces that as a wrapped validation
+		// error whose field codes ("validation_not_unique") do NOT appear in
+		// err.Error() — a string match alone misses it, and the loser used
+		// to answer 500 on the very first visit to a topic. Re-lookup
+		// instead: if the row now exists, the concurrent writer won and this
+		// caller degrades into the same forward-only update a warm visit
+		// performs.
+		if winner, lookupErr := app.FindFirstRecordByFilter(
+			topicReadStatesCollectionName,
+			"user_id = {:user} && topic_id = {:topic}",
+			dbx.Params{"user": userID, "topic": topicID},
+		); lookupErr == nil && winner != nil {
+			return applyTopicReadStateUpdate(app, winner, lastReadPostID, lastReadCreated, lastReadTiebreakID)
+		}
+		// No winner appeared, so the violation is not the insert race above.
+		// Only a raw unique violation in a format the re-lookup cannot see
+		// through (a row deleted concurrently between save and lookup) is
+		// still treated as the idempotent no-op: the concurrent writer's row
+		// already said the same thing, and the loser must not see an error.
+		errStr := err.Error()
+		if strings.Contains(errStr, "UNIQUE constraint failed") ||
+			strings.Contains(errStr, "validation_not_unique") ||
+			strings.Contains(errStr, "must be unique") {
 			return nil
 		}
 		return err
 	}
 	return nil
+}
+
+// applyTopicReadStateUpdate moves an existing read row forward, never backward.
+//
+// Never move the read cursor backward: a visit to an earlier page must not
+// overwrite a later read position, or the topic will appear unread again
+// (badge relights with 1).
+func applyTopicReadStateUpdate(app core.App, existing *core.Record, lastReadPostID, lastReadCreated, lastReadTiebreakID string) error {
+	existingCreated := existing.GetDateTime("last_read_created")
+	newCreated, parseErr := types.ParseDateTime(lastReadCreated)
+	if parseErr == nil && !existingCreated.IsZero() {
+		if newCreated.Before(existingCreated) {
+			return nil // backward write: ignore
+		}
+		if newCreated.Equal(existingCreated) && existing.GetString("last_read_post_tiebreak_id") != "" && lastReadTiebreakID != "" && lastReadTiebreakID < existing.GetString("last_read_post_tiebreak_id") {
+			return nil // backward tiebreak write: ignore
+		}
+	}
+	existing.Set("last_read_post_id", lastReadPostID)
+	existing.Set("last_read_created", lastReadCreated)
+	existing.Set("last_read_post_tiebreak_id", lastReadTiebreakID)
+	return app.Save(existing)
 }
 
 // markAllTopicsReadHandler moves the caller's read position across many topics at
@@ -740,9 +786,9 @@ func unreadTopicsPredicate(e *core.RequestEvent) (string, dbx.Params, error) {
 		t.category_id IN (` + strings.Join(placeholders, ", ") + `)
 		AND COALESCE(t.last_post_author_id, '') != {:user}
 		AND (
-			t.last_post_created > COALESCE(r.last_read_created, r.last_read_at, {:registered}, t.last_post_created)
+			datetime(t.last_post_created) > datetime(COALESCE(r.last_read_created, r.last_read_at, {:registered}, t.last_post_created))
 			OR (
-				t.last_post_created = COALESCE(r.last_read_created, r.last_read_at, {:registered}, t.last_post_created)
+				datetime(t.last_post_created) = datetime(COALESCE(r.last_read_created, r.last_read_at, {:registered}, t.last_post_created))
 				AND COALESCE(r.last_read_post_id, '') <> ''
 				AND t.last_post_id > r.last_read_post_id
 			)

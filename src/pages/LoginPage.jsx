@@ -34,11 +34,9 @@ const LoginPage = () => {
       typeof raw === 'string' ? raw : (raw?.[lang] || raw?.en || raw?.ru || '')
     );
     return custom || sanitizeHtml(
-      lang === 'ru'
-        ? 'На форуме ведутся технические работы. Мы скоро вернемся! Пожалуйста, зайдите позже.'
-        : 'The forum is currently under maintenance. We will be back soon! Please check again later.'
+      t('forum.maintenance_default')
     );
-  }, [settings?.maintenanceMode, settings?.whitelistMode, settings?.showMaintenanceMessage, settings?.maintenanceMessage, lang]);
+  }, [settings?.maintenanceMode, settings?.whitelistMode, settings?.showMaintenanceMessage, settings?.maintenanceMessage]);
 
   if (user) {
     if (!profile) return null; // Wait for profile to load before redirecting
@@ -83,9 +81,7 @@ const LoginPage = () => {
           <LoginForm />
           {settings?.maintenanceMode && (
             <div className="mt-3 text-center small text-muted">
-              {lang === 'ru'
-                ? 'Только администраторы могут войти в данный момент.'
-                : 'Only administrators can log in at this time.'}
+              {t('forum.admins_only')}
             </div>
           )}
           {settings?.registrationEnabled !== false && (

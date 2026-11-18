@@ -150,6 +150,40 @@ func setTopicOpener(topic, post *core.Record) {
 	topic.Set("author_character_id", ref.CharacterID)
 }
 
+// refileTopicOpener re-files the topic's opener AuthorRef onto its EARLIEST
+// visible post. The opener is a projection of the post row (setTopicOpener),
+// and moving posts between topics is the one write that can remove the row
+// that projection was filed from: movePostsHandler calls this for BOTH topics
+// in the same transaction, so the opener can never name the author of a post
+// that has left. Ordering mirrors the list (`created ASC`, `id ASC`), so the
+// re-filed opener is exactly the post the page would show first.
+//
+// Owner ruling (2026-11-01): moving the opening post does NOT delete the
+// topic — the next earliest post simply becomes the opener. A topic whose
+// every post was moved away keeps its row (an emptied topic is a husk, not a
+// deletion), but its opener projection must not keep naming an author whose
+// post is gone.
+func refileTopicOpener(txApp core.App, topic *core.Record) error {
+	var earliest []*core.Record
+	if err := txApp.RecordQuery(postsCollectionName).
+		AndWhere(dbx.HashExp{"topic_id": topic.Id}).
+		AndWhere(dbx.NewExp("is_draft = false OR is_draft IS NULL")).
+		OrderBy("created ASC", "id ASC").
+		Limit(1).
+		All(&earliest); err != nil {
+		return fmt.Errorf("find the opening post: %w", err)
+	}
+	if len(earliest) > 0 {
+		setTopicOpener(topic, earliest[0])
+		return nil
+	}
+	topic.Set("author_id", "")
+	topic.Set(authorKindField, "")
+	topic.Set(guestDisplayNameField, "")
+	topic.Set("author_character_id", "")
+	return nil
+}
+
 // setLastPostProjection copies a post row's stored AuthorRef onto the topic's
 // last-post projection columns. It is the ONLY writer for the last-post
 // author identity: every call site that advances last_post_id must go through

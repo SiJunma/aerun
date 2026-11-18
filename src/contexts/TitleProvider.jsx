@@ -37,8 +37,8 @@ export const TitleProvider = ({ children }) => {
   // effect resetting state on the way out, so a sign-out blanks the badge on the
   // very next render with no extra render pass.
   const countsEligible = Boolean(user?.uid)
-    && profile?.role_id !== 'pending'
-    && profile?.role_id !== 'banned';
+    && profile?.role !== 'pending'
+    && profile?.role !== 'banned';
 
   // The DM term excludes the conversation currently open in the UI: those
   // messages are already on screen, so counting them in the tab badge would

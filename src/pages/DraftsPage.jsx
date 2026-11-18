@@ -36,7 +36,7 @@ import { resolveField } from '../utils/text';
  */
 const DraftsPage = () => {
   const { t, lang } = useI18n();
-  const { user, categories } = useAuth();
+  const { user, categories, profile } = useAuth();
   const { showToast } = useToast();
   const { setPageTitle } = usePageTitle();
   const navigate = useNavigate();
@@ -165,7 +165,7 @@ const handleCopyText = async (draft) => {
         {/* No authorId: draftPayload does not carry one, and every draft on this
             page is the caller's own by construction (GET /me/drafts), so there is
             nothing for a per-author BBCode branch to resolve. */}
-        <BBCode rolls={draft.rolls}>{content}</BBCode>
+        <BBCode rolls={draft.rolls} authorRole={profile?.role}>{content}</BBCode>
       </div>
     );
   };
@@ -173,10 +173,10 @@ const renderDraftCard = (draft, isOrphan) => {
     const busy = busyId === draft.id;
     return (
       <div key={draft.id} className="p-3 hover-bg-light transition-all border-bottom">
-        <div className="d-flex justify-content-between align-items-start gap-2 mb-2">
+        <div className="d-flex justify-content-between align-items-start gap-2 mb-2 flex-wrap">
           <div className="min-w-0">
             {isOrphan ? (
-              <span className="fw-bold d-block" style={{ fontSize: '1.05rem' }}>
+              <span className="fw-bold d-block" style={{ fontSize: '1.05rem', wordBreak: 'break-word' }}>
                 {t('drafts.orphan_badge', 'Тема удалена')}
               </span>
             ) : (
@@ -186,7 +186,7 @@ const renderDraftCard = (draft, isOrphan) => {
               <Link
                 to={`/topic/${draft.topic_id}?draft=1&goLast=1`}
                 className="fw-bold text-decoration-none d-block"
-                style={{ fontSize: '1.1rem', lineHeight: '1.25' }}
+                style={{ fontSize: '1.1rem', lineHeight: '1.25', wordBreak: 'break-word' }}
               >
                 {draft.topic_title || '...'}
               </Link>
@@ -203,7 +203,7 @@ const renderDraftCard = (draft, isOrphan) => {
             </div>
           </div>
 
-          <div className="d-flex gap-2 flex-shrink-0">
+          <div className="d-flex gap-2 flex-wrap">
             {isOrphan ? (
               <>
                 <Button
@@ -263,7 +263,7 @@ const renderDraftCard = (draft, isOrphan) => {
           </div>
         </div>
 
-        <div className="line-clamp-4">{renderPreview(draft)}</div>
+        <div className="post-preview text-muted small text-break line-clamp-4">{renderPreview(draft)}</div>
       </div>
     );
   };
@@ -327,7 +327,7 @@ return (
 
       <div className="mt-4">
         <Link to="/" className="btn btn-outline-secondary">
-          {t('common.back_to_main', 'На главную')}
+          &larr; {t('common.back_to_main', 'На главную')}
         </Link>
       </div>
 

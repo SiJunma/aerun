@@ -42,9 +42,8 @@ const rollIDForTests = "roll_1791050763756_1"
 
 // ── Dice: create → store → read back ────────────────────────────────────────
 
-// TestPostRollsSurviveAReload is THE reported failure. The reply is created with
-// a dice, and the create answer must already carry it — otherwise the card that
-// renders from that answer shows the raw tag.
+// TestPostRollsSurviveAReload: creating a post with [dice=N] mints the roll
+// on the server (SEC-08) and returns it in the response.
 func TestPostRollsSurviveAReload(t *testing.T) {
 	var scenario tests.ApiScenario
 	scenario = tests.ApiScenario{
@@ -55,16 +54,14 @@ func TestPostRollsSurviveAReload(t *testing.T) {
 		ExpectedStatus: http.StatusCreated,
 		ExpectedContent: []string{
 			`"rolls":{`,
-			`"roll_1791050763756_1":{"id":"roll_1791050763756_1"`,
-			`"value":17`,
+			`"sides":20`,
 		},
 		BeforeTestFunc: func(t testing.TB, app *tests.TestApp, e *core.ServeEvent) {
 			tokens := seedIdentityFixtures(t, app)
 			catID := getGeneralCategoryID(t, app)
 			body := fmt.Sprintf(
-				`{"category_id":%q,"title":"Dice topic","content":"dice\n[roll=%s]",`+
-					`"rolls":{"%s":{"sides":20,"value":17,"type":"normal","timestamp":1791050763756}}}`,
-				catID, rollIDForTests, rollIDForTests)
+				`{"category_id":%q,"title":"Dice topic","content":"dice\n[dice=20]"}`,
+				catID)
 			scenario.Body = strings.NewReader(body)
 			scenario.Headers = map[string]string{
 				"Authorization":   tokens["player"],
@@ -81,7 +78,7 @@ func TestPostRollsSurviveAReload(t *testing.T) {
 			if derr != nil {
 				t.Fatalf("stored rolls did not decode: %v", derr)
 			}
-			if _, ok := stored[rollIDForTests]; !ok {
+			if len(stored) == 0 {
 				t.Fatalf("the throw was not stored, got %#v", stored)
 			}
 		},
@@ -103,7 +100,7 @@ func TestPostRollsAreReadableByAnotherMember(t *testing.T) {
 	catID := getGeneralCategoryID(t, app)
 
 	topicID := createTopicWithDice(t, server, tokens["player"], catID,
-		"Readable dice", "кубик\n[roll="+rollIDForTests+"]", `{"sides":20,"value":9,"type":"normal"}`)
+		"Readable dice", "кубик\n[dice=20]", "")
 
 	for _, who := range []struct {
 		name  string
@@ -135,8 +132,7 @@ func TestMasterDiceIsWithheldFromReadersWithoutThePermission(t *testing.T) {
 	catID := getGeneralCategoryID(t, app)
 
 	topicID := createTopicWithDice(t, server, tokens["player"], catID,
-		"Master dice", "тайный бросок\n[roll="+rollIDForTests+"]",
-		`{"sides":100,"value":87,"type":"master"}`)
+		"Master dice", "тайный бросок\n[dice=100 type=master]", "")
 
 	// The compiled matrix gives `player` view_master_dice (internal/auth role.go:
 	// "compiled-only" for the player role — see migration-data/idmap/report.json),
@@ -158,39 +154,49 @@ func TestMasterDiceIsWithheldFromReadersWithoutThePermission(t *testing.T) {
 	if v := readRollValue(t, server, topicID, tokens["player"]); v != nil {
 		t.Errorf("a player received the master value %v — view_master_dice is moderator-and-above", v)
 	}
-	if v := readRollValue(t, server, topicID, tokens["moderator"]); v == nil || fmt.Sprint(v) != "87" {
+	if v := readRollValue(t, server, topicID, tokens["moderator"]); v == nil {
 		t.Errorf("a moderator holds view_master_dice and must see the value, got %v", v)
 	}
-	if v := readRollValue(t, server, topicID, tokens["root"]); v == nil || fmt.Sprint(v) != "87" {
+	if v := readRollValue(t, server, topicID, tokens["root"]); v == nil {
 		t.Errorf("root must see the master value, got %v", v)
 	}
 }
 
-// TestRollsAreValidatedOnTheWayIn: a client cannot store a die that lies.
+// TestRollsAreValidatedOnTheWayIn: an edit attempting to forge/change a frozen roll is refused.
 func TestRollsAreValidatedOnTheWayIn(t *testing.T) {
-	var scenario tests.ApiScenario
-	scenario = tests.ApiScenario{
-		Name:            "a roll whose value exceeds its sides is refused",
-		Method:          http.MethodPost,
-		URL:             "/api/aerun/topics",
-		TestAppFactory:  newAerunTestApp,
-		ExpectedStatus:  http.StatusBadRequest,
-		ExpectedContent: []string{`"validation":true`},
-		BeforeTestFunc: func(t testing.TB, app *tests.TestApp, e *core.ServeEvent) {
-			tokens := seedIdentityFixtures(t, app)
-			catID := getGeneralCategoryID(t, app)
-			body := fmt.Sprintf(
-				`{"category_id":%q,"title":"Liar","content":"[roll=%s]",`+
-					`"rolls":{"%s":{"sides":20,"value":99,"type":"normal"}}}`,
-				catID, rollIDForTests, rollIDForTests)
-			scenario.Body = strings.NewReader(body)
-			scenario.Headers = map[string]string{
-				"Authorization":   tokens["player"],
-				"Idempotency-Key": "idem-liar-1",
-			}
-		},
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	server := newTestServer(t, app)
+	defer server.Close()
+
+	tokens := seedIdentityFixtures(t, app)
+	catID := getGeneralCategoryID(t, app)
+
+	_, postID := createTopicWithDiceAndID(t, server, tokens["player"], catID,
+		"Liar", "кубик\n[dice=20]", "")
+
+	postRecord, err := app.FindRecordById(postsCollectionName, postID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	scenario.Test(t)
+	storedMap, _ := decodeRolls(postRecord.Get("rolls"))
+	var rollID string
+	for id := range storedMap {
+		rollID = id
+		break
+	}
+
+	// Try to edit and overwrite with a different value (forgery)
+	edit := requestJSON(t, server, http.MethodPatch, "/api/aerun/posts/"+postID,
+		fmt.Sprintf(`{"content":"кубик\n[roll=%s]","rolls":{"%s":{"sides":20,"value":99,"type":"normal"}}}`, rollID, rollID),
+		map[string]string{
+			"Authorization":   tokens["player"],
+			"Idempotency-Key": "idem-liar-1",
+		})
+	if edit.StatusCode != http.StatusBadRequest {
+		t.Fatalf("edit forging roll = %d, want 400 validation error, body %s", edit.StatusCode, readBody(t, edit))
+	}
 }
 
 // TestEditingAPostWithoutRollsKeepsThem: the edit form sends only the text when
@@ -207,11 +213,22 @@ func TestEditingAPostWithoutRollsKeepsThem(t *testing.T) {
 	catID := getGeneralCategoryID(t, app)
 
 	_, postID := createTopicWithDiceAndID(t, server, tokens["player"], catID,
-		"Edited dice", "кубик\n[roll="+rollIDForTests+"]", `{"sides":20,"value":9,"type":"normal"}`)
+		"Edited dice", "кубик\n[dice=20]", "")
+
+	postRecord, err := app.FindRecordById(postsCollectionName, postID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storedMap, _ := decodeRolls(postRecord.Get("rolls"))
+	var rollID string
+	for id := range storedMap {
+		rollID = id
+		break
+	}
 
 	// An edit that sends NO rolls key at all.
 	edit := requestJSON(t, server, http.MethodPatch, "/api/aerun/posts/"+postID,
-		fmt.Sprintf(`{"content":"кубик, переписал текст\n[roll=%s]"}`, rollIDForTests),
+		fmt.Sprintf(`{"content":"кубик, переписал текст\n[roll=%s]"}`, rollID),
 		map[string]string{
 			"Authorization":   tokens["player"],
 			"Idempotency-Key": "idem-edit-dice-2",
@@ -227,9 +244,8 @@ func TestEditingAPostWithoutRollsKeepsThem(t *testing.T) {
 	if !ok {
 		t.Fatalf("an unrelated edit wiped the stored throws: %#v", edited.Post)
 	}
-	entry, ok := rolls[rollIDForTests].(map[string]any)
-	if !ok || entry["value"] == nil {
-		t.Errorf("the throw did not survive an unrelated edit: %#v", rolls)
+	if _, ok := rolls[rollID].(map[string]any); !ok {
+		t.Fatalf("the stored throw %q disappeared after edit: %#v", rollID, rolls)
 	}
 }
 
@@ -573,8 +589,14 @@ func createTopicWithDice(t testing.TB, server *httptest.Server, token, categoryI
 // post rather than read it back.
 func createTopicWithDiceAndID(t testing.TB, server *httptest.Server, token, categoryID, title, content, rollEntry string) (string, string) {
 	t.Helper()
-	body := fmt.Sprintf(`{"category_id":%q,"title":%q,"content":%q,"rolls":{"%s":%s}}`,
-		categoryID, title, content, rollIDForTests, rollEntry)
+	var body string
+	if rollEntry != "" {
+		body = fmt.Sprintf(`{"category_id":%q,"title":%q,"content":%q,"rolls":{"%s":%s}}`,
+			categoryID, title, content, rollIDForTests, rollEntry)
+	} else {
+		body = fmt.Sprintf(`{"category_id":%q,"title":%q,"content":%q}`,
+			categoryID, title, content)
+	}
 	res := requestJSON(t, server, http.MethodPost, "/api/aerun/topics", body,
 		map[string]string{
 			"Authorization":   token,
@@ -617,11 +639,21 @@ func readRollValue(t testing.TB, server *httptest.Server, topicID, token string)
 		t.Fatal("no posts returned")
 	}
 	rolls, ok := page.Items[0]["rolls"].(map[string]any)
-	if !ok {
+	if !ok || len(rolls) == 0 {
 		t.Fatalf("no `rolls` key in the payload, so the tag renders raw: %#v", page.Items[0])
 	}
-	entry, ok := rolls[rollIDForTests].(map[string]any)
-	if !ok {
+	var entry map[string]any
+	if e, exists := rolls[rollIDForTests]; exists {
+		entry, _ = e.(map[string]any)
+	} else {
+		for _, e := range rolls {
+			if m, ok := e.(map[string]any); ok {
+				entry = m
+				break
+			}
+		}
+	}
+	if entry == nil {
 		t.Fatalf("the throw is not in the map: %#v", rolls)
 	}
 	// The entry must still be DESCRIBED even when its value is withheld:

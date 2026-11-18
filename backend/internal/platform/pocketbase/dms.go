@@ -12,6 +12,7 @@ import (
 	"github.com/pocketbase/pocketbase/tools/types"
 
 	"github.com/SiJunma/aerun/backend/internal/auth"
+	"github.com/SiJunma/aerun/backend/internal/forum"
 	"github.com/SiJunma/aerun/backend/internal/messaging"
 )
 
@@ -63,9 +64,10 @@ type editDMMessageForm struct {
 //
 // Firebase parity: onDmMessageCreated checked whether the recipient was currently
 // online on the forum (state == 'online'). In PocketBase, live presence is
-// tracked in onlineMembers with presenceTTL (75s, refreshed every 30s by heartbeat).
-// When a user logs out, they are removed from onlineMembers immediately.
-// When a user closes the tab, they expire after presenceTTL.
+// tracked in onlineMembers with presenceTTL (15 minutes, refreshed by heartbeat
+// on explicit user activity). When a user logs out, they are removed from
+// onlineMembers immediately. When a user closes the tab or goes idle, they
+// expire after presenceTTL.
 func isMemberOnline(userID string, now time.Time) bool {
 	presenceMu.RLock()
 	defer presenceMu.RUnlock()
@@ -144,8 +146,8 @@ func maybeEnqueueDMEmail(txApp core.App, conversationID string, recipient *core.
 		txApp.Logger().Debug("dm-email skipped: recipient nil or email disabled", "conversation_id", conversationID, "recipient_id", recipientId)
 		return
 	}
-	if isMemberOnline(recipient.Id, time.Now()) {
-		txApp.Logger().Debug("dm-email skipped: recipient is online", "conversation_id", conversationID, "recipient_id", recipient.Id)
+	if isMemberOnline(recipient.Id, time.Now()) || isMemberRecentlyActive(txApp, recipient.Id, time.Now()) {
+		txApp.Logger().Debug("dm-email skipped: recipient is online or recently active", "conversation_id", conversationID, "recipient_id", recipient.Id)
 		return
 	}
 	tpl, ok := loadEmailTemplates(txApp)[emailTemplateDM]
@@ -245,8 +247,10 @@ func editDMMessageHandler(e *core.RequestEvent) error {
 		msg.Set("text", cleanText)
 		// Only when the request carries them: an edit that never touched the dice
 		// must leave the stored throws alone, exactly as editPostForm does.
+		// On edit the freeze applies the same way as for forum posts.
 		if form.Rolls != nil {
-			if err := writeRolls(msg, cleanText, *form.Rolls); err != nil {
+			stored := storedRolls(msg)
+			if err := writeRollsFrozen(msg, cleanText, *form.Rolls, stored); err != nil {
 				return 0, nil, validationError(err.Error())
 			}
 		}
@@ -698,14 +702,20 @@ func createDMHandler(e *core.RequestEvent) error {
 			return 0, nil, internalError("dm_messages collection unavailable", err)
 		}
 
+		// SEC-08: server-generated dice from the RAW tags in the body.
+		serverText, serverRolls, err := forum.MintDice(cleanText)
+		if err != nil {
+			return 0, nil, internalError("dice generation failed", err)
+		}
 		msg := core.NewRecord(msgCol)
 		msg.Set("conversation_id", conv.Id)
 		msg.Set("sender_id", e.Auth.Id)
 		msg.Set("sequence", 1)
-		msg.Set("text", cleanText)
-		if err := writeRolls(msg, cleanText, form.Rolls); err != nil {
+		msg.Set("text", serverText)
+		if err := writeRolls(msg, serverText, serverRolls); err != nil {
 			return 0, nil, validationError(err.Error())
 		}
+		cleanText = serverText
 		if err := txApp.Save(msg); err != nil {
 			return 0, nil, internalError("failed to save message", err)
 		}
@@ -856,6 +866,11 @@ func appendMessageToConversation(
 	// Monotonic sequence assignment within the conversation transaction.
 	nextSeq := conv.GetInt("messages_count") + 1
 
+	// SEC-08: server-generated dice from the RAW tags in the body.
+	serverText, serverRolls, err := forum.MintDice(cleanText)
+	if err != nil {
+		return nil, 0, internalError("dice generation failed", err)
+	}
 	msgCol, err := txApp.FindCollectionByNameOrId(dmMessagesCollectionName)
 	if err != nil {
 		return nil, 0, internalError("dm_messages collection unavailable", err)
@@ -864,10 +879,11 @@ func appendMessageToConversation(
 	msg.Set("conversation_id", conv.Id)
 	msg.Set("sender_id", senderID)
 	msg.Set("sequence", nextSeq)
-	msg.Set("text", cleanText)
-	if err := writeRolls(msg, cleanText, rolls); err != nil {
+	msg.Set("text", serverText)
+	if err := writeRolls(msg, serverText, serverRolls); err != nil {
 		return nil, 0, validationError(err.Error())
 	}
+	cleanText = serverText
 	if err := txApp.Save(msg); err != nil {
 		return nil, 0, internalError("failed to save message", err)
 	}

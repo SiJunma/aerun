@@ -63,6 +63,11 @@ export const getVotesInTopic = async (voterUid, topicId) => {
 export const voteOnProfile = async (voterUid, targetUid, value, comment, _voterNickname = 'User') => {
   if (voterUid === targetUid) throw new Error('You cannot vote for yourself.');
 
+  // Drop the cached vote for this pair: the read that follows must answer
+  // with the value just written, not the pre-write snapshot cached moments
+  // earlier.
+  _voteCache.delete(`${voterUid}:${targetUid}`);
+  _voteFlights.delete(`${voterUid}:${targetUid}`);
   return await sendApi(`/api/aerun/users/${targetUid}/vote`, {
     method: 'POST',
     body: {
@@ -80,18 +85,43 @@ export const voteOnProfile = async (voterUid, targetUid, value, comment, _voterN
  * browser rules, so the old `pb.collection('reputation_votes').getFirstListItem`
  * could only ever 403. /me/votes returns the caller's own ballots, and a profile
  * vote is the one with an empty post_id.
+ *
+ * Deduplicated per (voter, target): the profile effect that calls this used to
+ * re-run whenever the viewer's `profile` got a new identity, so the same
+ * /me/votes read was re-issued inside one page view. And a short-TTL hit
+ * covers the remount-after-cleanup case the same way fetchUserProfile does.
+ * A just-cast vote is never masked: `voteOnProfile` invalidates the entry
+ * below before sending, so the post-vote read goes to the server.
  */
+const _voteFlights = new Map();
+const _voteCache = new Map();
+const PROFILE_VOTE_CACHE_MS = 5_000;
+
 export const getProfileVote = async (voterUid, targetUid) => {
   if (!voterUid || !targetUid) return null;
-  try {
-    const res = await sendApi('/api/aerun/me/votes');
-    const record = (res?.items || []).find(
-      r => !r.post_id && r.target_id === targetUid
-    );
-    return record ? { id: record.id, ...record } : null;
-  } catch {
-    return null;
-  }
+  const key = `${voterUid}:${targetUid}`;
+  const cached = _voteCache.get(key);
+  if (cached && Date.now() - cached.at < PROFILE_VOTE_CACHE_MS) return cached.value;
+  const live = _voteFlights.get(key);
+  if (live) return live;
+  const flight = (async () => {
+    try {
+      const res = await sendApi('/api/aerun/me/votes');
+      const record = (res?.items || []).find(
+        r => !r.post_id && r.target_id === targetUid
+      );
+      const value = record ? { id: record.id, ...record } : null;
+      _voteCache.set(key, { value, at: Date.now() });
+      return value;
+    } catch {
+      return null;
+    }
+  })();
+  _voteFlights.set(key, flight);
+  flight.finally(() => {
+    if (_voteFlights.get(key) === flight) _voteFlights.delete(key);
+  });
+  return flight;
 };
 
 /**

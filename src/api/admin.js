@@ -149,6 +149,36 @@ export const transferRoot = async ({ successorId, password, confirmPhrase }) => 
 };
 
 // --- User Management ---
+
+/**
+ * Read ONE page of the staff list: GET /admin/users?page=N&search=…
+ *
+ * The server caps a page at 30 (and clamps perPage, not honours it), so the
+ * table paginates server-side: the caller asks for the page it renders and
+ * counts on `totalPages` for the footer. This is the LIST endpoint — the
+ * moderation columns (`status`, `verified`) and NO email come with it, per
+ * the same whitelist every other admin users route speaks.
+ *
+ * `search` narrows by nickname substring before the page is cut (server
+ * side), so the pagination the client renders counts the narrowed set.
+ *
+ * The path is a literal prefix with the query appended, not an opaque
+ * parameter: scripts/audit-endpoints.mjs resolves routes by reading the
+ * string literal inside each sendApi call.
+ *
+ * @param {{page?: number, perPage?: number, search?: string}} [query]
+ */
+export const fetchAdminUsers = async ({ page = 1, perPage = 30, search = '' } = {}) => {
+  const params = new URLSearchParams({ page: String(page), perPage: String(perPage) });
+  if (search) params.set('search', search);
+  try {
+    return await sendApi(`/api/aerun/admin/users?${params.toString()}`);
+  } catch (err) {
+    console.warn('[fetchAdminUsers err]', err);
+    throw err;
+  }
+};
+
 // Approving clears the STATUS only. The account was already created with the
 // player role (register.go), so naming a role here would also overwrite it —
 // which is invisible in the common case and destructive for an admin who
@@ -405,4 +435,42 @@ export const sendTestEmail = async () => {
     console.warn('[sendTestEmail err]', err);
     throw err;
   }
+};
+
+/**
+ * bulkUpdateUsers performs one bulk operation (role change or ban/unban) over
+ * a list of users. The server answers 200 even when individual targets fail,
+ * so the promise resolves with { processed, succeeded, failed, items } and
+ * the caller must inspect `res.failed` / `res.items`. It rejects only on a bad
+ * body (400) or a missing actor-level right (403).
+ */
+export const bulkUpdateUsers = async (ids, { role, status, notify_role_change = true } = {}) => {
+  return await sendApi('/api/aerun/admin/users/bulk', {
+    method: 'PATCH',
+    body: { ids, role, status, notify_role_change }
+  });
+};
+
+/**
+ * bulkDeleteUsers soft-deletes a list of users in one command, optionally
+ * purging their content. Same error contract as bulkUpdateUsers.
+ */
+export const bulkDeleteUsers = async (ids, { delete_posts = false } = {}) => {
+  return await sendApi('/api/aerun/admin/users/bulk', {
+    method: 'DELETE',
+    body: { ids, delete_posts }
+  });
+};
+
+/**
+ * fetchUsersContentCounts asks the server how much content the
+ * "delete all their content" option would destroy for each account:
+ * { items: [{ id, topics, posts }] } — owned topics and owned posts.
+ * Read-only, no idempotency key needed.
+ */
+export const fetchUsersContentCounts = async (ids) => {
+  return await sendApi('/api/aerun/admin/users/content-counts', {
+    method: 'POST',
+    body: { ids }
+  });
 };

@@ -1,0 +1,128 @@
+/**
+ * Aerun Forum Pagination — shared module (the ONLY owner of the look).
+ *
+ * Used on CategoryPage, ActiveTopicsPage, NewRepliesPage, TopTopicsPage,
+ * SubscriptionsPage, MembersPage, Topic View top/bottom and any other
+ * paginated list. NOT used on the forum index (MainPage) — there the
+ * statistics panel is the only footer.
+ *
+ * DOM: ForumPagination renders <ul class="forum-pagination"> directly.
+ * A page wraps it in <nav id="...pagination-..."> only when it needs a
+ * semantic landmark; the look itself is always .forum-pagination.
+ * Modifiers carry only placement:
+ *   .forum-pagination-view   — full-width centered row (list pages)
+ *   .forum-pagination-topic  — compact row inside a header (Topic View)
+ *  No topic- / forum-pagination- component classes per page.
+ */
+
+.forum-pagination {
+  display: flex;
+  flex-direction: row;
+  gap: 0.15rem;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 0.2rem 0;
+  margin: 0;
+  list-style: none;
+}
+
+.forum-pagination-centered {
+  justify-content: center;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Placement modifiers — same look, different position. */
+.forum-pagination-view {
+  justify-content: center;
+  margin-bottom: 1rem;
+  margin-top: 1rem;
+}
+
+/* Topic View only changes alignment inside the header row. */
+.forum-pagination-topic {
+  flex: 0 0 auto;
+}
+
+.forum-pagination .page-item .page-link {
+  min-width: 2.2rem;
+  height: 2.2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1.5px solid transparent;
+  background: transparent;
+  color: var(--pagination-color);
+  font-size: 0.95rem;
+  font-weight: 500;
+  line-height: 1;
+  border-radius: 6px;
+  text-decoration: none;
+  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
+}
+
+.forum-pagination .page-item:not(.active) .page-link {
+  opacity: 0.7;
+}
+
+.forum-pagination .page-item:not(.active):not(.disabled) .page-link:hover,
+.forum-pagination .page-item:not(.active):not(.disabled) .page-link:focus {
+  background: var(--pagination-hover-bg);
+  color: var(--pagination-hover-color);
+  opacity: 1;
+  border-color: var(--pagination-active-border);
+}
+
+.forum-pagination .page-item.active .page-link {
+  background: transparent;
+  color: var(--pagination-active-color);
+  border: 1.5px solid var(--pagination-active-border);
+  font-weight: 700;
+  cursor: default;
+  pointer-events: none;
+  opacity: 1;
+}
+
+.forum-pagination .page-item.prev .page-link,
+.forum-pagination .page-item.next .page-link,
+.forum-pagination .page-item.first .page-link,
+.forum-pagination .page-item.last .page-link {
+  color: var(--pagination-color);
+  opacity: 0.6;
+}
+
+.forum-pagination .page-item.prev:hover .page-link,
+.forum-pagination .page-item.next:hover .page-link,
+.forum-pagination .page-item.first:hover .page-link,
+.forum-pagination .page-item.last:hover .page-link {
+  opacity: 1;
+}
+
+.forum-pagination .page-item.disabled .page-link {
+  opacity: var(--pagination-disabled-opacity);
+  color: var(--pagination-color);
+  background: transparent;
+}
+
+.forum-pagination .page-item.disabled:not(.prev):not(.next):not(.first):not(.last) .page-link {
+  border: none;
+  background: transparent;
+  opacity: 0.4;
+  color: var(--pagination-color);
+  font-size: 1rem;
+  cursor: default;
+  min-width: 1.5rem;
+}
+
+@media (max-width: 576px) {
+  .forum-pagination {
+    gap: 0.1rem;
+  }
+
+  .forum-pagination .page-item .page-link {
+    min-width: 2rem;
+    height: 2rem;
+    font-size: 0.85rem;
+  }
+}

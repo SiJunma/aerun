@@ -45,10 +45,17 @@
 | Хочу... | Команда |
 |---|---|
 | Сделать бэкап базы | `python deploy.py db backup` |
+| Скачать бэкап базы с VPS на свой компьютер (новейший) | `python deploy.py backup` или `npm run deploy:vps:backup` |
+| Скачать конкретный бэкап | `python deploy.py backup --file pb_data-backup-<дата>.tgz` |
+| Скачать в свой путь / перезаписать существующий | `python deploy.py backup --out <путь>` / добавить `--overwrite` |
 | Применить миграции (рестарт, они сами) | `python deploy.py db migrate` |
 | Восстановить базу из бэкапа | `python deploy.py db restore --file ~/project/pb_data-backup-<дата>.tgz` |
 
 `db restore` спросит подтверждение и остановит сервис на время замены.
+
+Скачанные архивы кладутся в `.deploy/backups/` (gitignored, как и `.deploy/`),
+проверяются по sha256 против серверного файла. Скачка без `--overwrite`
+не перезапишет файл, который уже лежит локально.
 
 ## Если что-то пошло не так
 

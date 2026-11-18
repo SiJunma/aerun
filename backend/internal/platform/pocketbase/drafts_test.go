@@ -304,3 +304,89 @@ func TestDraftMaskCannotBeBorrowed(t *testing.T) {
 		t.Fatalf("filing a draft as another member's mask: got %d, want 403 (%v)", status, payload)
 	}
 }
+
+// TestDraftClearingMaskDoesNotFallbackToProfileMask verifies that saving a draft
+// with character_id: "" clears the mask even if users.last_selected_character_id
+// is set on the author's profile (e.g. from the composer).
+func TestDraftClearingMaskDoesNotFallbackToProfileMask(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	topicID := seedDraftTopic(t, app, fixPlayerID, "Clear mask draft topic")
+	seedRuntimeCharacter(t, app, "chardftmask0001", fixPlayerID, "Rough")
+	seedRuntimeCharacter(t, app, "chardftmask0002", fixPlayerID, "Smooth")
+
+	// Set last_selected_character_id on the user record to simulate having selected
+	// a mask in the reply composer previously.
+	owner, err := app.FindRecordById(usersCollectionName, fixPlayerID)
+	if err != nil || owner == nil {
+		t.Fatalf("owner not found: %v", err)
+	}
+	owner.Set("last_selected_character_id", "chardftmask0001")
+	if err := app.Save(owner); err != nil {
+		t.Fatalf("failed to save owner: %v", err)
+	}
+
+	server := newTestServer(t, app)
+	defer server.Close()
+
+	// 1. Save draft under mask 1.
+	status, payload := doJSON(t, server.URL, http.MethodPut, "/api/aerun/topics/"+topicID+"/draft",
+		tokens["player"], "draft-mask-clear-1", `{"content":"reply under mask 1","character_id":"chardftmask0001"}`)
+	if status != http.StatusOK {
+		t.Fatalf("upsert draft 1: %d %v", status, payload)
+	}
+	draft, _ := payload["draft"].(map[string]any)
+	if got, _ := draft["author_character_id"].(string); got != "chardftmask0001" {
+		t.Fatalf("draft.author_character_id = %q, want chardftmask0001", got)
+	}
+
+	// 2. Edit draft to main account (character_id: "").
+	status, payload = doJSON(t, server.URL, http.MethodPut, "/api/aerun/topics/"+topicID+"/draft",
+		tokens["player"], "draft-mask-clear-2", `{"content":"reply under main account","character_id":""}`)
+	if status != http.StatusOK {
+		t.Fatalf("upsert draft clear: %d %v", status, payload)
+	}
+	draft2, _ := payload["draft"].(map[string]any)
+	if got, ok := draft2["author_character_id"]; ok && got != nil && got != "" {
+		t.Fatalf("draft.author_character_id = %v, want empty/absent after clearing", got)
+	}
+	draftID, _ := draft2["id"].(string)
+	stored, err := app.FindRecordById(postsCollectionName, draftID)
+	if err != nil || stored == nil {
+		t.Fatalf("stored draft not found: %v", err)
+	}
+	if got := stored.GetString("author_character_id"); got != "" {
+		t.Fatalf("posts.author_character_id in DB = %q, want empty — fell back to last_selected_character_id", got)
+	}
+
+	// 3. Edit draft to mask 2.
+	status, payload = doJSON(t, server.URL, http.MethodPut, "/api/aerun/topics/"+topicID+"/draft",
+		tokens["player"], "draft-mask-clear-3", `{"content":"reply under mask 2","character_id":"chardftmask0002"}`)
+	if status != http.StatusOK {
+		t.Fatalf("upsert draft mask 2: %d %v", status, payload)
+	}
+	draft3, _ := payload["draft"].(map[string]any)
+	if got, _ := draft3["author_character_id"].(string); got != "chardftmask0002" {
+		t.Fatalf("draft.author_character_id = %q, want chardftmask0002", got)
+	}
+
+	// 4. Edit draft from mask 2 back to main account (character_id: "").
+	status, payload = doJSON(t, server.URL, http.MethodPut, "/api/aerun/topics/"+topicID+"/draft",
+		tokens["player"], "draft-mask-clear-4", `{"content":"reply back to main account","character_id":""}`)
+	if status != http.StatusOK {
+		t.Fatalf("upsert draft back to account: %d %v", status, payload)
+	}
+	draft4, _ := payload["draft"].(map[string]any)
+	if got, ok := draft4["author_character_id"]; ok && got != nil && got != "" {
+		t.Fatalf("draft.author_character_id = %v, want empty/absent after clearing", got)
+	}
+	stored4, err := app.FindRecordById(postsCollectionName, draftID)
+	if err != nil || stored4 == nil {
+		t.Fatalf("stored draft not found: %v", err)
+	}
+	if got := stored4.GetString("author_character_id"); got != "" {
+		t.Fatalf("posts.author_character_id in DB = %q, want empty after second clear, got %q", got, got)
+	}
+}

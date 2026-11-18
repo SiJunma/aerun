@@ -527,14 +527,14 @@ func TestDeletedAuthorDecoratesAsDeleted(t *testing.T) {
 // TestMigratedUsersCollectionHoldsIsDeleted pins that migration
 // 1770000009 adds users.is_deleted (fail-fast at boot — see verifyDeletedUserSchema).
 func TestMigratedUsersCollectionHoldsIsDeleted(t *testing.T) {
+	// tests.NewTestApp already runs the full migration chain
+	// (PocketBase tests/app.go); a second RunAllMigrations pass is
+	// redundant work that only stretches package runtime.
 	app, err := tests.NewTestApp(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer app.Cleanup()
-	if err := app.RunAllMigrations(); err != nil {
-		t.Fatalf("run migrations: %v", err)
-	}
 	users, err := app.FindCollectionByNameOrId(usersCollectionName)
 	if err != nil {
 		t.Fatalf("users collection: %v", err)

@@ -5,7 +5,7 @@ import {
   Bold, Italic, Underline, Strikethrough, Link as LinkIcon, Image as ImageIcon,
   Quote, Undo, Redo, Palette, ALargeSmall, Columns, Dices, Clapperboard,
   Youtube, EyeOff, Minus, Smile, AlignLeft, AlignCenter, AlignRight,
-  AlignJustify, Keyboard, MoreHorizontal, Superscript, Subscript, HelpCircle, Code
+  AlignJustify, Keyboard, MoreHorizontal, Superscript, Subscript, HelpCircle, Code, CodeXml, Table as TableIcon
 } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
 import SmilesPicker from './SmilesPicker';
@@ -18,7 +18,7 @@ const RichEditor = forwardRef(({
   showHide = true, smilesDropDirection = "up", smilesFullWidth = true, onSubmit,
   hideHotkeysButton = false, hideFooter = false, autoResize = false
 }, ref) => {
-  const { lang, t } = useI18n();
+  const { t } = useI18n();
 
   const textareaRef = useRef(null);
   const containerRef = useRef(null);
@@ -42,6 +42,8 @@ const RichEditor = forwardRef(({
   const [isSearchingUsers, setIsSearchingUsers] = useState(false);
   const [showColumnsModal, setShowColumnsModal] = useState(false);
   const [columnsData, setColumnsData] = useState({ count: 2, stack: '768' });
+  const [showTableModal, setShowTableModal] = useState(false);
+  const [tableData, setTableData] = useState({ rows: 3, cols: 2, layout: 'auto', width: '100%', border: '', noBorders: false });
   const [showHotkeysModal, setShowHotkeysModal] = useState(false);
   const [showSmilesModal, setShowSmilesModal] = useState(false);
   const [showAbbrModal, setShowAbbrModal] = useState(false);
@@ -193,7 +195,7 @@ const RichEditor = forwardRef(({
       before = '[quote]';
       after = '[/quote]';
     } else if (type === 'spoiler' && !before) {
-      const defaultTitle = lang === 'ru' ? 'Спойлер' : 'Spoiler';
+      const defaultTitle = t('editor.spoiler_default');
       before = `[spoiler="${defaultTitle}"]`;
       after = '[/spoiler]';
     } else if (type === 'bullet' && !before) {
@@ -231,9 +233,9 @@ const RichEditor = forwardRef(({
         replacement = before + (selected || '') + after;
       }
     } else if (type === 'size') {
-      replacement = `[size=${before}]${selected || (lang === 'ru' ? 'размер' : 'size')}[/size]`;
+      replacement = `[size=${before}]${selected || t('editor.size_placeholder')}[/size]`;
     } else if (type === 'color') {
-      replacement = `[color=${before}]${selected || (lang === 'ru' ? 'цвет' : 'color')}[/color]`;
+      replacement = `[color=${before}]${selected || t('editor.color_placeholder')}[/color]`;
     } else {
       replacement = before + selected + after;
     }
@@ -262,7 +264,7 @@ const RichEditor = forwardRef(({
           cursorStart = preText.length + (replacement.startsWith('\n') ? 1 : 0) + '[quote]'.length;
           cursorEnd = cursorStart;
         } else if (type === 'spoiler') {
-          const defaultTitle = lang === 'ru' ? 'Спойлер' : 'Spoiler';
+          const defaultTitle = t('editor.spoiler_default');
           cursorStart = preText.length + (replacement.startsWith('\n') ? 1 : 0) + `[spoiler="${defaultTitle}"]`.length;
           cursorEnd = cursorStart;
         } else if (before && after) {
@@ -298,7 +300,7 @@ const RichEditor = forwardRef(({
       { id: 'links', priority: 4, width: 45 },
       { id: 'typography', priority: 5, width: 100 },
       { id: 'align', priority: 6, width: 145 },
-      { id: 'inserts', priority: 7, width: 160 },
+      { id: 'inserts', priority: 7, width: 205 },
       { id: 'media', priority: 8, width: 85 },
       { id: 'advanced', priority: 9, width: (showHide ? 45 : 0) + (showDice && !isEdit ? 45 : 0) + 75 }
     ];
@@ -366,10 +368,10 @@ const RichEditor = forwardRef(({
         case 'KeyI': e.preventDefault(); insertText('[i]', '[/i]'); break;
         case 'KeyU': e.preventDefault(); insertText('[u]', '[/u]'); break;
         case 'KeyS': e.preventDefault(); insertText('[s]', '[/s]'); break;
-        case 'KeyL': e.preventDefault(); insertText('[left]', '[/left]'); break;
-        case 'KeyR': e.preventDefault(); insertText('[right]', '[/right]'); break;
-        case 'KeyE': e.preventDefault(); insertText('[center]', '[/center]'); break;
-        case 'KeyJ': e.preventDefault(); insertText('[justify]', '[/justify]'); break;
+        case 'KeyL': e.preventDefault(); insertText('[align=left]', '[/align]'); break;
+        case 'KeyR': e.preventDefault(); insertText('[align=right]', '[/align]'); break;
+        case 'KeyE': e.preventDefault(); insertText('[align=center]', '[/align]'); break;
+        case 'KeyJ': e.preventDefault(); insertText('[align=justify]', '[/align]'); break;
         case 'KeyK': e.preventDefault(); openLinkModal(); break;
         case 'KeyG': e.preventDefault(); insertText('', '', 'spoiler'); break;
         case 'KeyH': e.preventDefault(); openHideModal(); break;
@@ -652,6 +654,26 @@ const RichEditor = forwardRef(({
     setShowColumnsModal(false);
   };
 
+  const openTableModal = () => {
+    setTableData({ rows: 3, cols: 2, layout: 'auto', width: '100%', border: '', noBorders: false });
+    setShowTableModal(true);
+  };
+
+  const handleTableSubmit = () => {
+    const { rows, cols, layout, width, border, noBorders } = tableData;
+    let before = `[table${layout ? ` layout=${layout}` : ''}${width ? ` width=${width}` : ''}${noBorders ? ' border=0' : border ? ` border=${border}` : ''}]\n`;
+    for (let r = 0; r < rows; r++) {
+      before += `[tr]`;
+      for (let c = 0; c < cols; c++) {
+        before += `[td][/td]`;
+      }
+      before += `[/tr]\n`;
+    }
+    before += `[/table]`;
+    insertText(before, '', 'table');
+    setShowTableModal(false);
+  };
+
   // The mention picker.
 //
 // THIS USED TO BE `pb.collection('users').getList(1, 5, { filter: nickname ~ … })`
@@ -686,61 +708,61 @@ const handleUserSearch = async (queryText) => {
 
   const hotkeyGroups = [
     {
-      title: lang === 'ru' ? 'Форматирование' : 'Formatting',
+      title: t('editor.formatting'),
       items: [
-        { keys: 'Ctrl + B', desc: lang === 'ru' ? 'Жирный' : 'Bold' },
-        { keys: 'Ctrl + I', desc: lang === 'ru' ? 'Курсив' : 'Italic' },
-        { keys: 'Ctrl + U', desc: lang === 'ru' ? 'Подчёркнутый' : 'Underline' },
-        { keys: 'Ctrl + S', desc: lang === 'ru' ? 'Зачёркнутый' : 'Strikethrough' },
+        { keys: 'Ctrl + B', desc: t('editor.bold') },
+        { keys: 'Ctrl + I', desc: t('editor.italic') },
+        { keys: 'Ctrl + U', desc: t('editor.underline') },
+        { keys: 'Ctrl + S', desc: t('editor.strikethrough') },
       ],
     },
     {
-      title: lang === 'ru' ? 'Выравнивание' : 'Alignment',
+      title: t('editor.alignment'),
       items: [
-        { keys: 'Ctrl + L', desc: lang === 'ru' ? 'По левому краю' : 'Align Left' },
-        { keys: 'Ctrl + E', desc: lang === 'ru' ? 'По центру' : 'Align Center' },
-        { keys: 'Ctrl + R', desc: lang === 'ru' ? 'По правому краю' : 'Align Right' },
-        { keys: 'Ctrl + J', desc: lang === 'ru' ? 'По ширине' : 'Justify' },
+        { keys: 'Ctrl + L', desc: t('editor.align_left') },
+        { keys: 'Ctrl + E', desc: t('editor.align_center') },
+        { keys: 'Ctrl + R', desc: t('editor.align_right') },
+        { keys: 'Ctrl + J', desc: t('editor.justify') },
       ],
     },
     {
-      title: lang === 'ru' ? 'Вставки' : 'Inserts',
+      title: t('editor.inserts'),
       items: [
-        { keys: 'Ctrl + K', desc: lang === 'ru' ? 'Ссылка' : 'Link' },
-        { keys: 'Ctrl + G', desc: lang === 'ru' ? 'Спойлер' : 'Spoiler' },
-        { keys: 'Ctrl + H', desc: lang === 'ru' ? 'Скрыть' : 'Hide' },
-        { keys: 'Ctrl + Q', desc: lang === 'ru' ? 'Цитата' : 'Quote' },
-        { keys: 'Ctrl + [', desc: lang === 'ru' ? 'Блок кода' : 'Code Block' },
-        { keys: 'Ctrl + ]', desc: lang === 'ru' ? 'HTML-блок' : 'HTML Block' },
+        { keys: 'Ctrl + K', desc: t('editor.link') },
+        { keys: 'Ctrl + G', desc: t('editor.spoiler') },
+        { keys: 'Ctrl + H', desc: t('editor.hide') },
+        { keys: 'Ctrl + Q', desc: t('editor.quote') },
+        { keys: 'Ctrl + [', desc: t('editor.code_block') },
+        { keys: 'Ctrl + ]', desc: t('editor.html_block') },
       ],
     },
     {
-      title: lang === 'ru' ? 'Медиа и структура (Alt)' : 'Media & Structure (Alt)',
+      title: t('editor.media_structure'),
       items: [
-        { keys: 'Alt + V', desc: lang === 'ru' ? 'Видео' : 'Video' },
-        { keys: 'Alt + I', desc: lang === 'ru' ? 'Изображение' : 'Image' },
-        { keys: 'Alt + H', desc: lang === 'ru' ? 'Горизонтальная линия' : 'Horizontal Rule' },
-        { keys: 'Alt + T', desc: lang === 'ru' ? 'Таблица' : 'Table' },
-        { keys: 'Alt + L', desc: lang === 'ru' ? 'Обтекание слева' : 'Floating Left' },
-        { keys: 'Alt + R', desc: lang === 'ru' ? 'Обтекание справа' : 'Floating Right' },
+        { keys: 'Alt + V', desc: t('editor.video') },
+        { keys: 'Alt + I', desc: t('editor.image') },
+        { keys: 'Alt + H', desc: t('editor.horizontal_rule') },
+        { keys: 'Alt + T', desc: t('editor.table') },
+        { keys: 'Alt + L', desc: t('editor.float_left') },
+        { keys: 'Alt + R', desc: t('editor.float_right') },
       ],
     },
     {
-      title: lang === 'ru' ? 'Спец. блоки (Ctrl+Shift)' : 'Special Blocks (Ctrl+Shift)',
+      title: t('editor.special_blocks'),
       items: [
-        { keys: 'Ctrl + Shift + D', desc: lang === 'ru' ? 'Добавлено' : 'Added Block' },
-        { keys: 'Ctrl + Shift + A', desc: lang === 'ru' ? 'Информация' : 'Info Block' },
-        { keys: 'Ctrl + Shift + M', desc: lang === 'ru' ? 'Маркированный список' : 'Bullet List' },
+        { keys: 'Ctrl + Shift + D', desc: t('editor.added_block') },
+        { keys: 'Ctrl + Shift + A', desc: t('editor.info_block') },
+        { keys: 'Ctrl + Shift + M', desc: t('editor.bullet_list') },
       ],
     },
     {
-      title: lang === 'ru' ? 'Система' : 'System',
+      title: t('editor.system'),
       items: [
-        { keys: 'Ctrl + Z', desc: lang === 'ru' ? 'Отменить' : 'Undo' },
-        { keys: 'Ctrl + Y / Ctrl + Shift + Z', desc: lang === 'ru' ? 'Повторить' : 'Redo' },
-        { keys: 'Ctrl + Enter', desc: lang === 'ru' ? 'Отправить' : 'Submit' },
-        { keys: 'Shift + Tab', desc: lang === 'ru' ? 'Отступ (4 пробела)' : 'Indent (4 spaces)' },
-        { keys: 'Ctrl + /', desc: lang === 'ru' ? 'Показать эту справку' : 'Show this manual' },
+        { keys: 'Ctrl + Z', desc: t('editor.undo') },
+        { keys: 'Ctrl + Y / Ctrl + Shift + Z', desc: t('editor.redo') },
+        { keys: 'Ctrl + Enter', desc: t('editor.submit') },
+        { keys: 'Shift + Tab', desc: t('editor.indent') },
+        { keys: 'Ctrl + /', desc: t('editor.show_manual') },
       ],
     },
   ];
@@ -751,22 +773,22 @@ const handleUserSearch = async (queryText) => {
         return isOverflow ? (
           <>
             <Dropdown.Item onClick={() => insertText('[b]', '[/b]')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Bold size={16} /> {lang === 'ru' ? 'Жирный' : 'Bold'}
+              <Bold size={16} /> {t('editor.bold')}
             </Dropdown.Item>
             <Dropdown.Item onClick={() => insertText('[i]', '[/i]')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Italic size={16} /> {lang === 'ru' ? 'Курсив' : 'Italic'}
+              <Italic size={16} /> {t('editor.italic')}
             </Dropdown.Item>
             <Dropdown.Item onClick={() => insertText('[u]', '[/u]')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Underline size={16} /> {lang === 'ru' ? 'Подчёркнутый' : 'Underline'}
+              <Underline size={16} /> {t('editor.underline')}
             </Dropdown.Item>
             <Dropdown.Item onClick={() => insertText('[s]', '[/s]')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Strikethrough size={16} /> {lang === 'ru' ? 'Зачёркнутый' : 'Strikethrough'}
+              <Strikethrough size={16} /> {t('editor.strikethrough')}
             </Dropdown.Item>
             <Dropdown.Item onClick={() => insertText('[sup]', '[/sup]')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Superscript size={16} /> {lang === 'ru' ? 'Надстрочный' : 'Superscript'}
+              <Superscript size={16} /> {t('editor.superscript')}
             </Dropdown.Item>
             <Dropdown.Item onClick={() => insertText('[sub]', '[/sub]')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Subscript size={16} /> {lang === 'ru' ? 'Подстрочный' : 'Subscript'}
+              <Subscript size={16} /> {t('editor.subscript')}
             </Dropdown.Item>
             <Dropdown.Divider />
           </>
@@ -784,10 +806,10 @@ const handleUserSearch = async (queryText) => {
         return isOverflow ? (
           <>
             <Dropdown.Item onClick={handleUndo} disabled={historyIndex === 0} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Undo size={16} /> {lang === 'ru' ? 'Отменить (Ctrl+Z)' : 'Undo (Ctrl+Z)'}
+              <Undo size={16} /> {t('editor.undo_shortcut')}
             </Dropdown.Item>
             <Dropdown.Item onClick={handleRedo} disabled={historyIndex >= history.length - 1} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Redo size={16} /> {lang === 'ru' ? 'Повторить (Ctrl+Y)' : 'Redo (Ctrl+Y)'}
+              <Redo size={16} /> {t('editor.redo_shortcut')}
             </Dropdown.Item>
             <Dropdown.Divider />
           </>
@@ -800,7 +822,7 @@ const handleUserSearch = async (queryText) => {
       case 'smiles':
         return isOverflow ? (
           <Dropdown.Item onClick={() => setShowSmilesModal(true)} className="d-flex align-items-center gap-2 py-2 px-3">
-             <Smile size={16} /> {lang === 'ru' ? 'Смайлики' : 'Smiles'}
+             <Smile size={16} /> {t('editor.smiles')}
           </Dropdown.Item>
         ) : (
           <Dropdown className="d-inline-block" drop={smilesDropDirection}>
@@ -813,7 +835,7 @@ const handleUserSearch = async (queryText) => {
       case 'links':
         return isOverflow ? (
           <Dropdown.Item onClick={openLinkModal} className="d-flex align-items-center gap-2 py-2 px-3">
-            <LinkIcon size={16} /> {lang === 'ru' ? 'Ссылка' : 'Link'}
+            <LinkIcon size={16} /> {t('editor.link')}
           </Dropdown.Item>
         ) : (
           <Button variant="light" size="sm" className="p-1 px-2" onClick={openLinkModal} title="Link (Ctrl+K)"><LinkIcon size={16} /></Button>
@@ -822,10 +844,10 @@ const handleUserSearch = async (queryText) => {
         return isOverflow ? (
           <>
             <Dropdown.Item onClick={() => insertText('150%', '', 'size')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <ALargeSmall size={16} /> {lang === 'ru' ? 'Крупный текст' : 'Large Text'}
+              <ALargeSmall size={16} /> {t('editor.large_text')}
             </Dropdown.Item>
             <Dropdown.Item onClick={() => insertText('#ff0000', '', 'color')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Palette size={16} /> {lang === 'ru' ? 'Цвет текста' : 'Text Color'}
+              <Palette size={16} /> {t('editor.text_color')}
             </Dropdown.Item>
           </>
         ) : (
@@ -834,14 +856,14 @@ const handleUserSearch = async (queryText) => {
               <Dropdown.Toggle variant="light" size="sm" className="p-1 px-2 no-caret editor-dropdown-toggle" title="Size"><ALargeSmall size={19} /></Dropdown.Toggle>
               <Dropdown.Menu className="size-picker-menu shadow-sm border-0" style={{ maxHeight: '250px', overflowY: 'auto' }}>
                 <Dropdown.Header className="px-3 py-1 font-monospace text-uppercase" style={{ fontSize: '0.7rem', opacity: 0.7 }}>
-                  {lang === 'ru' ? 'Проценты' : 'Percent'}
+                  {t('editor.smiles_percent')}
                 </Dropdown.Header>
                 {[{label:'50%',v:'50%'},{label:'85%',v:'85%'},{label:'100%',v:'100%'},{label:'120%',v:'120%'},{label:'150%',v:'150%'},{label:'200%',v:'200%'}].map(s=>(
                   <Dropdown.Item key={s.v} onClick={()=>insertText(s.v,'','size')} className="small py-1 px-3"><span style={{fontSize:s.v}}>{s.label}</span></Dropdown.Item>
                 ))}
                 <Dropdown.Divider />
                 <Dropdown.Header className="px-3 py-1 font-monospace text-uppercase" style={{ fontSize: '0.7rem', opacity: 0.7 }}>
-                  {lang === 'ru' ? 'Пиксели' : 'Pixels'}
+                  {t('editor.smiles_pixels')}
                 </Dropdown.Header>
                 {[{label:'9px',v:'9'},{label:'11px',v:'11'},{label:'12px',v:'12'},{label:'14px',v:'14'},{label:'16px',v:'16'},{label:'18px',v:'18'},{label:'20px',v:'20'},{label:'24px',v:'24'}].map(s=>(
                   <Dropdown.Item key={s.v} onClick={()=>insertText(s.v,'','size')} className="small py-1 px-3"><span style={{fontSize:`${s.v}px`}}>{s.label}</span></Dropdown.Item>
@@ -863,56 +885,68 @@ const handleUserSearch = async (queryText) => {
       case 'align':
         return isOverflow ? (
           <>
-            <Dropdown.Item onClick={() => insertText('[left]', '[/left]')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <AlignLeft size={16} /> {lang === 'ru' ? 'По левому краю' : 'Align Left'}
+            <Dropdown.Item onClick={() => insertText('[align=left]', '[/align]')} className="d-flex align-items-center gap-2 py-2 px-3">
+              <AlignLeft size={16} /> {t('editor.align_left')}
             </Dropdown.Item>
-            <Dropdown.Item onClick={() => insertText('[center]', '[/center]')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <AlignCenter size={16} /> {lang === 'ru' ? 'По центру' : 'Align Center'}
+            <Dropdown.Item onClick={() => insertText('[align=center]', '[/align]')} className="d-flex align-items-center gap-2 py-2 px-3">
+              <AlignCenter size={16} /> {t('editor.align_center')}
             </Dropdown.Item>
-            <Dropdown.Item onClick={() => insertText('[right]', '[/right]')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <AlignRight size={16} /> {lang === 'ru' ? 'По правому краю' : 'Align Right'}
+            <Dropdown.Item onClick={() => insertText('[align=right]', '[/align]')} className="d-flex align-items-center gap-2 py-2 px-3">
+              <AlignRight size={16} /> {t('editor.align_right')}
             </Dropdown.Item>
             <Dropdown.Divider />
           </>
         ) : (
           <div className="d-flex align-items-center gap-1">
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[left]', '[/left]')} title="Left"><AlignLeft size={16} /></Button>
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[center]', '[/center]')} title="Center"><AlignCenter size={16} /></Button>
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[right]', '[/right]')} title="Right"><AlignRight size={16} /></Button>
+            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[align=left]', '[/align]')} title="Left"><AlignLeft size={16} /></Button>
+            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[align=center]', '[/align]')} title="Center"><AlignCenter size={16} /></Button>
+            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[align=right]', '[/align]')} title="Right"><AlignRight size={16} /></Button>
           </div>
         );
       case 'inserts':
         return isOverflow ? (
           <>
             <Dropdown.Item onClick={() => insertText('', '', 'quote')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Quote size={16} /> {lang === 'ru' ? 'Цитата' : 'Quote'}
+              <Quote size={16} /> {t('editor.quote')}
             </Dropdown.Item>
             <Dropdown.Item onClick={() => insertText('', '', 'spoiler')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Clapperboard size={16} /> {lang === 'ru' ? 'Спойлер' : 'Spoiler'}
+              <Clapperboard size={16} /> {t('editor.spoiler')}
             </Dropdown.Item>
             <Dropdown.Item onClick={openAbbrModal} className="d-flex align-items-center gap-2 py-2 px-3">
-              <HelpCircle size={16} /> {lang === 'ru' ? 'Аббревиатура / Подсказка' : 'Abbreviation / Tooltip'}
+              {t('editor.abbreviation')}
+            </Dropdown.Item>
+            <Dropdown.Item onClick={() => insertText('[code]', '[/code]', 'code')} className="d-flex align-items-center gap-2 py-2 px-3">
+              <Code size={16} /> {t('editor.code_block')}
             </Dropdown.Item>
             <Dropdown.Item onClick={() => insertText('[html]', '[/html]')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Code size={16} /> HTML
+              <CodeXml size={16} /> HTML
             </Dropdown.Item>
           </>
         ) : (
           <div className="d-flex align-items-center gap-1">
             <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('', '', 'quote')} title="Quote"><Quote size={16} /></Button>
             <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('', '', 'spoiler')} title="Spoiler"><Clapperboard size={15} /></Button>
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={openAbbrModal} title={lang === 'ru' ? 'Аббревиатура / Подсказка' : 'Abbreviation / Tooltip'}><HelpCircle size={16} /></Button>
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[html]', '[/html]')} title="HTML"><Code size={16} /></Button>
+            <Button variant="light" size="sm" className="p-1 px-2" onClick={openAbbrModal} title={t('editor.abbreviation')}><HelpCircle size={16} /></Button>
+            <Button
+              variant="light"
+              size="sm"
+              className="p-1 px-2"
+              onClick={() => insertText('[code]', '[/code]', 'code')}
+              title={t('editor.code_block')}
+            >
+              <Code size={16} />
+            </Button>
+            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[html]', '[/html]')} title="HTML"><CodeXml size={16} /></Button>
           </div>
         );
       case 'media':
         return isOverflow ? (
           <>
             <Dropdown.Item onClick={() => setShowImageModal(true)} className="d-flex align-items-center gap-2 py-2 px-3">
-              <ImageIcon size={16} /> {lang === 'ru' ? 'Изображение' : 'Image'}
+              <ImageIcon size={16} /> {t('editor.image')}
             </Dropdown.Item>
             <Dropdown.Item onClick={() => insertText('[video]', '[/video]')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Youtube size={16} /> {lang === 'ru' ? 'Видео' : 'Video'}
+              <Youtube size={16} /> {t('editor.video')}
             </Dropdown.Item>
           </>
         ) : (
@@ -925,32 +959,36 @@ const handleUserSearch = async (queryText) => {
         return isOverflow ? (
           <>
             <Dropdown.Item onClick={() => setShowColumnsModal(true)} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Columns size={16} /> {lang === 'ru' ? 'Колонки' : 'Columns'}
+              <Columns size={16} /> {t('editor.columns')}
+            </Dropdown.Item>
+            <Dropdown.Item onClick={openTableModal} className="d-flex align-items-center gap-2 py-2 px-3">
+              <TableIcon size={16} /> {t('editor.table')}
             </Dropdown.Item>
             {showHide && (
               <Dropdown.Item onClick={openHideModal} className="d-flex align-items-center gap-2 py-2 px-3">
-                <EyeOff size={16} /> {lang === 'ru' ? 'Скрыть под хайдом' : 'Hide'}
+                <EyeOff size={16} /> {t('editor.hide')}
               </Dropdown.Item>
             )}
             {showDice && !isEdit && (
               <Dropdown.Item onClick={() => setShowDiceModal(true)} className="d-flex align-items-center gap-2 py-2 px-3">
-                <Dices size={16} /> {lang === 'ru' ? 'Бросить кубик' : 'Roll Dice'}
+                <Dices size={16} /> {t('editor.dice_roll_btn')}
               </Dropdown.Item>
             )}
             <Dropdown.Item onClick={() => insertText('[hr]', '')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Minus size={16} /> {lang === 'ru' ? 'Разделительная линия' : 'HR'}
+              <Minus size={16} /> {t('editor.hr')}
             </Dropdown.Item>
           </>
         ) : (
           <div className="d-flex align-items-center gap-1">
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => setShowColumnsModal(true)} title="Columns"><Columns size={16} /></Button>
+            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => setShowColumnsModal(true)} title={t('editor.columns')}><Columns size={16} /></Button>
+            <Button variant="light" size="sm" className="p-1 px-2" onClick={openTableModal} title={t('editor.table')}> <TableIcon size={16} /></Button>
             {showHide && (
-              <Button variant="light" size="sm" className="p-1 px-2" onClick={openHideModal} title="Hide"><EyeOff size={16} /></Button>
+              <Button variant="light" size="sm" className="p-1 px-2" onClick={openHideModal} title={t('editor.hide')}><EyeOff size={16} /></Button>
             )}
             {showDice && !isEdit && (
-              <Button variant="light" size="sm" className="p-1 px-2" onClick={() => setShowDiceModal(true)} title="Roll Dice"><Dices size={16} /></Button>
+              <Button variant="light" size="sm" className="p-1 px-2" onClick={() => setShowDiceModal(true)} title={t('editor.roll_dice')}><Dices size={16} /></Button>
             )}
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[hr]', '')} title="HR"><Minus size={16} /></Button>
+            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[hr]', '')} title={t('editor.hr')}><Minus size={16} /></Button>
           </div>
         );
       default: return null;
@@ -983,13 +1021,13 @@ const handleUserSearch = async (queryText) => {
                 size="sm"
                 className="p-1 px-2 editor-more-tools-btn"
                 onClick={() => setShowMoreToolsModal(true)}
-                title={lang === 'ru' ? 'Дополнительные коды' : 'More tools'}
+                title={t('editor.additional_formatting_title')}
               >
                 <MoreHorizontal size={18} />
               </Button>
             ) : (
               <Dropdown className="d-inline-block">
-                <Dropdown.Toggle variant="light" size="sm" className="p-1 px-2 no-caret editor-dropdown-toggle" title={lang === 'ru' ? 'Дополнительно' : 'More'}>
+                <Dropdown.Toggle variant="light" size="sm" className="p-1 px-2 no-caret editor-dropdown-toggle" title={t('editor.additional_formatting_title')}>
                   <MoreHorizontal size={18} />
                 </Dropdown.Toggle>
                 <Dropdown.Menu
@@ -1015,7 +1053,7 @@ const handleUserSearch = async (queryText) => {
         {/* Far Right: Manual */}
         {!hideHotkeysButton && (
           <div className="ms-auto flex-shrink-0">
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => setShowHotkeysModal(true)} title={lang === 'ru' ? 'Горячие клавиши (Ctrl+/)' : 'Hotkeys (Ctrl+/)'}>
+            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => setShowHotkeysModal(true)} title={t('editor.hotkeys')}>
               <Keyboard size={18} />
             </Button>
           </div>
@@ -1041,12 +1079,12 @@ const handleUserSearch = async (queryText) => {
       {!hideFooter && (
         <div className="d-flex justify-content-between mt-2 px-1">
           <Form.Text className="text-muted small">
-            {lang === 'ru' ? 'Поддерживается BBCode' : 'BBCode is supported'}.
+            {t('forum.bbcode_supported')}
           </Form.Text>
           <Form.Text className={`${maxLength && value?.length >= maxLength ? 'text-danger' : 'text-muted'} fw-bold small`}>
             {maxLength > 0
               ? `${value?.length || 0} / ${maxLength}`
-              : `${lang === 'ru' ? 'Символов: ' : 'Chars: '}${value?.length || 0}`
+              : `${t('forum.chars')} ${value?.length || 0}`
             }
           </Form.Text>
         </div>
@@ -1055,25 +1093,25 @@ const handleUserSearch = async (queryText) => {
       <ForumModal
         show={showLinkModal}
         onHide={() => closeModalWithFocus(setShowLinkModal)}
-        title={lang === 'ru' ? 'Вставить ссылку' : 'Insert Link'}
+        title={t('editor.link_modal_title')}
         footer={
           <>
             <Button variant="outline-secondary" onClick={() => closeModalWithFocus(setShowLinkModal)}>
-              {lang === 'ru' ? 'Отмена' : 'Cancel'}
+              {t('editor.link_cancel')}
             </Button>
             <Button variant="primary" onClick={handleLinkSubmit}>
-              {lang === 'ru' ? 'Вставить' : 'Insert'}
+              {t('editor.link_insert')}
             </Button>
           </>
         }
       >
         <Form.Group className="mb-3">
-          <Form.Label>{lang === 'ru' ? 'Текст ссылки' : 'Link Text'}</Form.Label>
+          <Form.Label>{t('editor.link_text_label')}</Form.Label>
           <Form.Control
             type="text"
             value={linkData.text}
             onChange={e => setLinkData({ ...linkData, text: e.target.value })}
-            placeholder={lang === 'ru' ? 'Текст...' : 'Text...'}
+            placeholder={t('editor.link_text_placeholder')}
           />
         </Form.Group>
         <Form.Group>
@@ -1092,35 +1130,35 @@ const handleUserSearch = async (queryText) => {
       <ForumModal
         show={showAbbrModal}
         onHide={() => closeModalWithFocus(setShowAbbrModal)}
-        title={lang === 'ru' ? 'Вставить аббревиатуру / подсказку' : 'Insert Abbreviation / Tooltip'}
+        title={t('editor.abbr_modal_title')}
         footer={
           <>
             <Button variant="outline-secondary" onClick={() => closeModalWithFocus(setShowAbbrModal)}>
-              {lang === 'ru' ? 'Отмена' : 'Cancel'}
+              {t('editor.link_cancel')}
             </Button>
             <Button variant="primary" onClick={handleAbbrSubmit}>
-              {lang === 'ru' ? 'Вставить' : 'Insert'}
+              {t('editor.link_insert')}
             </Button>
           </>
         }
       >
         <Form.Group className="mb-3">
-          <Form.Label>{lang === 'ru' ? 'Текст' : 'Text'}</Form.Label>
+          <Form.Label>{t('editor.abbr_text_label')}</Form.Label>
           <Form.Control
             type="text"
             value={abbrData.text}
             onChange={e => setAbbrData({ ...abbrData, text: e.target.value })}
-            placeholder={lang === 'ru' ? 'Слово или текст...' : 'Word or text...'}
+            placeholder={t('editor.abbr_text_placeholder')}
             autoFocus
           />
         </Form.Group>
         <Form.Group>
-          <Form.Label>{lang === 'ru' ? 'Описание / Подсказка' : 'Description / Tooltip'}</Form.Label>
+          <Form.Label>{t('editor.abbr_title_label')}</Form.Label>
           <Form.Control
             type="text"
             value={abbrData.title}
             onChange={e => setAbbrData({ ...abbrData, title: e.target.value })}
-            placeholder={lang === 'ru' ? 'Значение или описание...' : 'Definition or explanation...'}
+            placeholder={t('editor.abbr_title_placeholder')}
             required
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAbbrSubmit(e); } }}
           />
@@ -1130,38 +1168,38 @@ const handleUserSearch = async (queryText) => {
       <ForumModal
         show={showImageModal}
         onHide={() => closeModalWithFocus(setShowImageModal)}
-        title={lang === 'ru' ? 'Вставить изображение' : 'Insert Image'}
+        title={t('editor.image_modal_title')}
         footer={
           <>
             <Button variant="outline-secondary" onClick={() => closeModalWithFocus(setShowImageModal)}>
-              {lang === 'ru' ? 'Отмена' : 'Cancel'}
+              {t('editor.link_cancel')}
             </Button>
             <Button variant="primary" onClick={handleImageSubmit}>
-              {lang === 'ru' ? 'Вставить' : 'Insert'}
+              {t('editor.link_insert')}
             </Button>
           </>
         }
       >
         <Form.Group className="mb-3">
-          <Form.Label>{lang === 'ru' ? 'Описание (alt)' : 'Description (alt)'}</Form.Label>
+          <Form.Label>{t('editor.image_alt_label')}</Form.Label>
           <Form.Control
             type="text"
             value={imageData.alt}
             onChange={e => setImageData({ ...imageData, alt: e.target.value })}
-            placeholder={lang === 'ru' ? 'Описание...' : 'Description...'}
+            placeholder={t('editor.image_alt_placeholder')}
           />
         </Form.Group>
         <Form.Group className="mb-3">
-          <Form.Label>{lang === 'ru' ? 'Ширина (px или %)' : 'Width (px or %)'}</Form.Label>
+          <Form.Label>{t('editor.image_width_label')}</Form.Label>
           <Form.Control
             type="text"
             value={imageData.width || ''}
             onChange={e => setImageData({ ...imageData, width: e.target.value })}
-            placeholder={lang === 'ru' ? 'Например: 100px или 50%' : 'e.g. 100px or 50%'}
+            placeholder={t('editor.image_width_placeholder')}
           />
         </Form.Group>
         <Form.Group>
-          <Form.Label>{lang === 'ru' ? 'Ссылка на изображение' : 'Image URL'}</Form.Label>
+          <Form.Label>{t('editor.image_url_label')}</Form.Label>
           <Form.Control
             type="url"
             value={imageData.url}
@@ -1176,26 +1214,24 @@ const handleUserSearch = async (queryText) => {
       <ForumModal
         show={showDiceModal}
         onHide={() => closeModalWithFocus(setShowDiceModal)}
-        title={lang === 'ru' ? 'Бросить кубик' : 'Roll Dice'}
+        title={t('editor.dice_modal_title')}
         footer={
           <>
             <Button variant="outline-secondary" onClick={() => closeModalWithFocus(setShowDiceModal)}>
-              {lang === 'ru' ? 'Отмена' : 'Cancel'}
+              {t('editor.link_cancel')}
             </Button>
             <Button variant="primary" onClick={handleDiceSubmit}>
-              {lang === 'ru' ? 'Бросить' : 'Roll'}
+              {t('editor.dice_roll')}
             </Button>
           </>
         }
       >
         <div className="alert alert-info py-2" style={{ fontSize: '0.875rem' }}>
-          {lang === 'ru'
-            ? 'Кубики нельзя менять после публикации. Для нового броска нужно создать новый пост.'
-            : 'Dice rolls cannot be changed after publication. To roll again, create a new post.'}
+          {t('editor.dice_immutable')}
         </div>
 
         <Form.Group className="mb-3">
-          <Form.Label>{lang === 'ru' ? 'Выберите кубик' : 'Select dice'}</Form.Label>
+          <Form.Label>{t('editor.dice_select_label')}</Form.Label>
           <Form.Select
             value={diceData.sides}
             onChange={e => setDiceData({ ...diceData, sides: parseInt(e.target.value) })}
@@ -1210,22 +1246,20 @@ const handleUserSearch = async (queryText) => {
             <option value="100">d100</option>
           </Form.Select>
           <Form.Text className="text-muted small mt-1 d-block">
-            {lang === 'ru'
-              ? 'Выберите тип кубика для броска. Результат будет сгенерирован при публикации.'
-              : 'Choose the dice type for your roll. The result will be generated upon publication.'}
+            {t('editor.dice_type_hint')}
           </Form.Text>
         </Form.Group>
 
         {!hideDiceType && (
           <Form.Group className="mb-3">
-            <Form.Label>{lang === 'ru' ? 'Тип броска' : 'Roll type'}</Form.Label>
+            <Form.Label>{t('editor.dice_type_label')}</Form.Label>
             <Form.Select
               value={diceData.type}
               onChange={e => setDiceData({ ...diceData, type: e.target.value })}
               className="form-select-themed"
             >
-              <option value="normal">{lang === 'ru' ? 'Обычный (видят все)' : 'Normal (visible to all)'}</option>
-              <option value="master">{lang === 'ru' ? 'Мастерский (только GM)' : 'Master (GM only)'}</option>
+              <option value="normal">{t('editor.dice_normal')}</option>
+              <option value="master">{t('editor.dice_master')}</option>
             </Form.Select>
           </Form.Group>
         )}
@@ -1238,7 +1272,7 @@ const handleUserSearch = async (queryText) => {
         footer={
           <>
             <Button variant="outline-secondary" onClick={() => closeModalWithFocus(setShowHideModal)}>
-              {lang === 'ru' ? 'Отмена' : 'Cancel'}
+              {t('editor.link_cancel')}
             </Button>
             <Button variant="primary" onClick={handleHideSubmit}>
               {t('editor.hide_insert')}
@@ -1277,7 +1311,7 @@ const handleUserSearch = async (queryText) => {
             <Form.Check
               type="radio"
               id="hide-type-user"
-              label={lang === 'ru' ? 'Адресный (для конкретного пользователя)' : 'Addressed (for a specific user)'}
+              label={t('editor.hide_addressed_label')}
               name="hideType"
               checked={hideData.type === 'user'}
               onChange={() => setHideData(prev => ({ ...prev, type: 'user' }))}
@@ -1287,13 +1321,13 @@ const handleUserSearch = async (queryText) => {
               <div className="ms-4 mb-3 position-relative">
                 <Form.Control
                   type="text"
-                  placeholder={lang === 'ru' ? 'Введите никнейм...' : 'Type a nickname...'}
+                  placeholder={t('editor.hide_username_placeholder')}
                   value={hideData.username}
                   onChange={(e) => handleUserSearch(e.target.value)}
                   className="modal-section-themed"
                   autoComplete="off"
                 />
-                {isSearchingUsers && <div className="small text-muted mt-1">{lang === 'ru' ? 'Поиск...' : 'Searching...'}</div>}
+                {isSearchingUsers && <div className="small text-muted mt-1">{t('editor.hide_searching')}</div>}
                 {!isSearchingUsers && userSearchResults.length > 0 && (
                   <div className="position-absolute w-100 mt-1 shadow-sm rounded border bg-white" style={{ zIndex: 1000, maxHeight: '200px', overflowY: 'auto' }}>
                     {userSearchResults.map(u => (
@@ -1318,7 +1352,7 @@ const handleUserSearch = async (queryText) => {
                 )}
                 {hideData.uid && (
                   <div className="small text-success mt-1">
-                    {lang === 'ru' ? 'Пользователь выбран.' : 'User selected.'}
+                    {t('editor.hide_user_selected')}
                   </div>
                 )}
               </div>
@@ -1336,9 +1370,7 @@ const handleUserSearch = async (queryText) => {
             />
           </div>
           <p className="small text-muted mb-0">
-            {lang === 'ru'
-              ? 'Текст внутри тега будет скрыт от пользователей, не соответствующих условиям. Администраторы всегда видят скрытый контент.'
-              : 'Text inside the tag will be hidden from users who do not meet the requirements. Administrators can always see hidden content.'}
+            {t('editor.hide_hidden_hint')}
           </p>
         </Form>
       </ForumModal>
@@ -1346,20 +1378,20 @@ const handleUserSearch = async (queryText) => {
       <ForumModal
         show={showColumnsModal}
         onHide={() => closeModalWithFocus(setShowColumnsModal)}
-        title={lang === 'ru' ? 'Настройка колонок' : 'Columns Setup'}
+        title={t('editor.columns_modal_title')}
         footer={
           <>
             <Button variant="outline-secondary" onClick={() => closeModalWithFocus(setShowColumnsModal)}>
-              {lang === 'ru' ? 'Отмена' : 'Cancel'}
+              {t('editor.link_cancel')}
             </Button>
             <Button variant="primary" onClick={handleColumnsSubmit}>
-              {lang === 'ru' ? 'Применить' : 'Apply'}
+              {t('editor.columns_apply')}
             </Button>
           </>
         }
       >
         <Form.Group className="mb-3">
-          <Form.Label>{lang === 'ru' ? 'Количество колонок' : 'Number of Columns'}</Form.Label>
+          <Form.Label>{t('editor.columns_count_label')}</Form.Label>
           <Form.Select
             value={columnsData.count}
             onChange={(e) => setColumnsData({ ...columnsData, count: parseInt(e.target.value) })}
@@ -1371,21 +1403,124 @@ const handleUserSearch = async (queryText) => {
         </Form.Group>
 
         <Form.Group className="mb-3">
-          <Form.Label>{lang === 'ru' ? 'Адаптивность (Stack)' : 'Adaptability (Stack)'}</Form.Label>
+          <Form.Label>{t('editor.columns_stack_label')}</Form.Label>
           <Form.Select
             value={columnsData.stack}
             onChange={(e) => setColumnsData({ ...columnsData, stack: e.target.value })}
           >
-            <option value="0">{lang === 'ru' ? 'Никогда не переносить (в ряд)' : 'Never stack (always row)'}</option>
-            <option value="576">{lang === 'ru' ? 'Мобильный (576px)' : 'Mobile (576px)'}</option>
-            <option value="768">{lang === 'ru' ? 'Планшет (768px)' : 'Tablet (768px)'}</option>
-            <option value="992">{lang === 'ru' ? 'Десктоп (992px)' : 'Desktop (992px)'}</option>
-            <option value="9999">{lang === 'ru' ? 'Всегда переносить (в колонку)' : 'Always stack (column)'}</option>
+            <option value="0">{t('editor.columns_never')}</option>
+            <option value="576">{t('editor.columns_mobile')}</option>
+            <option value="768">{t('editor.columns_tablet')}</option>
+            <option value="992">{t('editor.columns_desktop')}</option>
+            <option value="9999">{t('editor.columns_always')}</option>
           </Form.Select>
           <Form.Text className="text-muted small mt-1 d-block">
-            {lang === 'ru'
-              ? 'Параметр Stack определяет ширину экрана, при которой колонки выстраиваются вертикально друг под другом. 768px — стандарт для планшетов.'
-              : 'Stack parameter defines the screen width at which columns will collapse into a vertical list. 768px is recommended for most cases.'}
+            {t('editor.columns_hint')}
+          </Form.Text>
+        </Form.Group>
+      </ForumModal>
+
+      <ForumModal
+        show={showTableModal}
+        onHide={() => closeModalWithFocus(setShowTableModal)}
+        title={t('editor.table_modal_title')}
+        footer={
+          <>
+            <Button variant="outline-secondary" onClick={() => closeModalWithFocus(setShowTableModal)}>
+              {t('editor.link_cancel')}
+            </Button>
+            <Button variant="primary" onClick={handleTableSubmit}>
+              {t('editor.table_apply')}
+            </Button>
+          </>
+        }
+      >
+        <Form.Group className="mb-3">
+          <Form.Label>{t('editor.table_rows_label')}</Form.Label>
+          <Form.Select
+            value={tableData.rows}
+            onChange={(e) => setTableData({ ...tableData, rows: parseInt(e.target.value) })}
+          >
+            <option value={1}>1</option>
+            <option value={2}>2</option>
+            <option value={3}>3</option>
+            <option value={4}>4</option>
+            <option value={5}>5</option>
+            <option value={6}>6</option>
+            <option value={7}>7</option>
+            <option value={8}>8</option>
+            <option value={9}>9</option>
+            <option value={10}>10</option>
+          </Form.Select>
+        </Form.Group>
+
+        <Form.Group className="mb-3">
+          <Form.Label>{t('editor.table_cols_label')}</Form.Label>
+          <Form.Select
+            value={tableData.cols}
+            onChange={(e) => setTableData({ ...tableData, cols: parseInt(e.target.value) })}
+          >
+            <option value={1}>1</option>
+            <option value={2}>2</option>
+            <option value={3}>3</option>
+            <option value={4}>4</option>
+            <option value={5}>5</option>
+            <option value={6}>6</option>
+            <option value={7}>7</option>
+            <option value={8}>8</option>
+            <option value={9}>9</option>
+            <option value={10}>10</option>
+          </Form.Select>
+        </Form.Group>
+
+        <Form.Group className="mb-3">
+          <Form.Label>{t('editor.table_layout_label')}</Form.Label>
+          <Form.Select
+            value={tableData.layout}
+            onChange={(e) => setTableData({ ...tableData, layout: e.target.value })}
+          >
+            <option value="auto">{t('editor.table_layout_auto')}</option>
+            <option value="fixed">{t('editor.table_layout_fixed')}</option>
+            <option value="revert">{t('editor.table_layout_revert')}</option>
+          </Form.Select>
+        </Form.Group>
+
+        <Form.Group className="mb-3">
+          <Form.Label>{t('editor.table_width_label')}</Form.Label>
+          <Form.Control
+            type="text"
+            value={tableData.width}
+            onChange={(e) => setTableData({ ...tableData, width: e.target.value })}
+            placeholder="100%"
+          />
+          <Form.Text className="text-muted small mt-1 d-block">
+            {t('editor.table_width_hint')}
+          </Form.Text>
+        </Form.Group>
+
+        <Form.Group className="mb-3">
+          <Form.Label>{t('editor.table_border_label')}</Form.Label>
+          <Form.Control
+            type="text"
+            value={tableData.border}
+            onChange={(e) => setTableData({ ...tableData, border: e.target.value })}
+            placeholder="#cccccc"
+          />
+          <Form.Text className="text-muted small mt-1 d-block">
+            {t('editor.table_border_hint')}
+          </Form.Text>
+        </Form.Group>
+
+        <Form.Group className="mb-3">
+          <Form.Check
+            type="checkbox"
+            id="table-no-borders"
+            label={t('editor.table_no_borders')}
+            checked={tableData.noBorders}
+            onChange={(e) => setTableData({ ...tableData, noBorders: e.target.checked })}
+          />
+          <Form.Text className="text-muted small mt-1 d-block">
+            {t('editor.table_no_borders_hint')}
           </Form.Text>
         </Form.Group>
       </ForumModal>
@@ -1394,17 +1529,15 @@ const handleUserSearch = async (queryText) => {
       <ForumModal
         show={showHotkeysModal}
         onHide={() => closeModalWithFocus(setShowHotkeysModal)}
-        title={lang === 'ru' ? 'Горячие клавиши' : 'Keyboard Shortcuts'}
+        title={t('editor.hotkeys_modal_title')}
         footer={
           <Button variant="primary" onClick={() => closeModalWithFocus(setShowHotkeysModal)}>
-            {lang === 'ru' ? 'Закрыть' : 'Close'}
+            {t('editor.hotkeys_close')}
           </Button>
         }
       >
         <p className="small text-muted mb-3">
-          {lang === 'ru'
-            ? 'Полный список сочетаний клавиш, доступных в редакторе. Нажмите Ctrl + / в любой момент, чтобы открыть эту справку.'
-            : 'Full list of keyboard shortcuts available in the editor. Press Ctrl + / at any time to reopen this manual.'}
+          {t('editor.hotkeys_hint')}
         </p>
 
         {hotkeyGroups.map((group) => (
@@ -1430,7 +1563,7 @@ const handleUserSearch = async (queryText) => {
       <ForumModal
         show={showSmilesModal}
         onHide={() => setShowSmilesModal(false)}
-        title={lang === 'ru' ? 'Выбор смайлика' : 'Select a smile'}
+        title={t('editor.smiles_modal_title')}
         size="md"
       >
         <div style={{ minHeight: '300px' }}>
@@ -1445,7 +1578,7 @@ const handleUserSearch = async (queryText) => {
       <ForumModal
         show={showMoreToolsModal}
         onHide={() => closeModalWithFocus(setShowMoreToolsModal)}
-        title={lang === 'ru' ? 'Дополнительные коды' : 'Additional Formatting'}
+        title={t('editor.additional_formatting_title')}
         size="md"
       >
         <div 

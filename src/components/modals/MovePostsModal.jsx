@@ -24,7 +24,8 @@ const stripBBCode = (text = '') =>
  *   onHide          {() => void}
  *   posts           {Array}   – Posts on the current page, sorted chronologically
  *   startIndex      {number}  – Starting post number for the current page (e.g. 1, 21, 41)
- *   firstPostId     {string}  – ID of the first post (cannot be moved)
+ *   firstPostId     {string}  – ID of the topic's opening post (marked: the
+ *                                next post becomes the opener when it moves)
  *   currentTopicId  {string}  – ID of the current topic (excluded from target list)
  *   onConfirm       {async (postIds: string[], targetTopicId: string) => void}
  */
@@ -267,7 +268,7 @@ const MovePostsModal = ({
                   <div className="flex-grow-1 overflow-hidden">
                     <div className="d-flex align-items-baseline gap-2 flex-wrap">
                       <span className="fw-semibold" style={{ fontSize: '0.82rem' }}>
-                        {post.author_name}
+                        {post.author?.display_name}
                       </span>
                       {isFirst && (
                         <span className="text-warning fw-semibold" style={{ fontSize: '0.72rem' }}>

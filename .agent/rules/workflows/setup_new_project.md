@@ -2,7 +2,13 @@
 description: how to deploy a new Aerun Forum instance
 ---
 
-# Setup a New Aerun Forum Instance
+> ⚠️ **ОТРЕДАКТИВНО / LEGACY FIREBASE**
+> Этот файл описывает развёртывание нового проекта на **Firebase**, которое больше не актуально.
+> Проект переведён на **Go 1.27 + PocketBase (SQLite)**.
+> **Не использовать как руководство для текущих задач.**
+> Актуальная документация: `DEPLOY.md`, `backend/deploy/README.md`.
+
+# Setup a New Aerun Forum Instance [ОТРЕДАКТИВНО / LEGACY FIREBASE]
 
 Follow these steps to deploy and initialize a new forum instance from scratch.
 

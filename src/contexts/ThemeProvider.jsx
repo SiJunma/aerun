@@ -1,45 +1,54 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { useAuth } from './AuthProvider';
+import { makeStorageKey } from '../utils/storageScope';
 
 const ThemeContext = createContext();
 
 export const useTheme = () => useContext(ThemeContext);
 
 export const ThemeProvider = ({ children }) => {
-  const { profile, settings } = useAuth();
+  const { profile, settings, updateSettings } = useAuth();
 
   const getFallbackTheme = useCallback(() => {
     if (settings?.defaultDesignId && ['light', 'dark', 'neutral'].includes(settings.defaultDesignId)) {
       return settings.defaultDesignId;
     }
     return 'dark';
-  }, [settings?.defaultDesignId]);
+  }, [settings]);
 
-  const [theme, setTheme] = useState(() => {
-    return localStorage.getItem('guest_theme') || getFallbackTheme();
-  });
+  const readGuestTheme = useCallback(() => {
+    return localStorage.getItem(makeStorageKey('guest_theme', 'guest'));
+  }, []);
 
-  // Sync the active theme with the signed-in member's preference during render
-  // instead of inside an effect: `profile.settings.theme` is the source of truth
-  // when present, otherwise the guest/fallback theme applies. Doing it here (a
-  // state adjustment on a changed source, React's documented pattern) avoids the
-  // cascading render the old effect triggered on every mount.
-  const themeSource = profile?.settings?.theme || null;
-  const [prevThemeSource, setPrevThemeSource] = useState(themeSource);
-  if (themeSource !== prevThemeSource) {
-    setPrevThemeSource(themeSource);
-    setTheme(themeSource || localStorage.getItem('guest_theme') || getFallbackTheme());
-  }
+  const serverTheme = profile?.settings?.theme || null;
 
-  // Persist the member's own theme choice to the guest store so it survives a
-  // reload. Kept as a pure side-effect here (no setState), so it is not a
-  // cascading render.
+  const initialTheme = useCallback(() => {
+    if (serverTheme) return serverTheme;
+    return readGuestTheme() || getFallbackTheme();
+  }, [serverTheme, readGuestTheme, getFallbackTheme]);
+
+  const [theme, setTheme] = useState(initialTheme);
+
+  // Миграция гостевой темы в аккаунт: пользователь вошёл, на сервере тема не задана,
+  // а в localStorage есть гостевой выбор — отправить на сервер (один раз при входе).
   useEffect(() => {
-    if (themeSource) {
-      localStorage.setItem('guest_theme', themeSource);
+    if (profile && !serverTheme) {
+      const guest = readGuestTheme();
+      if (guest) {
+        updateSettings({ theme: guest }).catch(() => {
+          // Не критично: сервер недоступен, локальный выбор остаётся в localStorage.
+        });
+      }
     }
-  }, [themeSource]);
+  }, [profile, serverTheme, updateSettings, readGuestTheme]);
+
+  // Реакция на изменение серверной настройки темы (сохранение в профиле и т.п.).
+  const [prevThemeSource, setPrevThemeSource] = useState(serverTheme);
+  if (serverTheme !== prevThemeSource) {
+    setPrevThemeSource(serverTheme);
+    setTheme(serverTheme || readGuestTheme() || getFallbackTheme());
+  }
 
   // A guest without an explicit theme choice must open with the forum's default
   // design, not with the hardcoded dark fallback. `settings.defaultDesignId`
@@ -47,16 +56,10 @@ export const ThemeProvider = ({ children }) => {
   // once it is known — but never overriding an explicit localStorage choice or
   // a signed-in member's own preference. Applied during render (like the
   // themeSource sync above) so it never causes a cascading render from an effect.
-  const [prevFallbackTheme, setPrevFallbackTheme] = useState(getFallbackTheme());
-  const currentFallbackTheme = getFallbackTheme();
-  if (
-    !themeSource &&
-    !localStorage.getItem('guest_theme') &&
-    currentFallbackTheme !== prevFallbackTheme
-  ) {
-    setPrevFallbackTheme(currentFallbackTheme);
-    setTheme(currentFallbackTheme);
-  }
+  // A guest without an explicit theme choice opens with the forum's default
+  // design via the initialTheme above; no separate fallback render needed here.
+
+
 
   useEffect(() => {
     const isStandardTheme = ['light', 'dark', 'neutral'].includes(theme);
@@ -72,15 +75,25 @@ export const ThemeProvider = ({ children }) => {
     }
   }, [theme, settings?.defaultDesignId, getFallbackTheme]);
 
-  const changeGuestTheme = useCallback((newTheme) => {
+  // Сохранение выбора темы: авторизованный → на сервер (users.settings), гость → localStorage.
+  const changeTheme = useCallback((newTheme) => {
     setTheme(newTheme);
-    localStorage.setItem('guest_theme', newTheme);
-  }, []);
+    if (profile) {
+      updateSettings({ theme: newTheme }).catch(() => {});
+    } else {
+      try {
+        localStorage.setItem(makeStorageKey('guest_theme', 'guest'), newTheme);
+      } catch {
+        // localStorage может быть недоступен (приватный режим) — деградируем мягко.
+      }
+    }
+  }, [profile, updateSettings]);
 
   const value = {
     theme,
     setTheme,
-    changeGuestTheme
+    // changeGuestTheme — обратная совместимость с Navbar, за ним та же логика.
+    changeGuestTheme: changeTheme,
   };
 
   return (

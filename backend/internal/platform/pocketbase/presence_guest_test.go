@@ -129,6 +129,20 @@ func guestBeat(t testing.TB, baseURL, guestID string) {
 	}
 }
 
+// guestBeatAt posts one anonymous heartbeat carrying last_active_at (unix
+// millis), the moment of the guest's last click. A test that wants to prove
+// "the window runs from the click, not the beat" seeds clicks in the past
+// this way instead of waiting for real time to pass.
+func guestBeatAt(t testing.TB, baseURL, guestID string, lastActiveAt time.Time) {
+	t.Helper()
+
+	status, payload := postAerun(t, baseURL+"/api/aerun/presence/heartbeat",
+		fmt.Sprintf(`{"guest_id":%q,"last_active_at":%d}`, guestID, lastActiveAt.UnixMilli()), "")
+	if status != http.StatusOK {
+		t.Fatalf("heartbeat for %q: expected 200, got %d: %s", guestID, status, payload)
+	}
+}
+
 func TestGuestHeartbeatCreatesOneRowAndRefreshesIt(t *testing.T) {
 	app := newAerunTestApp(t)
 	defer app.Cleanup()
@@ -176,6 +190,54 @@ func TestGuestHeartbeatCreatesOneRowAndRefreshesIt(t *testing.T) {
 	guestBeat(t, ts.URL, "guestxyz987654")
 	if got := countGuests(t, app); got != 2 {
 		t.Fatalf("expected one row per visitor, got %d", got)
+	}
+}
+
+// TestGuestHeartbeatStoresTheClickMoment pins the AUDIT §1 п.1 contract for
+// guests: the row's last_seen is the moment of the last CLICK carried in
+// last_active_at, not the moment of the beat. A closed tab and an open idle
+// tab are therefore counted identically — 15 minutes after the last click.
+func TestGuestHeartbeatStoresTheClickMoment(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	guestLimiter.reset()
+	defer guestLimiter.reset()
+
+	const guestID = "guestclick00001"
+	clickAt := time.Now().Add(-5 * time.Minute).UTC().Truncate(time.Millisecond)
+	guestBeatAt(t, ts.URL, guestID, clickAt)
+
+	row := findGuest(t, app, guestID)
+	if got := row.GetDateTime("last_seen").Time(); !got.Equal(clickAt) {
+		t.Fatalf("last_seen must be the click moment (%s), got %s", clickAt, got)
+	}
+
+	// A later beat with the SAME click must not move last_seen forward: the
+	// beat is transport, the click is the activity. This is what makes a
+	// background tab's 30-second ticks unable to keep a guest counted.
+	guestBeatAt(t, ts.URL, guestID, clickAt)
+	if got := findGuest(t, app, guestID).GetDateTime("last_seen").Time(); !got.Equal(clickAt) {
+		t.Fatalf("a beat without a newer click must not move last_seen (%s), got %s", clickAt, got)
+	}
+
+	// A guest whose last click is already outside the window must not be
+	// resurrected into a FRESH online presence by beating. The server clamps
+	// the claim to the window edge (the oldest moment that still counts as
+	// "just inside"), so the stored moment must be old — never "now".
+	staleClick := time.Now().Add(-guestPresenceWindow - 10*time.Minute).UTC().Truncate(time.Millisecond)
+	guestBeatAt(t, ts.URL, "gueststale00001", staleClick)
+	got := findGuest(t, app, "gueststale00001").GetDateTime("last_seen").Time()
+	// The clamped value is the window edge itself (now - presenceTTL): it must
+	// be far from "now" and near the edge, i.e. older than the window allows
+	// a fresh resurrection to be.
+	if got.After(time.Now().Add(-presenceTTL + 2*time.Minute)) {
+		t.Fatalf("a stale click must be clamped to the window edge, got %s (claim was %s)", got, staleClick)
+	}
+	if !got.Before(time.Now().Add(-presenceTTL + 5*time.Minute)) {
+		t.Fatalf("the clamped value must be near the window edge, got %s", got)
 	}
 }
 

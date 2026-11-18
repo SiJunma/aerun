@@ -2,6 +2,7 @@ package pocketbase
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -639,4 +640,322 @@ func queryValue(query, key string) string {
 		}
 	}
 	return ""
+}
+
+// ------------------------------------------------------------------------
+// PATCH/DELETE /api/aerun/admin/users/bulk (bulk user management)
+// ------------------------------------------------------------------------
+
+// TestAdminBulkAccessMatrix pins the route gate: bulk endpoints require
+// admin_access (root + admin). Moderators holding ban/delete rights still
+// cannot reach them — the same gate as the single /admin/users/{id}
+// endpoints (§2 of the spec).
+func TestAdminBulkAccessMatrix(t *testing.T) {
+	cases := []struct {
+		name           string
+		actor          string
+		method         string
+		body           string
+		expectStatus   int
+		expectContent  []string
+		makeAdminActor bool
+	}{
+		{
+			name:          "guest is unauthenticated",
+			actor:         "",
+			method:        http.MethodPatch,
+			body:          `{"ids":["` + fixPlayerID + `"],"status":"banned"}`,
+			expectStatus:  http.StatusUnauthorized,
+			expectContent: []string{"Authentication is required"},
+		},
+		{
+			name:          "player is forbidden",
+			actor:         "player",
+			method:        http.MethodPatch,
+			body:          `{"ids":["` + fixPlayerID + `"],"status":"banned"}`,
+			expectStatus:  http.StatusForbidden,
+			expectContent: []string{"You are not allowed"},
+		},
+		{
+			name:          "moderator is forbidden",
+			actor:         "moderator",
+			method:        http.MethodPatch,
+			body:          `{"ids":["` + fixPlayerID + `"],"status":"banned"}`,
+			expectStatus:  http.StatusForbidden,
+			expectContent: []string{"You are not allowed"},
+		},
+		{
+			name:          "root is allowed",
+			actor:         "root",
+			method:        http.MethodPatch,
+			body:          `{"ids":["` + fixPlayerID + `"],"status":"banned"}`,
+			expectStatus:  http.StatusOK,
+			expectContent: []string{"\"processed\":1", "\"succeeded\":1"},
+		},
+		{
+			name:           "admin is allowed",
+			actor:          "",
+			method:         http.MethodPatch,
+			body:           `{"ids":["` + fixPlayerID + `"],"status":"banned"}`,
+			expectStatus:   http.StatusOK,
+			expectContent:  []string{"\"processed\":1", "\"succeeded\":1"},
+			makeAdminActor: true,
+		},
+		{
+			name:          "root delete is allowed",
+			actor:         "root",
+			method:        http.MethodDelete,
+			body:          `{"ids":["` + fixPlayerID + `"]}`,
+			expectStatus:  http.StatusOK,
+			expectContent: []string{"\"processed\":1", "\"succeeded\":1"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			scenario := tests.ApiScenario{
+				Name:            tc.name,
+				Method:          tc.method,
+				URL:             "/api/aerun/admin/users/bulk",
+				Body:            strings.NewReader(tc.body),
+				TestAppFactory:  newAerunTestApp,
+				ExpectedStatus:  tc.expectStatus,
+				ExpectedContent: tc.expectContent,
+			}
+			scenario.BeforeTestFunc = func(t testing.TB, app *tests.TestApp, e *core.ServeEvent) {
+				headers := map[string]string{}
+				if tc.makeAdminActor {
+					seedIdentityFixtures(t, app)
+					// `admin` is not in the standard fixture matrix; create one
+					// inline so the admin_access gate can be probed.
+					headers["Authorization"] = createTestUser(t, app, fixAdminID, "admin@example.com", "AdminOne", auth.RoleAdmin, auth.StatusActive)
+				} else if tc.actor != "" {
+					headers["Authorization"] = seedIdentityFixtures(t, app)[tc.actor]
+				}
+				headers["Idempotency-Key"] = "test-bulk-access-" + strings.ReplaceAll(tc.name, " ", "-")
+				scenario.Headers = headers
+			}
+			scenario.Test(t)
+		})
+	}
+}
+
+// TestAdminBulkUpdatePartialSuccess pins the per-target contract: a
+// refusal on one target (missing account, self-action) is reported
+// per-item with a machine-readable code and does not abort the other
+// targets; HTTP stays 200 (§4.4).
+func TestAdminBulkUpdatePartialSuccess(t *testing.T) {
+	scenario := tests.ApiScenario{
+		Name:           "root bans player, targets itself and a missing account",
+		Method:         http.MethodPatch,
+		URL:            "/api/aerun/admin/users/bulk",
+		Body:           strings.NewReader(`{"ids":["` + fixPlayerID + `","` + fixRootID + `","does-not-exist"],"status":"banned"}`),
+		TestAppFactory: newAerunTestApp,
+		ExpectedStatus: http.StatusOK,
+		ExpectedContent: []string{
+			`"processed":3`,
+			`"succeeded":1`,
+			`"failed":2`,
+			`"id":"` + fixPlayerID + `","ok":true`,
+			`"status":"banned"`,
+			`"id":"` + fixRootID + `","ok":false`,
+			`"error":"cannot act on your own account"`,
+			`"code":"self_action"`,
+			`"id":"does-not-exist","ok":false`,
+			`"error":"user not found"`,
+			`"code":"not_found"`,
+		},
+	}
+	scenario.BeforeTestFunc = func(t testing.TB, app *tests.TestApp, e *core.ServeEvent) {
+		scenario.Headers = map[string]string{
+			"Authorization":   seedIdentityFixtures(t, app)["root"],
+			"Idempotency-Key": "test-bulk-partial-1",
+		}
+	}
+	scenario.Test(t)
+}
+
+// TestAdminBulkRoleChange pins bulk role changes: unknown role is a
+// whole-request 400, a self re-role is self_action, and an admin may not
+// appoint another admin even through bulk (§4.3).
+func TestAdminBulkRoleChange(t *testing.T) {
+	t.Run("unknown role is rejected wholesale", func(t *testing.T) {
+		scenario := tests.ApiScenario{
+			Name:            "bulk role change with an unknown role",
+			Method:          http.MethodPatch,
+			URL:             "/api/aerun/admin/users/bulk",
+			Body:            strings.NewReader(`{"ids":["` + fixPlayerID + `"],"role":"no-such-role"}`),
+			TestAppFactory:  newAerunTestApp,
+			ExpectedStatus:  http.StatusBadRequest,
+			ExpectedContent: []string{"validation"},
+		}
+		scenario.BeforeTestFunc = func(t testing.TB, app *tests.TestApp, e *core.ServeEvent) {
+			scenario.Headers = map[string]string{
+				"Authorization":   seedIdentityFixtures(t, app)["root"],
+				"Idempotency-Key": "test-bulk-role-bad-1",
+			}
+		}
+		scenario.Test(t)
+	})
+
+	t.Run("root re-roles player to moderator", func(t *testing.T) {
+		scenario := tests.ApiScenario{
+			Name:           "root bulk-re-roles player to moderator",
+			Method:         http.MethodPatch,
+			URL:            "/api/aerun/admin/users/bulk",
+			Body:           strings.NewReader(`{"ids":["` + fixPlayerID + `"],"role":"moderator"}`),
+			TestAppFactory: newAerunTestApp,
+			ExpectedStatus: http.StatusOK,
+			ExpectedContent: []string{
+				`"processed":1`,
+				`"succeeded":1`,
+				`"failed":0`,
+				`"id":"` + fixPlayerID + `","ok":true`,
+				`"role":"moderator"`,
+			},
+		}
+		scenario.BeforeTestFunc = func(t testing.TB, app *tests.TestApp, e *core.ServeEvent) {
+			scenario.Headers = map[string]string{
+				"Authorization":   seedIdentityFixtures(t, app)["root"],
+				"Idempotency-Key": "test-bulk-role-ok-1",
+			}
+		}
+		scenario.Test(t)
+	})
+
+	t.Run("admin cannot bulk-appoint another admin", func(t *testing.T) {
+		scenario := tests.ApiScenario{
+			Name:           "admin bulk-re-roles player to admin is refused per target",
+			Method:         http.MethodPatch,
+			URL:            "/api/aerun/admin/users/bulk",
+			Body:           strings.NewReader(`{"ids":["` + fixPlayerID + `"],"role":"admin"}`),
+			TestAppFactory: newAerunTestApp,
+			ExpectedStatus: http.StatusOK,
+			ExpectedContent: []string{
+				`"processed":1`,
+				`"succeeded":0`,
+				`"failed":1`,
+				`"id":"` + fixPlayerID + `","ok":false`,
+				`"code":"forbidden"`,
+			},
+		}
+		scenario.BeforeTestFunc = func(t testing.TB, app *tests.TestApp, e *core.ServeEvent) {
+			seedIdentityFixtures(t, app)
+			scenario.Headers = map[string]string{
+				"Authorization":   createTestUser(t, app, fixAdminID, "admin@example.com", "AdminOne", auth.RoleAdmin, auth.StatusActive),
+				"Idempotency-Key": "test-bulk-role-admin-1",
+			}
+		}
+		scenario.Test(t)
+	})
+}
+
+// TestAdminBulkDelete pins bulk soft-delete: self-delete and
+// already-deleted targets are reported per-item, and delete_posts really
+// purges content (§4.3-4.4).
+func TestAdminBulkDelete(t *testing.T) {
+	t.Run("self-delete and missing target are per-item errors", func(t *testing.T) {
+		scenario := tests.ApiScenario{
+			Name:           "root bulk-delete with self and missing target",
+			Method:         http.MethodDelete,
+			URL:            "/api/aerun/admin/users/bulk",
+			Body:           strings.NewReader(`{"ids":["` + fixRootID + `","does-not-exist"]}`),
+			TestAppFactory: newAerunTestApp,
+			ExpectedStatus: http.StatusOK,
+			ExpectedContent: []string{
+				`"processed":2`,
+				`"succeeded":0`,
+				`"failed":2`,
+				`"id":"` + fixRootID + `","ok":false`,
+				`"code":"self_action"`,
+				`"id":"does-not-exist","ok":false`,
+				`"code":"not_found"`,
+			},
+		}
+		scenario.BeforeTestFunc = func(t testing.TB, app *tests.TestApp, e *core.ServeEvent) {
+			scenario.Headers = map[string]string{
+				"Authorization":   seedIdentityFixtures(t, app)["root"],
+				"Idempotency-Key": "test-bulk-delete-self-1",
+			}
+		}
+		scenario.Test(t)
+	})
+
+	t.Run("active player is soft-deleted", func(t *testing.T) {
+		scenario := tests.ApiScenario{
+			Name:           "root bulk-deletes an active player",
+			Method:         http.MethodDelete,
+			URL:            "/api/aerun/admin/users/bulk",
+			Body:           strings.NewReader(`{"ids":["` + fixPlayerID + `"],"delete_posts":true}`),
+			TestAppFactory: newAerunTestApp,
+			ExpectedStatus: http.StatusOK,
+			ExpectedContent: []string{
+				`"processed":1`,
+				`"succeeded":1`,
+				`"failed":0`,
+				`"id":"` + fixPlayerID + `","ok":true`,
+			},
+		}
+		scenario.BeforeTestFunc = func(t testing.TB, app *tests.TestApp, e *core.ServeEvent) {
+			scenario.Headers = map[string]string{
+				"Authorization":   seedIdentityFixtures(t, app)["root"],
+				"Idempotency-Key": "test-bulk-delete-ok-1",
+			}
+		}
+		scenario.Test(t)
+	})
+
+	t.Run("already-deleted target reports already_deleted", func(t *testing.T) {
+		scenario := tests.ApiScenario{
+			Name:           "root bulk-deletes an already-deleted player",
+			Method:         http.MethodDelete,
+			URL:            "/api/aerun/admin/users/bulk",
+			Body:           strings.NewReader(`{"ids":["` + fixPlayerID + `"]}`),
+			TestAppFactory: newAerunTestApp,
+			ExpectedStatus: http.StatusOK,
+			ExpectedContent: []string{
+				`"processed":1`,
+				`"succeeded":0`,
+				`"failed":1`,
+				`"id":"` + fixPlayerID + `","ok":false`,
+				`"code":"already_deleted"`,
+			},
+		}
+		scenario.BeforeTestFunc = func(t testing.TB, app *tests.TestApp, e *core.ServeEvent) {
+			tokens := seedIdentityFixtures(t, app)
+			// Pre-mark the fixture account as deleted so the command
+			// reports already_deleted instead of acting on it.
+			if rec, err := app.FindRecordById(usersCollectionName, fixPlayerID); err == nil {
+				rec.Set("status", string(auth.StatusDeleted))
+				_ = app.Save(rec)
+			}
+			scenario.Headers = map[string]string{
+				"Authorization":   tokens["root"],
+				"Idempotency-Key": "test-bulk-delete-ok-2",
+			}
+		}
+		scenario.Test(t)
+	})
+}
+
+// deleteBulk sends a DELETE to the bulk users endpoint with the given headers.
+func deleteBulk(t testing.TB, url, body string, headers map[string]string) (int, []byte) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodDelete, url, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	payload, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res.StatusCode, payload
 }

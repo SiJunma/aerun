@@ -22,7 +22,7 @@ const Navigation = () => {
   const [showAuthModal, setShowAuthModal] = React.useState(false);
   const [authModalMode, setAuthModalMode] = React.useState('login');
 
-  const isAdmin = (profile?.role_id === 'admin' || profile?.role_id === 'root') && hasPermission(PERMISSIONS.ADMIN_ACCESS);
+  const isAdmin = (profile?.role === 'admin' || profile?.role === 'root') && hasPermission(PERMISSIONS.ADMIN_ACCESS);
 
   // The unread-notification badge is the SERVER's count, not a list counted here.
   //
@@ -50,7 +50,7 @@ const Navigation = () => {
     // unread-count response carries their private conversations, and a member
     // who may not see them must not be told they exist. The check reads the
     // STATUS (the permission list is already status-narrowed by the server) —
-    // the old `role_id === 'pending'` test could never fire, because a pending
+    // the old `role === 'pending'` test could never fire, because a pending
     // account's role is a real role and its pending-ness is a status.
     if (!user?.uid || !hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES)) {
       setDmUnread(0);
@@ -111,16 +111,18 @@ const Navigation = () => {
 
   return (
     <Navbar
+      as="header"
+      id="forum-header"
       bg="dark"
       variant="dark"
       expand="lg"
       sticky="top"
       expanded={expanded}
       onToggle={(val) => setExpanded(val)}
-      className="mb-0 shadow-sm border-bottom border-secondary border-opacity-25"
+      className="forum-header mb-0 shadow-sm border-bottom border-secondary border-opacity-25"
     >
       <Container className="d-flex align-items-center">
-        <div className="d-flex align-items-center">
+        <div id="forum-title" className="forum-title d-flex align-items-center">
           <div className="position-relative d-lg-none">
             <Navbar.Toggle
               aria-controls="basic-navbar-nav"
@@ -128,28 +130,18 @@ const Navigation = () => {
               onClick={() => setExpanded(!expanded)}
             />
             {unreadTopicsCount > 0 && (
-              <span
-                className="position-absolute rounded-circle bg-warning shadow-sm"
-                style={{
-                  width: '10px',
-                  height: '10px',
-                  top: '5px',
-                  right: '11px',
-                  border: '2px solid var(--nav-bg)',
-                  pointerEvents: 'none'
-                }}
-              />
+              <span className="nav-mobile-unread-dot" />
             )}
           </div>
-          <Navbar.Brand as={Link} to="/" onClick={() => setExpanded(false)} className="d-flex align-items-center gap-2">
+          <Navbar.Brand as={Link} to="/" onClick={() => setExpanded(false)} className="forum-brand d-flex align-items-center gap-2">
             {(activeDesign?.logoUrl || settings?.logoUrl) && (
               <img
                 src={activeDesign?.logoUrl || settings.logoUrl}
                 alt="Logo"
-                style={{ height: '32px', width: 'auto', objectFit: 'contain' }}
+                className="forum-logo"
               />
             )}
-            <span>
+            <span className="forum-name">
               {activeDesign?.forumTitle ? activeDesign.forumTitle : (
                 (typeof settings?.forumName === 'object' && settings.forumName !== null)
                   ? (settings.forumName[lang] || settings.forumName.en || 'Aerun Forum')
@@ -160,22 +152,22 @@ const Navigation = () => {
         </div>
 
         {/* Persistent actions (Right side on mobile & desktop) */}
-        <div className="d-flex align-items-center gap-2 gap-md-3 order-lg-3 ms-auto">
+        <div id="forum-user-links" className="forum-user-links d-flex align-items-center gap-2 gap-md-3 order-lg-3 ms-auto">
           {settings?.maintenanceMode && (
             <Badge bg="warning" text="dark" className="d-none d-sm-flex align-items-center gap-1 shadow-sm px-2 py-1" style={{ fontSize: '0.75rem', letterSpacing: '0.5px' }}>
               <div className="bg-dark rounded-circle me-1" style={{ width: '6px', height: '6px', animation: 'pulse 1.5s infinite' }}></div>
-              {lang === 'ru' ? 'ТЕХРАБОТЫ' : 'MAINTENANCE'}
+              {t('navbar.maintenance')}
             </Badge>
           )}
 
           {/* Notifications bell */}
-          {user && profile?.role_id !== 'banned' && profile?.role_id !== 'pending' && profile?.role_id !== 'spectator' && (
+          {user && profile?.role !== 'banned' && profile?.role !== 'pending' && profile?.role !== 'spectator' && (
             <Nav.Link
               as={Link}
               to="/notifications"
               onClick={() => setExpanded(false)}
               className="position-relative p-1 d-flex align-items-center text-light opacity-75 hover-opacity-100"
-              title={lang === 'ru' ? 'Уведомления' : 'Notifications'}
+              title={t('navbar.notifications')}
             >
               <Bell size={20} />
               {totalUnread > 0 && (
@@ -198,7 +190,7 @@ const Navigation = () => {
               to="/messages"
               onClick={() => setExpanded(false)}
               className="position-relative p-1 d-flex align-items-center text-light opacity-75 hover-opacity-100"
-              title={lang === 'ru' ? 'Личные сообщения' : 'Messages'}
+              title={t('navbar.messages')}
             >
               <MessageCircle size={20} />
               {dmUnread > 0 && (
@@ -322,22 +314,21 @@ const Navigation = () => {
         </div>
 
         <Navbar.Collapse id="basic-navbar-nav" className="order-lg-2">
-          <Nav className="me-auto mt-2 mt-lg-0">
-            <Nav.Link as={Link} to="/new-replies" onClick={() => setExpanded(false)}>
+          <Nav id="forum-nav" className="forum-nav me-auto mt-2 mt-lg-0">
+            <Nav.Link as={Link} to="/new-replies" onClick={() => setExpanded(false)} className="nav-active-topics">
               {t('nav.active_topics')}
               {unreadTopicsCount > 0 && ` (${unreadTopicsCount})`}
             </Nav.Link>
             {user && (
-              <Nav.Link as={Link} to="/subscriptions" onClick={() => setExpanded(false)}>
+              <Nav.Link as={Link} to="/subscriptions" onClick={() => setExpanded(false)} className="nav-subscriptions">
                 {t('nav.subscriptions', 'Подписки')}
               </Nav.Link>
             )}
-            <Nav.Link as={Link} to="/members" onClick={() => setExpanded(false)}>
-
+            <Nav.Link as={Link} to="/members" onClick={() => setExpanded(false)} className="nav-members">
               {t('nav.members')}
             </Nav.Link>
             {isAdmin && (
-              <Nav.Link as={Link} to="/admin" onClick={() => setExpanded(false)} className="text-warning fw-semibold">
+              <Nav.Link as={Link} to="/admin" onClick={() => setExpanded(false)} className="nav-admin">
                 {t('nav.admin')}
               </Nav.Link>
             )}
@@ -349,7 +340,7 @@ const Navigation = () => {
                 title={
                   <div className="d-flex align-items-center gap-2 text-light opacity-75 hover-opacity-100">
                     <Palette size={18} />
-                    <span>{lang === 'ru' ? 'Тема оформления' : 'Theme'}</span>
+                    <span>{t('navbar.theme')}</span>
                   </div>
                 }
                 id="guest-theme-dropdown-collapse"

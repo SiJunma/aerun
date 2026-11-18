@@ -69,7 +69,7 @@ func TestConfigureAuthTemplatesUsesTheDeploymentURL(t *testing.T) {
 	}
 	users := reloadUsers(t, app)
 
-	want := "https://forum.aerun.example/_/#/auth/confirm-verification/"
+	want := "https://forum.aerun.example/auth/confirm-verification/"
 	if !strings.Contains(users.VerificationTemplate.Body, want) {
 		t.Fatalf("verification link must be %q, got body:\n%s", want, users.VerificationTemplate.Body)
 	}

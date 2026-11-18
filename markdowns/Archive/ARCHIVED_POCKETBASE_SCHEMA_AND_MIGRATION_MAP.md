@@ -1,4 +1,10 @@
-# PocketBase schema and migration map (from the Firebase snapshot)
+> ⚠️ **ОТРЕДАКТИВНО / НЕАКТУАЛЬНАЯ КАРТА МИГРАЦИИ**
+> Этот документ описывал соответствие Firebase → PocketBase на этапе Sprint 7 (до final cutover).
+> Миграция уже завершена, актуальная PocketBase схема отличается strongly.
+> **Не использовать как актуальную спецификацию схемы.**
+> Актуальная документация: `backend/README.md`, `backend/internal/migrations`.
+
+# PocketBase schema and migration map (from the Firebase snapshot) [ОТРЕДАКТИВНО / НЕАКТУАЛЬНАЯ КАРТА МИГРАЦИИ]
 
 **Status:** working baseline for the import writer (Sprint 7 continuation)
 **Source:** `backend/migration-data/stage-1.json` (snapshot `512509de…5746`,
@@ -371,8 +377,12 @@ lowercase alnum, 18–19 символов) и хранит в `localStorage.gues
 PII намеренно нет: только id и две метки времени — ни IP, ни user-agent, ни
 путей. Окно онлайна 15 минут (как в legacy и в панели статистики), ретенция
 1 час (cron-джоб `__aerunGuestPresencePrune__`, `*/10 * * * *`). Heartbeat —
-раз в минуту плюс при возврате фокуса во вкладку; leave — `sendBeacon` на
-`pagehide` и при логине (аналог `onDisconnect().remove()`).
+раз в минуту плюс при возврате фокуса во вкладку, с `last_active_at` = момент
+последнего клика клиента; `last_seen` строки = этот момент (не момент бита).
+Закрытие вкладки НЕ удаляет гостя (beacon на `pagehide` убран): строка живёт,
+пока не истечёт 15-мин окно от последнего клика, как и открытая вкладка.
+Явный leave — только при логине/разлогине (`POST /presence/guest/leave`).
+(Обновлено по `markdowns/AUDIT_PRESENCE_AND_ACTIVITY_TRACKING.md`.)
 Анти-спам: id валидируется по форме до записи, а на heartbeat стоит бюджет
 30 запросов в минуту на IP — встроенный `Settings().RateLimits` PocketBase в
 этом деплое выключен (`Enabled: false`), поэтому защита живёт рядом с данными.

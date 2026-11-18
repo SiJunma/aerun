@@ -32,7 +32,7 @@ Interpreting the report (`schema: aerun-ci-report/1`):
   as well — a missing report means the workflow itself never ran.
 
 A red report blocks further work: fix the failing check, push again, and re-read
-the report. Details: `BACKEND_MIGRATION_AUDIT_AND_SPRINT_PLAN.md` §5 and
+the report. Details: `markdowns/Archive/DONE_BACKEND_MIGRATION_AUDIT_AND_SPRINT_PLAN.md` §5 and
 `backend/README.md`.
 
 ### Local gofmt must see LF
@@ -53,6 +53,6 @@ gofmt -l "%TEMP%\blob.go"                        # what the Linux runner actuall
 failure mode of CI run 12 (`5e5e8ce`): three hunks — a missing blank line before
 two mutation-form type declarations and a trailing blank line at EOF — sat under
 CRLF noise, the run died in 35s with an empty `checks` object, and run 13
-(`d778b0a`) cleared it. See `BACKEND_MIGRATION_AUDIT_AND_SPRINT_PLAN.md`, progress
+(`d778b0a`) cleared it. See `markdowns/Archive/DONE_BACKEND_MIGRATION_AUDIT_AND_SPRINT_PLAN.md`, progress
 log entry 2026-09-28.
 

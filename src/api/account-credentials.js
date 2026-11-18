@@ -91,3 +91,17 @@ export const unlinkGoogle = async (currentPassword) => {
   if (currentPassword) body.current_password = currentPassword;
   await sendApi('/api/aerun/me/auth/google', { method: 'DELETE', body });
 };
+
+/**
+ * confirmEmailVerification confirms email with token from confirmation letter (SEC-04).
+ */
+export const confirmEmailVerification = async (token) => {
+  return await pb.collection('users').confirmVerification(token);
+};
+
+/**
+ * confirmPasswordReset completes password reset using token and new password (SEC-04).
+ */
+export const confirmPasswordReset = async ({ token, password, passwordConfirm }) => {
+  return await pb.collection('users').confirmPasswordReset(token, password, passwordConfirm);
+};

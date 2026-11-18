@@ -1,34 +1,60 @@
 {
-	# Отключаем HTTP-3 (QUIC), иначе Chrome на продакшене получает
-	# net::ERR_QUI_PROTOCOL_ERROR на долгоживущих SSE-подключениях
-	# к /api/realtime. На локалке HTTP-3 не используется (обычный HTTP),
-	# поэтому ошибки там нет.
-	servers :443 {
-		protocol {
-			experimental_http3 {
-				disabled
-			}
-		}
+	# HTTP/3 (QUIC) is what puts ERR_QUIC_PROTOCOL_ERROR on long-lived
+	# SSE streams to /api/realtime (one stream carries every realtime
+	# subscription; QUIC resets it and the PocketBase SDK reconnects in
+	# a storm). `protocols h1 h2` serves HTTP/1.1 + HTTP/2 only and,
+	# unlike the old `experimental_http3 { disabled }` block, also stops
+	# Caddy from advertising `alt-svc: h3=` to the browser. The browser-
+	# facing HTTP/3 toggle lives in the Cloudflare dashboard
+	# (SSL/TLS -> Edge Certificates -> HTTP/3): until that is switched
+	# there too, `alt-svc: h3=":443"` is still emitted by the CF edge —
+	# verified in prod responses. That header is a CF-dashboard-only fix.
+	servers {
+		protocols h1 h2
 	}
 }
 
 aerun-world.com {
-	encode zstd gzip
+	# /api/realtime is SSE and must bypass the encoder: zstd/gzip
+	# buffering would delay flushes and make the edge hold the stream
+	# open without progress (stall -> drop -> reconnect storm).
+	# Caddy 2.10 `encode` has no inline matcher syntax for negation on
+	# this version (both `match { not {…} }` and `not {…}` are rejected),
+	# so the encoder is split: a plain `encode` everywhere, and SSE
+	# excluded by keeping this directive but moving the encoder into the
+	# non-API handles below instead. See handle blocks: only the SPA
+	# handle keeps `encode`; /api/* is proxied without encoding.
+	#
+	# (kept as a comment so this note survives config edits)
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options nosniff
 		X-Frame-Options DENY
 		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; font-src 'self' data: https:; connect-src 'self' https: wss:; frame-src 'self' https:; object-src 'none'; base-uri 'self';"
 	}
 	# Backend API and the PocketBase admin dashboard.
+	# flush_interval -1: forward /api/realtime (SSE) the moment
+	# PocketBase writes it. Without it Caddy buffers into a reconnect
+	# storm (see markdowns/Archive/DONE_INIT_PAGE_REQUESTS_DUPLICATES.md).
+	# -1 is the documented "flush immediately" sentinel.
 	handle /api/* {
-		reverse_proxy 127.0.0.1:8090
+		reverse_proxy 127.0.0.1:8090 {
+			flush_interval -1
+		}
 	}
+	# SEC-04: PocketBase admin dashboard — restrict to localhost and operator IP.
 	handle /_/* {
+		@denied not remote_ip 127.0.0.1 202.148.54.64
+		respond @denied "Access denied" 403
 		reverse_proxy 127.0.0.1:8090
 	}
 	# SPA: built frontend from the feature/pocketbase-migration branch.
+	# encode lives here only — /api/* above is proxied without encoding,
+	# so SSE is never zstd/gzip-buffered.
 	handle {
+		encode zstd gzip
 		root * /home/deploy/project/dist
 		try_files {path} /index.html
 		file_server

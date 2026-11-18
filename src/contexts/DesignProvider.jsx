@@ -2,6 +2,7 @@
 import React, { createContext, useContext, useEffect, useState, useMemo } from 'react';
 import { useAuth } from './AuthProvider';
 import { getDesigns } from '../api/designs';
+import { makeStorageKey } from '../utils/storageScope';
 
 const DesignContext = createContext();
 
@@ -32,8 +33,21 @@ export const DesignProvider = ({ children }) => {
 
     if (previewId) {
       targetId = previewId;
-    } else if (settings?.allowUserCustomDesign && profile?.settings?.theme) {
+    } else if (profile?.settings?.theme) {
+      // Авторизованный: серверная настройка — источник истины.
       targetId = profile.settings.theme;
+    } else if (!profile) {
+      // Гость: локальный выбор из localStorage (скопленный по гостю).
+      // Built-in темы ('dark'/'light'/'neutral') не являются custom design —
+      // их обрабатывает ThemeProvider, здесь пропускаем.
+      try {
+        const guestTheme = localStorage.getItem(makeStorageKey('guest_theme', 'guest'));
+        if (guestTheme && !BUILTIN_THEMES.includes(guestTheme)) {
+          targetId = guestTheme;
+        }
+      } catch {
+        // localStorage недоступен — игнорируем гостевой выбор.
+      }
     }
 
     // Fallback to global default
@@ -72,6 +86,9 @@ export const DesignProvider = ({ children }) => {
 
   useEffect(() => {
     if (activeDesign) {
+      // Custom design active → mark the page as themeable so semantic
+      // DOM hooks (always rendered) become the theme API.
+      document.body.setAttribute('data-theme-engine', 'themeable');
       // 1. Inject CSS
       let styleEl = document.getElementById('custom-design-style');
       if (!styleEl) {
@@ -93,6 +110,7 @@ export const DesignProvider = ({ children }) => {
         document.body.appendChild(scriptEl);
       }
     } else {
+      document.body.removeAttribute('data-theme-engine');
       // Cleanup
       document.getElementById('custom-design-style')?.remove();
       document.getElementById('custom-design-script')?.remove();

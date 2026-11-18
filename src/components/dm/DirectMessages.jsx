@@ -669,7 +669,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
     } catch (err) {
       openChatInflightRef.current.delete(peerUid);
       console.error('[openChat]', err);
-      showToast(lang === 'ru' ? 'Ошибка открытия диалога' : 'Failed to open conversation', 'danger');
+      showToast(t('dm.open_error'), 'danger');
     }
   };
 
@@ -749,10 +749,10 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
       if (updated) applyMessageUpdate(updated);
       // Converges the sidebar preview and the counters, which an edit moves.
       refreshDmMessages(activeChatId);
-      showToast(lang === 'ru' ? 'Сообщение изменено' : 'Message edited');
+      showToast(t('dm.message_edited'));
     } catch (err) {
       console.error('[handleSaveDmEdit]', err);
-      showToast(lang === 'ru' ? 'Не удалось изменить сообщение' : 'Failed to edit message', 'danger');
+      showToast(t('dm.edit_error'), 'danger');
     }
   };
 
@@ -762,14 +762,10 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
       handleCancelDmEdit();
       if (tombstone) applyMessageUpdate(tombstone);
       refreshDmMessages(activeChatId);
-      showToast(
-        lang === 'ru'
-          ? 'Сообщение удалено. Оно остаётся видимым в переписке.'
-          : 'Message deleted. It stays visible in the conversation.'
-      );
+      showToast(t('dm.message_deleted'));
     } catch (err) {
       console.error('[handleDeleteDm]', err);
-      showToast(lang === 'ru' ? 'Не удалось удалить сообщение' : 'Failed to delete message', 'danger');
+      showToast(t('dm.delete_error'), 'danger');
     }
   };
 
@@ -787,9 +783,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
 
     if (computedMaxChars && messageText.length > computedMaxChars) {
       showToast(
-        lang === 'ru'
-          ? `Cообщение превышает лимит в ${computedMaxChars} символов`
-          : `Message exceeds the ${computedMaxChars} character limit`,
+        t('dm.max_chars_exceeded', { max: computedMaxChars }),
         'danger'
       );
       return;
@@ -892,7 +886,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
       }
     } catch (err) {
       console.error('[handleSend]', err);
-      showToast(lang === 'ru' ? 'Ошибка отправки сообщения' : 'Failed to send message', 'danger');
+      showToast(t('dm.send_error'), 'danger');
     } finally {
       setSending(false);
       sendInFlightRef.current.end();
@@ -961,7 +955,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
     setConversations(prev => prev.filter(c => c.id !== convId));
     try {
       await eraseConversation(convId, myUid);
-      showToast(lang === 'ru' ? 'Переписка удалена у вас' : 'Conversation removed for you', 'success');
+      showToast(t('dm.conversation_removed'), 'success');
       clearComposerText(convId, myUid);
       refreshDmList(myUid);
       if (activeChatId === convId) {
@@ -974,7 +968,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
       setConversations(previous);
       console.error('[handleDeleteConversation]', err);
       showToast(
-        lang === 'ru' ? 'Ошибка удаления' : 'Delete error',
+        t('dm.delete_error'),
         'danger'
       );
     }
@@ -1148,7 +1142,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
             className="ms-auto text-decoration-none p-1 d-flex align-items-center"
             style={{ color: '#ffffff', opacity: 0.75 }}
             onClick={(e) => promptDeleteConversation(activeChatId, e)}
-            title={lang === 'ru' ? 'Удалить переписку' : 'Delete conversation'}
+            title={t('dm.delete_conversation')}
           >
             <Trash2 size={17} />
           </Button>
@@ -1163,7 +1157,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
             <PrivacyNotice />
             {chatError ? (
               <ErrorCard
-                title={lang === 'ru' ? 'Не удалось загрузить сообщения' : 'Failed to load messages'}
+                title={t('dm.failed_load_messages')}
                 error={chatError}
                 onRetry={() => {
                   setChatError(null);
@@ -1193,10 +1187,10 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                       {loadingOlder ? (
                         <>
                           <Spinner animation="border" size="sm" />
-                          <span>{lang === 'ru' ? 'Загрузка...' : 'Loading...'}</span>
+                          <span>{t('dm.loading')}</span>
                         </>
                       ) : (
-                        <span>{lang === 'ru' ? 'Загрузить более старые сообщения' : 'Load older messages'}</span>
+                        <span>{t('dm.load_older')}</span>
                       )}
                     </Button>
                   </div>
@@ -1255,7 +1249,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                             />
                             <div className="d-flex gap-2 justify-content-end mt-2">
                               <Button size="sm" variant="outline-secondary" onClick={handleCancelDmEdit}>
-                                {lang === 'ru' ? 'Отмена' : 'Cancel'}
+                                {t('dm.cancel')}
                               </Button>
                               <Button
                                 size="sm"
@@ -1263,7 +1257,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                                 disabled={!editingText.trim()}
                                 onClick={() => handleSaveDmEdit(msg)}
                               >
-                                {lang === 'ru' ? 'Сохранить' : 'Save'}
+                                {t('dm.save')}
                               </Button>
                             </div>
                           </div>
@@ -1271,11 +1265,11 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                           <>
                             {msg.deleted ? (
                               <div className="w-100 fst-italic opacity-75">
-                                {lang === 'ru' ? 'Сообщение удалено' : 'Message deleted'}
+                                {t('dm.message_deleted_short')}
                               </div>
                             ) : (
                               <div className="w-100">
-                                <BBCode rolls={allConversationRolls} isDM={true}>{msg.text}</BBCode>
+                                <BBCode rolls={allConversationRolls} isDM={true} authorRole={isMe ? profile?.role : undefined}>{msg.text}</BBCode>
                               </div>
                             )}
                             <div
@@ -1287,7 +1281,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                                   show this should omit the marker rather than print
                                   a raw timestamp. */}
                               {msg.edited && !msg.deleted && (
-                                <span className="ms-2">· {lang === 'ru' ? 'изменено' : 'edited'}</span>
+                                <span className="ms-2">· {t('dm.edited_badge')}</span>
                               )}
                             </div>
                             {/* Actions on YOUR OWN messages only. There is no
@@ -1306,14 +1300,14 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                                   className="dm-bubble-action"
                                   onClick={() => handleStartDmEdit(msg)}
                                 >
-                                  {lang === 'ru' ? 'Изменить' : 'Edit'}
+                                  {t('dm.edit')}
                                 </button>
                                 <button
                                   type="button"
                                   className="dm-bubble-action"
                                   onClick={() => handleDeleteDm(msg)}
                                 >
-                                  {lang === 'ru' ? 'Удалить' : 'Delete'}
+                                  {t('common.delete')}
                                 </button>
                               </div>
                             )}
@@ -1352,8 +1346,8 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                   cursor: 'pointer',
                 }}
                 title={unreadBelowCount > 0
-                  ? (lang === 'ru' ? `Непрочитанных сообщений: ${unreadBelowCount}` : `${unreadBelowCount} unread messages`)
-                  : (lang === 'ru' ? 'Вниз' : 'Scroll to bottom')}
+                  ? t('dm.unread_below', { count: unreadBelowCount })
+                  : t('dm.scroll_to_bottom')}
               >
                 <ChevronDown size={22} />
                 {unreadBelowCount > 0 && (
@@ -1383,9 +1377,9 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                 <Lock size={32} className="mb-3 text-muted opacity-50" />
                 <p className="text-muted mb-0 fw-medium">
                   {peerStatus === 'deleted'
-                    ? (lang === 'ru' ? 'Аккаунт пользователя удален. Отправка сообщений недоступна.' : 'User account deleted. Sending messages is disabled.')
+                    ? t('dm.account_deleted')
                     : peerStatus === 'banned'
-                      ? (lang === 'ru' ? 'Пользователь заблокирован. Отправка сообщений недоступна.' : 'User is banned. Sending messages is disabled.')
+                      ? t('dm.user_banned')
                       : t('dm.pending_cannot_start')}
                 </p>
               </div>
@@ -1427,7 +1421,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                 <div className={`${computedMaxChars && messageText.length >= computedMaxChars ? 'text-danger' : 'text-muted'} fw-semibold small`}>
                   {computedMaxChars > 0
                     ? `${messageText.length} / ${computedMaxChars}`
-                    : `${lang === 'ru' ? 'Символов: ' : 'Chars: '}${messageText.length}`
+                    : t('dm.chars_label', { count: messageText.length })
                   }
                 </div>
               </div>
@@ -1441,12 +1435,10 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
         show={!!deleteConfirmConvId}
         onHide={() => setDeleteConfirmConvId(null)}
         onConfirm={handleConfirmDelete}
-        title={lang === 'ru' ? 'Удалить переписку?' : 'Delete conversation?'}
-        message={lang === 'ru'
-          ? 'Вы уверены, что хотите безвозвратно удалить этот диалог у себя?'
-          : 'Are you sure you want to permanently delete this conversation for yourself?'}
-        confirmText={lang === 'ru' ? 'Удалить' : 'Delete'}
-        cancelText={lang === 'ru' ? 'Отмена' : 'Cancel'}
+        title={t('dm.delete_conversation')}
+        message={t('dm.delete_conversation_confirm')}
+        confirmText={t('common.delete')}
+        cancelText={t('dm.cancel')}
         variant="danger"
       />
     </>
@@ -1466,7 +1458,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
 
         {inboxError ? (
           <ErrorCard
-            title={lang === 'ru' ? 'Не удалось загрузить диалоги' : 'Failed to load conversations'}
+            title={t('dm.load_conversations_error')}
             error={inboxError}
             onRetry={() => {
               setInboxError(null);
@@ -1596,7 +1588,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                     className="text-muted p-2 mx-1 shadow-none dm-trash-btn"
                     style={{ opacity: 0.6 }}
                     onClick={(e) => promptDeleteConversation(conv.id, e)}
-                    title={lang === 'ru' ? 'Удалить у себя' : 'Remove for me'}
+                    title={t('dm.remove_for_me')}
                   >
                     <Trash2 size={16} />
                   </Button>
@@ -1613,19 +1605,15 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
       onHide={() => setDeleteConfirmConvId(null)}
       onConfirm={handleConfirmDelete}
       title={isDraftId(deleteConfirmConvId)
-        ? (lang === 'ru' ? 'Удалить черновик?' : 'Delete draft?')
-        : (lang === 'ru' ? 'Удалить переписку у себя?' : 'Remove this conversation for you?')}
+        ? t('dm.delete_draft')
+        : t('dm.remove_this_conversation')}
       message={isDraftId(deleteConfirmConvId)
-        ? (lang === 'ru'
-            ? 'Этот черновик ещё не отправлен. Удалить его? Сообщение не будет создано.'
-            : 'This draft has not been sent yet. Delete it? No message will be created.')
-        : (lang === 'ru'
-            ? 'Переписка исчезнет у вас, и вы больше её не прочтёте. У собеседника переписка сохранится, пока он сам её не удалит.'
-            : 'The conversation disappears for you and you will not read it again. Your contact keeps it until they remove it too.')}
+        ? t('dm.delete_draft_confirm')
+        : t('dm.delete_conversation_desc')}
       confirmText={isDraftId(deleteConfirmConvId)
-        ? (lang === 'ru' ? 'Удалить' : 'Delete')
-        : (lang === 'ru' ? 'Удалить у себя' : 'Remove for me')}
-      cancelText={lang === 'ru' ? 'Отмена' : 'Cancel'}
+        ? t('common.delete')
+        : t('dm.remove_for_me')}
+      cancelText={t('dm.cancel')}
       variant="danger"
     />
   </>

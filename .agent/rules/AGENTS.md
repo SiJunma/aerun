@@ -1,22 +1,28 @@
 # Project Rules
 
-- **User instruction precedence**: The agent configuration file (`.agents/AGENTS.md`, `.clinerules`) holds standing defaults and guardrails, not absolute prohibitions. When the human gives an explicit instruction that contradicts a default rule, the explicit instruction takes precedence — the human is the authority and knows what they asked for. Defaults exist to prevent *unwanted autonomous* action, not to veto an explicit, intentional command from the human.
+> **Актуально** для стека **Go 1.27 + PocketBase (SQLite) + React 19** (обновлено 2026-11-02).
+> Контекст продукта: `PROJECT_CONTEXT.md`. Схема БД / API / права: `PROJECT_SPEC.md`.
+> Правила поддержания документации: `.agent/rules/documentation_maintenance.md`.
+> Firebase-эпоха живёт в ветке `legacy-firebase` — читать как историю, не как спецификацию; её файлы помечены `⚠️ ОТРЕДАКТИВНО`.
+
+- **User instruction precedence**: The agent configuration file (`.agent/rules/AGENTS.md`, `.clinerules`) holds standing defaults and guardrails, not absolute prohibitions. When the human gives an explicit instruction that contradicts a default rule, the explicit instruction takes precedence — the human is the authority and knows what they asked for. Defaults exist to prevent *unwanted autonomous* action, not to veto an explicit, intentional command from the human.
 
 - **Build and Deployment Workflow**: Two distinct workflows, not one rule:
-  - On the legacy Firebase-era branch (`main`, the still-live Firebase project), the human deploys manually (Firebase). The agent must NOT run build/deploy commands (`npm run build`, `firebase deploy`). The agent makes code changes and gives a summary report so the human can build/deploy manually.
-  - On `feature/pocketbase-migration` (production PocketBase/SQLite), building and deploying is a routine, explicitly-requested operator workflow. When the human explicitly asks to build or deploy, that explicit request overrides this file's general "do not"-style wording and the agent performs it. If the human does not ask, the agent stays out of it and does not touch the database.
-- **RTDB-First Data Architecture**: Always prioritize Firebase Realtime Database (RTDB) for frequently updated or frequently queried dynamic data (presence statuses, unread notification counters, session permissions, active topic posts cache, main page cache and stats) to drastically minimize Firestore read/write costs, while keeping Firestore as the permanent source of truth.
-- **Documentation Maintenance**: Whenever modifying database schemas, API methods, security rules, or data flows, agents MUST update the corresponding documentation files (`PROJECT_CONTEXT.md`, `PROJECT_SPEC.md`, etc.) to keep them strictly synchronized with the actual codebase. Before starting work, agents must verify documentation accuracy against active code and prune outdated or misleading sections.
-- **Custom Claims for Security Rules**: Prioritize Firebase Auth Custom Claims (`request.auth.token.role_id`) in Firestore Security Rules to avoid paid `get()` calls to Firestore user documents. Whenever user roles or statuses are updated, synchronize them to Custom Claims via Cloud Functions (`onUserCreated`, `onUserUpdated`).
+  - On `main` (current production branch: Go + PocketBase, deployed via `deploy.py`, see `DEPLOY.md`), building and deploying is a routine, explicitly-requested operator workflow. When the human explicitly asks to build or deploy, that explicit request overrides this file's general "do not"-style wording and the agent performs it. If the human does not ask, the agent stays out of it and does not touch the database.
+  - The Firebase-era branch is `legacy-firebase` (archived, never deployed). Treat it as read-only history; do not deploy from it. (Updated 2026-11-02: the earlier wording called `main` a live Firebase branch — that is no longer true; the Firebase→PocketBase migration work has landed on `main`.)
+- **PocketBase-first Data Architecture**: SQLite (PocketBase) — единственный источник истины. Динамические данные (presence, счётчики непрочитанного, realtime-сигналы) обслуживает Go-слой команд: presence — через heartbeat-маршруты `/api/aerun/presence/*`, realtime — SSE-сигналы + polling-fallback через `src/api/shared-poll.js`. Не вводить вторую «живую» БД: эпоха Firebase RTDB закончена; файлы с именами `rtdb-*.js` в `src/api/` носят исторические имена и работают через PocketBase.
+- **Presence считается от последнего клика, не от heartbeat-тика**: «онлайн» = 15 минут после последнего клика/нажатия клавиши, одинаково для открытой и закрытой вкладки (закрытие вкладки гостя не удаляет — нет pagehide-beacon; явный leave только при логине/разлогине). Клиент передаёт `last_active_at` в heartbeat; сервер клампит его в окно `[now−15m, now]` (stale → краю окна, не к `now` — иначе давно ушедший гость воскресает одним битом). `users.last_seen` = время последнего клика (троттлинг 5 мин; при выбывании по таймауту — точный момент клика, не момент выбывания). Изменения состава онлайна — SSE `presence.update` (debounce, без данных) + перечитывание `GET /status`. Эталон: `markdowns/AUDIT_PRESENCE_AND_ACTIVITY_TRACKING.md`.
+- **Documentation Maintenance**: Whenever modifying database schemas, API methods, permissions, or data flows, agents MUST update the corresponding documentation files (`PROJECT_CONTEXT.md`, `PROJECT_SPEC.md`) in the same commit. Full rules, document lifecycle and the pre-completion checklist: `.agent/rules/documentation_maintenance.md`. Before starting work, verify documentation accuracy against the code and prune outdated or misleading sections.
+- **Deny-by-default Permission Model**: Браузер не имеет прямого пути записи в коллекции (правила коллекций закрыты — superuser-only); все мутации идут через команды `/api/aerun/*`, которые через AccessResolver-middleware разрешают роль + статус + права. Права — строковые ключи в `backend/internal/auth/permission.go` (реестр `allPermissions`); смена роли уважает rank-матрицу, root-роль передаётся только через `POST /admin/transfer-root`. Статус аккаунта сужает права: `pending` → `view_forum` + self-edit, `banned` → ничего. Отсутствующая запись права — deny, никогда не allow.
 - **Network & Connection Resilience**: Never render blank screens (`return null`) or unhandled infinite loaders on data fetch failures or connection drops. Always provide human-friendly fallback cards (`ErrorCard`) with retry buttons, copyable technical error details for reporting to admins, and clear neutral explanations of connection issues.
 - **Zero Silent Failures & Diagnostic Transparency**: Never leave errors or exceptions without descriptive explanations or dead-end branching. Every failed operation, missing data state, or edge-case must have a meaningful user-facing notification (`Toast` / `Alert` / `ErrorCard`) and an informative diagnostic log for administrator troubleshooting.
-- **Backend Verification Channel (CI report)**: For any change under `backend/**`, never assume local success is enough. Every push is verified on a clean Linux runner by `.github/workflows/backend.yml` (gofmt, `go build`, `go vet`, `go test`), which publishes a machine-readable result that agents must read with plain git: `git fetch origin ci-report` then `git show origin/ci-report:report.json` (schema `aerun-ci-report/1`; a check appears with `ok` only when that step ran and passed, so a missing key means failed/skipped; only the newest run is stored, history lives behind `run_url`). Fix red checks before starting new work. Full description: `BACKEND_MIGRATION_AUDIT_AND_SPRINT_PLAN.md` §5 "Continuous verification channel" and `backend/README.md` §CI.
-- **Deletion Must Settle Its Denormalized Copies (2026-09-30 incident)**: Flagging a row deleted is NOT the end of a delete. Production deleted a whole topic and left post counts, reputation votes and topic subscriptions all pointing at content that no longer existed — the forum kept showing members scores for posts nobody could read. Whenever you write or review a handler that deletes, hides, or moves content: (1) enumerate every denormalized copy of that content (counters, votes, subscriptions, caches) and decide explicitly for each — moved, paid back, or deliberately kept; (2) put the cleanup in the SAME transaction as the tombstone, never a follow-up step; (3) aggregate per author/target BEFORE mutating, and never early-`return` out of a decrement — the original bug was a per-post loop that bailed out because its parent row was already gone, so nothing was ever decremented; (4) make any reputation payout exactly-once by construction, not with an "already reverted" marker, and prove it by replaying with a DIFFERENT idempotency key; (5) keep `RecomputeUserCounters` and the command layer deriving the same value — the repair tool silently undoes fixes whose predicate it disagrees with; (6) do not hard-delete what a soft delete is meant to preserve. Worked examples and the full rule set: `markdowns/POST_DELETE_WIPED_TOPIC_INCIDENT.md` §"Rules for agents" (read before touching any delete path).
+- **Backend Verification Channel (CI report)**: For any change under `backend/**`, never assume local success is enough. Every push is verified on a clean Linux runner by `.github/workflows/backend.yml` (gofmt, `go build`, `go vet`, `go test`), which publishes a machine-readable result that agents must read with plain git: `git fetch origin ci-report` then `git show origin/ci-report:report.json` (schema `aerun-ci-report/1`; a check appears with `ok` only when that step ran and passed, so a missing key means failed/skipped; only the newest run is stored, history lives behind `run_url`). Fix red checks before starting new work. Full description: `markdowns/Archive/DONE_BACKEND_MIGRATION_AUDIT_AND_SPRINT_PLAN.md` §5 "Continuous verification channel" and `backend/README.md` §CI.
+- **Deletion Must Settle Its Denormalized Copies (2026-09-30 incident)**: Flagging a row deleted is NOT the end of a delete. Production deleted a whole topic and left post counts, reputation votes and topic subscriptions all pointing at content that no longer existed — the forum kept showing members scores for posts nobody could read. Whenever you write or review a handler that deletes, hides, or moves content: (1) enumerate every denormalized copy of that content (counters, votes, subscriptions, caches) and decide explicitly for each — moved, paid back, or deliberately kept; (2) put the cleanup in the SAME transaction as the tombstone, never a follow-up step; (3) aggregate per author/target BEFORE mutating, and never early-`return` out of a decrement — the original bug was a per-post loop that bailed out because its parent row was already gone, so nothing was ever decremented; (4) make any reputation payout exactly-once by construction, not with an "already reverted" marker, and prove it by replaying with a DIFFERENT idempotency key; (5) keep `RecomputeUserCounters` and the command layer deriving the same value — the repair tool silently undoes fixes whose predicate it disagrees with; (6) do not hard-delete what a soft delete is meant to preserve. Worked examples and the full rule set: `markdowns/Archive/CLOSED_INCIDENT_POST_DELETE_WIPED_TOPIC.md` §"Rules for agents" (read before touching any delete path).
 
 
-## VPS deployment (feature/pocketbase-migration)
+## VPS deployment (branch `main`)
 
-Target: VPS at 202.148.54.64 (or `aerun-world.com`), user `deploy`, repository `~/project`.
+Target: VPS at 202.148.54.64 (`aerun-world.com`), user `deploy`, repository `~/project`.
 
 Prerequisites (one-time, on the deploy machine):
 - Путь к SSH-ключу: C:\Users\....\.ssh\aerun_deploy (ключ без passphrase, авторизация по паролю отключена).
@@ -24,24 +30,20 @@ Prerequisites (one-time, on the deploy machine):
 - Caddy terminates TLS; the Go backend listens loopback on 127.0.0.1:8090 (systemd unit `aerun.service`).
 - The backend `.env` used by `aerun.service` (`EnvironmentFile=/home/deploy/project/.env`) must contain at least: `AERUN_ENV=production`, `AERUN_LISTEN=127.0.0.1:8090`, `AERUN_PUBLIC_URL=https://aerun-world.com`, `AERUN_ALLOWED_ORIGINS=https://aerun-world.com`, `AERUN_DATA_DIR=/home/deploy/project/pb_data`, and `AERUN_ENCRYPTION_KEY=<32 random bytes>` (required in production). Mail runs in `dashboard` mode by default (relay configured in the PocketBase admin UI).
 
-When the human explicitly asks to deploy to the VPS:
-1. Pull the code locally: `git fetch origin && git reset --hard origin/feature/pocketbase-migration` (the dev machine clone stays on this branch).
-2. Frontend — build locally (the VPS's ~900 MB RAM OOMs `npm ci`):
-   - `cd <repo-root>` (frontend)
-   - `npm ci` (or reuse `node_modules`)
-   - `VITE_POCKETBASE_URL=https://aerun-world.com npm run build` → `dist/`
-   - `VITE_POCKETBASE_URL=https://aerun-world.com npm run build` — explicitly enforce production API URL during Vite build, regardless of local .env files.
-3. Backend — cross-compile for the VPS and upload:
-   - `cd backend && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o aerun-linux ./cmd/aerun`
-   - `tar -czf aerun-linux.tar.gz aerun-linux` (gzip + verify `sha256sum` before/after transfer)
-   - `scp aerun-linux.tar.gz deploy@202.148.54.64:/tmp/` (and `dist.tgz` from step 2)
-4. On the VPS (`ssh deploy@202.148.54.64`):
-   - `tar -xzf /tmp/aerun-linux.tar.gz -C ~/project/backend`
-   - `tar -xzf /tmp/dist.tgz -C ~/project/dist`
-   - `sudo systemctl restart aerun.service`
-5. Verify: `sudo systemctl status aerun.service`, `journalctl -u aerun.service -f`, health endpoint via Caddy.
-6. Migrations apply automatically on first start. Only run a DB migration if the human explicitly asks — otherwise do nothing to the database.
-7. Infrastructure as Code: Always keep `backend/deploy/aerun.service` and `backend/deploy/Caddyfile` updated whenever systemd unit or proxy configurations change. Never leave server configs solely on the VPS.
+When the human explicitly asks to deploy to the VPS, use `deploy.py` (it pulls code, builds the frontend with `VITE_POCKETBASE_URL=https://aerun-world.com`, cross-compiles the backend for Linux, verifies the ELF binary, uploads in sha256-checked chunks, restarts `aerun.service` and probes health — см. `DEPLOY.md`):
+
+| Действие | Команда |
+|---|---|
+| Выкатить всё (фронт + бэкенд) | `python deploy.py deploy --yes` |
+| Только фронт / только бэкенд | `python deploy.py deploy --only frontend --yes` / `--only backend --yes` |
+| Статус / health / рестарт | `python deploy.py status` / `health` / `restart` |
+| База: бэкап / миграции / восстановление | `python deploy.py db backup` / `db migrate` / `db restore --file ...` |
+
+Notes:
+
+- Migrations apply automatically on first start after deploy. Only run a DB migration if the human explicitly asks — otherwise do nothing to the database.
+- The manual build + scp + restart steps (в прежней версии этого файла) superseded by `deploy.py` — не повторять их руками.
+- Infrastructure as Code: always keep `backend/deploy/aerun.service` and `backend/deploy/Caddyfile` updated whenever systemd unit or proxy configurations change. Never leave server configs solely on the VPS.
 
 ### Deploy key clarification
 

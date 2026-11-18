@@ -81,6 +81,14 @@ export const toMillis = (value) => {
   const parsed = new Date(text).getTime();
   if (Number.isFinite(parsed)) return parsed;
 
+  // Fallback: some engines accept a non-ISO space form (e.g. "2026-03-02
+  // 10:00:00 +0000 UTC") that breaks once the space is normalised to "T".
+  // Try the raw value before giving up — an unparseable value is still 0.
+  if (typeof value === 'string') {
+    const rawParsed = new Date(value).getTime();
+    if (Number.isFinite(rawParsed)) return rawParsed;
+  }
+
   return 0;
 };
 

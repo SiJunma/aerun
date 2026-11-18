@@ -17,6 +17,8 @@
     "deploy:vps:health": "python deploy.py health",
     "deploy:vps:restart": "python deploy.py restart",
     "deploy:vps:db": "python deploy.py db",
+    "deploy:vps:backup": "python deploy.py backup",
+    "deploy:vps:backup:latest": "python deploy.py backup --overwrite",
     "dev:backend": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-backend.ps1",
     "dev:backend:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-backend.ps1 -StopOnly",
     "lint:js": "eslint .",
@@ -26,6 +28,7 @@
     "test:golast-overlay": "node scripts/check-golast-overlay.mjs",
     "test:inflight-guard": "node --test scripts/test-inflight-guard.mjs",
     "test:shared-poll": "node --test scripts/test-shared-poll.mjs",
+    "test:realtime-hub": "node --test --experimental-test-module-mocks --test-force-exit scripts/test-realtime-hub.mjs",
     "test:dm-mutation-state": "node scripts/check-dm-mutation-state.mjs",
     "test:dm-draft-conversations": "node scripts/check-dm-draft-conversations.mjs",
     "test:jsx-comments": "node scripts/check-jsx-no-line-comments.mjs",
@@ -86,6 +89,7 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
+    "playwright": "^1.64.1",
     "vite": "^7.3.1"
   }
 }

@@ -13,6 +13,7 @@ import { createInFlight } from '../utils/inflight';
 import { useToast } from '../contexts/ToastProvider';
 
 import { usePageTitle } from '../contexts/TitleProvider';
+import { makeStorageKey } from '../utils/storageScope';
 
 const TopicFormPage = () => {
   const { categoryId } = useParams();
@@ -23,7 +24,7 @@ const TopicFormPage = () => {
   const { setPageTitle } = usePageTitle();
 
   useEffect(() => {
-    setPageTitle(t('topic.create_topic', 'Создание темы'));
+    setPageTitle(t('forum.create_topic', 'Создание темы'));
   }, [setPageTitle, t, lang]);
 
   const [title, setTitle] = useState('');
@@ -45,16 +46,19 @@ const TopicFormPage = () => {
   const [pinFirstPost, setPinFirstPost] = useState(false);
   const [guestNickname, setGuestNickname] = useState(() => {
     try {
-      return localStorage.getItem('aerun_guest_nickname') || '';
+      return localStorage.getItem(makeStorageKey('guest_nickname', 'guest')) || '';
     } catch {
       return '';
     }
   });
 
   // Persist the guest nickname so it is pre-filled on the next visit.
+  // Only write once the guest has actually entered a nickname — do not create
+  // the key on mere page load / topic visit.
   useEffect(() => {
+    if (!guestNickname) return;
     try {
-      localStorage.setItem('aerun_guest_nickname', guestNickname);
+      localStorage.setItem(makeStorageKey('guest_nickname', 'guest'), guestNickname);
     } catch {
       // localStorage may be unavailable in private mode; degrade gracefully.
     }
@@ -83,7 +87,7 @@ const TopicFormPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.last_selected_character_id, categoryId, categories, hasPermission, PERMISSIONS.USE_MASKS, user, setLastSelectedMask, settings?.enableCharacters]);
 
-  const DRAFT_KEY = `topic_draft_${categoryId}`;
+  const DRAFT_KEY = makeStorageKey(`topic_draft_${categoryId}`, user?.uid || 'guest');
 
   useEffect(() => {
     // Find category from context — independent of user (guests need it too).
@@ -149,12 +153,12 @@ const TopicFormPage = () => {
 
   const runSubmit = async () => {
     if (!title.trim()) {
-      showToast(lang === 'ru' ? 'Пожалуйста, введите заголовок темы' : 'Please enter a topic title', 'danger');
+      showToast(t('topic_form.enter_title'), 'danger');
       return;
     }
 
     if (!content.trim()) {
-      showToast(lang === 'ru' ? 'Пожалуйста, введите текст сообщения' : 'Please enter the post content', 'danger');
+      showToast(t('topic_form.enter_content'), 'danger');
       return;
     }
 
@@ -165,7 +169,7 @@ const TopicFormPage = () => {
     // category only if the admin granted `create_topic` there.
     const cat = categories.find(c => c.id === categoryId);
     if (!hasPermission(PERMISSIONS.CREATE_TOPIC, { category: cat })) {
-      showToast(lang === 'ru' ? 'У вас нет прав для создания тем в этой категории.' : 'You do not have permission to create topics in this category.', 'danger');
+      showToast(t('topic_form.no_permission'), 'danger');
       return;
     }
 
@@ -186,7 +190,7 @@ const TopicFormPage = () => {
         author_name: authorName,
         author_avatar: selectedChar ? selectedChar.avatar_url : (profile?.avatar_url || ''),
         author_status_line: selectedChar ? (selectedChar.status_line || '') : (profile?.status_line || ''),
-        author_role_id: user ? (profile?.role_id || 'player') : 'guest',
+        author_role_id: user ? (profile?.role || 'player') : 'guest',
         is_character: !!selectedChar,
         author_character_id: selectedCharacterId || null,
         first_post_pinned: pinFirstPost,
@@ -200,7 +204,7 @@ const TopicFormPage = () => {
         author_name: authorName,
         author_avatar: topicData.author_avatar,
         author_status_line: topicData.author_status_line,
-        author_role_id: user ? (profile?.role_id || 'player') : 'guest',
+        author_role_id: user ? (profile?.role || 'player') : 'guest',
         is_character: topicData.is_character,
         author_character_id: topicData.author_character_id,
         character_title: selectedChar?.title || '',
@@ -234,15 +238,10 @@ const TopicFormPage = () => {
       // succeeded but lost its id is the exception — retrying would duplicate
       // the topic, so that case says so instead of inviting another attempt.
       if (err?.code === 'missing_topic_id') {
-        showToast(
-          lang === 'ru'
-            ? 'Тема создана, но открыть её не удалось. Найдите её в списке раздела.'
-            : 'The topic was created but could not be opened. Find it in the category list.',
-          'warning'
-        );
+        showToast(t('topic_form.topic_created_but_lost'), 'warning');
         return;
       }
-      showToast(err?.message || (lang === 'ru' ? 'Ошибка создания темы' : 'Error creating topic'), 'danger');
+      showToast(err?.message || t('topic_form.create_error'), 'danger');
     } finally {
       setSubmitting(false);
     }
@@ -261,10 +260,10 @@ const TopicFormPage = () => {
   if (!hasPermission(PERMISSIONS.CREATE_TOPIC, { category })) {
     return (
       <Container className="py-5 text-center">
-        <h3 className="text-muted">{lang === 'ru' ? 'Доступ запрещён' : 'Access Denied'}</h3>
-        <p className="text-muted">{lang === 'ru' ? 'У вас нет прав для создания тем в этой категории.' : 'You do not have permission to create topics in this category.'}</p>
+        <h3 className="text-muted">{t('topic_form.access_denied')}</h3>
+        <p className="text-muted">{t('topic_form.no_permission_desc')}</p>
         <Button as={Link} to="/" variant="outline-primary" className="mt-3">
-          {lang === 'ru' ? 'На главную' : 'Go Home'}
+          {t('topic_form.go_home')}
         </Button>
       </Container>
     );
@@ -332,7 +331,7 @@ const TopicFormPage = () => {
                       <User size={18} />
                       <span className="text-truncate">
                         {selectedCharacterId 
-                          ? `${lang === 'ru' ? 'Персонаж' : 'Character'}: ${characters.find(c => c.id === selectedCharacterId)?.name || '...'}`
+                          ? `${t('topic_form.character_label')}: ${characters.find(c => c.id === selectedCharacterId)?.name || '...'}`
                           : `User: ${profile?.nickname || profile?.email?.split('@')[0] || t('nav.profile')}`
                         }
                       </span>
@@ -358,7 +357,7 @@ const TopicFormPage = () => {
                           if (user) setLastSelectedMask(char.id);
                         }}
                       >
-                        {lang === 'ru' ? 'Персонаж' : 'Character'}: {char.name}
+                        {t('topic_form.character_label')}: {char.name}
                       </Dropdown.Item>
                     ))}
                   </Dropdown.Menu>
@@ -368,10 +367,10 @@ const TopicFormPage = () => {
 
             {!user && (
               <Form.Group className="mb-3" controlId="guestNickname">
-                <Form.Label className="fw-bold h6">{lang === 'ru' ? 'Ваш никнейм' : 'Your Nickname'} <span className="text-danger">*</span></Form.Label>
+                <Form.Label className="fw-bold h6">{t('topic_form.nickname_label')} <span className="text-danger">*</span></Form.Label>
                 <Form.Control
                   type="text"
-                  placeholder={lang === 'ru' ? 'Введите имя...' : 'Enter your name...'}
+                  placeholder={t('topic_form.nickname_placeholder')}
                   value={guestNickname}
                   onChange={(e) => setGuestNickname(e.target.value)}
                   required
@@ -380,10 +379,10 @@ const TopicFormPage = () => {
               </Form.Group>
             )}
             <Form.Group className="mb-3">
-              <Form.Label className="fw-bold h6">{lang === 'ru' ? 'Содержание' : 'Content'}</Form.Label>
+              <Form.Label className="fw-bold h6">{t('topic_form.content_label')}</Form.Label>
               <RichEditor
                 id="topicContent"
-                placeholder={lang === 'ru' ? 'Напишите ваше сообщение здесь...' : 'Write your message here...'}
+                placeholder={t('topic_form.content_placeholder')}
                 rows={6}
                 minHeight="210px"
                 value={content}

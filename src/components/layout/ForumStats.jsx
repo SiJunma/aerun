@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { Card } from 'react-bootstrap';
 import { Users, FileText, MessageSquare, TrendingUp, History } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
 import { useAuth } from '../../contexts/AuthProvider';
@@ -9,7 +8,7 @@ import { CHIEF_ADMIN_ID } from '../../constants/permissions';
 
 const ForumStats = () => {
   const { t } = useI18n();
-  const { user, categories, activeUsers, forumStats, dailyActiveUsers: contextDailyUsers } = useAuth();
+  const { categories, activeUsers, forumStats, dailyActiveUsers: contextDailyUsers } = useAuth();
 
   const [activeGuestsRaw, setActiveGuestsRaw] = useState([]);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
@@ -28,18 +27,21 @@ const ForumStats = () => {
     };
   }, []);
 
-
   // Онлайн пользователи и гости
   const { onlineUsers, activeGuestsCount } = useMemo(() => {
     const FIFTEEN_MINS_MS = 15 * 60 * 1000;
     const threshold = currentTime - FIFTEEN_MINS_MS;
-    const currentGuestId = localStorage.getItem('guest_id');
-    
+
+    // No local masking. The old `if (user && g.id === currentGuestId) return
+    // false` hid the browser's own guest row only on the tab that happened to
+    // share the same localStorage — on a second monitor, in a private window
+    // or on a phone the same guest was counted (AUDIT §3.1). The server
+    // already removes the guest row when the visitor logs in, so whatever
+    // remains in guest_presence is a real guest and is counted as one.
     const filteredGuests = activeGuestsRaw.filter(g => {
       const lastSeenMs = typeof g.last_seen === 'number'
         ? g.last_seen
         : (g.last_seen?.toMillis ? g.last_seen.toMillis() : (typeof g.last_seen === 'string' ? new Date(g.last_seen).getTime() : 0));
-      if (user && g.id === currentGuestId) return false;
       return lastSeenMs >= threshold;
     });
 
@@ -47,7 +49,7 @@ const ForumStats = () => {
       onlineUsers: activeUsers,
       activeGuestsCount: filteredGuests.length
     };
-  }, [activeUsers, activeGuestsRaw, currentTime, user]);
+  }, [activeUsers, activeGuestsRaw, currentTime]);
 
   // "Visited today" is a DIFFERENT clock from the list above it, and it used to
   // be the same array: subscribeToDailyActiveUsers was a one-line alias of the
@@ -69,49 +71,50 @@ const ForumStats = () => {
   const newestUser = forumStats?.newestUser ?? null;
 
   return (
-    <div className="forum-stats-section mt-5 mb-4">
-      <Card className="shadow-sm border-0 forum-stats-card">
-        <Card.Header className="stats-header d-flex align-items-center gap-2">
-          <span className="forum-header-text">
+    <section id="forum-statistics" className="forum-statistics mt-5 mb-4">
+      <div className="forum-stats-card">
+        <header className="stats-header">
+          <span className="stats-title">
             {t('stats.title')}
           </span>
-          <TrendingUp size={14} className="text-primary opacity-75" />
-        </Card.Header>
-        <Card.Body className="p-0">
-          <div className="stats-grid p-2 px-3 border-bottom">
-            <div className="d-flex flex-wrap align-items-center gap-4 stats-row-compact">
-              <div className="d-flex align-items-center gap-2 stats-item">
-                <MessageSquare size={14} className="text-muted opacity-50" />
-                <div className="d-flex align-items-center gap-1">
-                  <span className="fw-bold small">{totalTopics.toLocaleString()}</span>
-                  <span className="text-muted small">{t('stats.topics')}</span>
+          <TrendingUp size={14} className="stats-header-icon" />
+        </header>
+
+        <div className="stats-body">
+          <div className="stats-grid">
+            <div className="stats-row-compact">
+              <div className="stats-item stat-topics">
+                <FileText size={14} className="stats-item-icon" />
+                <div className="stats-item-text-group">
+                  <span className="stat-count">{totalTopics.toLocaleString()}</span>
+                  <span className="stat-label">{t('stats.topics')}</span>
                 </div>
               </div>
               
-              <div className="d-flex align-items-center gap-2 stats-item">
-                <FileText size={14} className="text-muted opacity-50" />
-                <div className="d-flex align-items-center gap-1">
-                  <span className="fw-bold small">{totalPosts.toLocaleString()}</span>
-                  <span className="text-muted small">{t('stats.posts')}</span>
+              <div className="stats-item stat-posts">
+                <MessageSquare size={14} className="stats-item-icon" />
+                <div className="stats-item-text-group">
+                  <span className="stat-count">{totalPosts.toLocaleString()}</span>
+                  <span className="stat-label">{t('stats.posts')}</span>
                 </div>
               </div>
 
-              <div className="d-flex align-items-center gap-2 stats-item">
-                <Users size={14} className="text-muted opacity-50" />
-                <div className="d-flex align-items-center gap-1">
-                  <span className="fw-bold small">{totalUsers.toLocaleString()}</span>
-                  <span className="text-muted small">{t('stats.members')}</span>
+              <div className="stats-item stat-members">
+                <Users size={14} className="stats-item-icon" />
+                <div className="stats-item-text-group">
+                  <span className="stat-count">{totalUsers.toLocaleString()}</span>
+                  <span className="stat-label">{t('stats.members')}</span>
                 </div>
               </div>
 
               {newestUser && (
-                <div className="d-flex align-items-center gap-2 stats-item ms-auto-md">
-                  <History size={14} className="text-muted opacity-50" />
-                  <div className="d-flex align-items-center gap-1">
-                    <span className="text-muted small">{t('stats.newest_member')}</span>
+                <div className="stats-item stat-newest-member ms-auto-md">
+                  <History size={14} className="stats-item-icon" />
+                  <div className="stats-item-text-group">
+                    <span className="stat-label">{t('stats.newest_member')}</span>
                     <Link 
                       to={`/profile/${newestUser.id}`} 
-                      className={`online-user-link text-decoration-none fw-bold small ${newestUser.role_id === 'admin' || newestUser.role_id === CHIEF_ADMIN_ID ? 'online-author-admin' : newestUser.role_id === 'moderator' ? 'online-author-mod' : 'text-primary'}`}
+                      className={`online-user-link ${newestUser.role === 'admin' || newestUser.role === CHIEF_ADMIN_ID ? 'online-author-admin' : newestUser.role === 'moderator' ? 'online-author-mod' : 'stat-user-default'}`}
                     >
                       {newestUser.nickname}
                     </Link>
@@ -122,24 +125,24 @@ const ForumStats = () => {
           </div>
 
           {/* Online Users Section */}
-          <div className="online-users-panel p-2 px-3">
-            <div className="d-flex flex-wrap align-items-center online-list" style={{ gap: '0 4px' }}>
-              <span className="text-muted small fw-semibold flex-shrink-0 d-flex align-items-center gap-2 me-1">
-                <div className="online-indicator-blob shadow-none" style={{ width: 6, height: 6 }}></div>
+          <div className="online-users-panel stat-online">
+            <div className="online-list">
+              <span className="online-list-label">
+                <div className="online-indicator-blob"></div>
                 {t('stats.online_now')} ({t('stats.guests')}: {activeGuestsCount}, {t('stats.users')}: {onlineUsers.length}):
               </span>
               {onlineUsers.length === 0 ? (
-                <span className="text-muted small italic opacity-75">{t('stats.silence')}</span>
+                <span className="stat-silence">{t('stats.silence')}</span>
               ) : (
                 onlineUsers.map((u, i) => (
-                  <span key={u.id} className="small">
+                  <span key={u.id} className="online-user-entry">
                     <Link
                       to={`/profile/${u.id}`}
-                      className={`online-user-link text-decoration-none ${u.role_id === 'admin' || u.role_id === CHIEF_ADMIN_ID ? 'online-author-admin' : u.role_id === 'moderator' ? 'online-author-mod' : 'text-primary'}`}
+                      className={`online-user-link ${u.role === 'admin' || u.role === CHIEF_ADMIN_ID ? 'online-author-admin' : u.role === 'moderator' ? 'online-author-mod' : 'stat-user-default'}`}
                     >
                       {u.nickname}
                     </Link>
-                    {i < onlineUsers.length - 1 && <span className="text-muted">,</span>}
+                    {i < onlineUsers.length - 1 && <span className="online-separator">,</span>}
                   </span>
                 ))
               )}
@@ -147,23 +150,23 @@ const ForumStats = () => {
           </div>
 
           {/* Daily Active Users Section */}
-          <div className="online-users-panel p-2 px-3" style={{ borderTop: '1px solid rgba(128,128,128,0.15)' }}>
-            <div className="d-flex flex-wrap align-items-center online-list" style={{ gap: '0 4px' }}>
-              <span className="text-muted small fw-semibold flex-shrink-0 me-1">
+          <div className="online-users-panel stat-visited-today">
+            <div className="online-list">
+              <span className="online-list-label">
                 {t('stats.visited_today')} ({dailyActiveCount}):
               </span>
               {dailyActiveUsers.length === 0 ? (
-                <span className="text-muted small italic opacity-75">{t('stats.silence')}</span>
+                <span className="stat-silence">{t('stats.silence')}</span>
               ) : (
                 dailyActiveUsers.map((u, i) => (
-                  <span key={u.id} className="small">
+                  <span key={u.id} className="online-user-entry">
                     <Link
                       to={`/profile/${u.id}`}
-                      className={`online-user-link text-decoration-none ${u.role_id === 'admin' || u.role_id === CHIEF_ADMIN_ID ? 'online-author-admin' : u.role_id === 'moderator' ? 'online-author-mod' : 'text-primary'}`}
+                      className={`online-user-link ${u.role === 'admin' || u.role === CHIEF_ADMIN_ID ? 'online-author-admin' : u.role === 'moderator' ? 'online-author-mod' : 'stat-user-default'}`}
                     >
                       {u.nickname}
                     </Link>
-                    {i < dailyActiveUsers.length - 1 && <span className="text-muted">,</span>}
+                    {i < dailyActiveUsers.length - 1 && <span className="online-separator">,</span>}
                   </span>
                 ))
               )}
@@ -171,14 +174,14 @@ const ForumStats = () => {
           </div>
 
           {/* Footer Links */}
-          <div className="stats-footer p-1 px-3 border-top d-flex justify-content-between align-items-center flex-wrap gap-2">
-            <Link to="/active-topics" className="btn btn-link btn-xs p-0 text-decoration-none text-primary opacity-50 hover-opacity-100 small">
+          <div className="stats-footer">
+            <Link to="/active-topics" className="stats-footer-link">
               {t('stats.active_topics')}
             </Link>
           </div>
-        </Card.Body>
-      </Card>
-    </div>
+        </div>
+      </div>
+    </section>
   );
 };
 

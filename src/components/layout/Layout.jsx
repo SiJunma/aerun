@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import Navigation from './Navbar';
-import { Container, Alert, Button } from 'react-bootstrap';
+import { Container } from 'react-bootstrap';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
 import { useDesign } from '../../contexts/DesignProvider';
@@ -34,48 +34,50 @@ const Layout = ({ children }) => {
   }, [settings?.welcomeMessage, activeDesign?.welcomeMessage, lang]);
 
   return (
-    <>
-      <ForumBackground />
+    <div id="forum-wrapper" className="forum-wrapper">
+      <div id="forum" className="forum">
+        <ForumBackground />
 
-      <div className="app-wrapper">
-        <ConnectionStatusBanner />
-        <Navigation />
+        <div className="app-wrapper">
+          <ConnectionStatusBanner />
+          <Navigation />
 
-        {settings?.maintenanceMode && (
-          <Alert variant="danger" className="m-0 text-center rounded-0 border-0 shadow-sm sticky-top maintenance-status-banner" style={{ zIndex: 900, top: '56px' }}>
-            <span className="small fw-medium">
-              {t('auth.maintenance_banner')}
-            </span>
-          </Alert>
-        )}
+          {settings?.maintenanceMode && (
+            <div id="forum-status" className="forum-status-banner maintenance-status-banner">
+              <span className="small fw-medium">
+                {t('auth.maintenance_banner')}
+              </span>
+            </div>
+          )}
 
-        <EmailVerificationBanner />
-        
-        {sanitizedBanner && location.pathname === '/' && (
-          <div dangerouslySetInnerHTML={{ __html: sanitizedBanner }} />
-        )}
+          <EmailVerificationBanner />
+          
+          {sanitizedBanner && location.pathname === '/' && (
+            <div id="forum-announcement" className="forum-announcement" dangerouslySetInnerHTML={{ __html: sanitizedBanner }} />
+          )}
 
-        <main className="py-2">
+          <main className="forum-main-content">
+            <Container>
+              {children}
+            </Container>
+          </main>
+        </div>
+        <footer id="forum-about" className="forum-about footer-custom py-2 text-center">
           <Container>
-            {children}
+            <p className="mb-0 small">
+              &copy; {new Date().getFullYear()} {
+                activeDesign?.forumTitle ? activeDesign.forumTitle : (
+                  (typeof settings?.forumName === 'object' && settings.forumName !== null)
+                    ? (settings.forumName[lang] || settings.forumName.en || 'Aerun Forum')
+                    : (settings?.forumName || 'Aerun Forum')
+                )
+              }
+            </p>
           </Container>
-        </main>
+        </footer>
+        <ScrollButtons />
       </div>
-      <footer className="footer-custom py-2 text-center">
-        <Container>
-          <p className="mb-0 small">
-            &copy; {new Date().getFullYear()} {
-              activeDesign?.forumTitle ? activeDesign.forumTitle : (
-                (typeof settings?.forumName === 'object' && settings.forumName !== null)
-                  ? (settings.forumName[lang] || settings.forumName.en || 'Aerun Forum')
-                  : (settings?.forumName || 'Aerun Forum')
-              )
-            }
-          </p>
-        </Container>
-      </footer>
-      <ScrollButtons />
-    </>
+    </div>
   );
 };
 

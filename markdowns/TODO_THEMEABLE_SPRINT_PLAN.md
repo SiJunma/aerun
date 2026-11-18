@@ -1,175 +1,554 @@
-# Themeable DOM Refactoring — мастер-план для агентов
+# Themeable DOM Refactoring — рабочий план миграции
 
-## Оглавление
-
-1. [Контекст и цель](#1-контекст-и-цель)
-2. [Архитектурные решения](#2-архитектурные-решения)
-3. [Текущая структура проекта](#3-текущая-структура-проекта)
-4. [Спецификации по страницам — что уже есть](#4-спецификации-по-страницам--что-уже-есть)
-5. [Спецификации по страницам — что нужно создать](#5-спецификации-по-страницам--что-нужно-создать)
-6. [Спринт 0 — Инфраструктура](#спринт-0--инфраструктура)
-7. [Спринт 1 — Layout, Navbar, общий каркас](#спринт-1--layout-navbar-общий-каркас)
-8. [Спринт 2 — Forum Index (MainPage)](#спринт-2--forum-index-mainpage)
-9. [Спринт 3 — Forum View (CategoryPage + TopicRow)](#спринт-3--forum-view-categorypage--topicrow)
-10. [Спринт 4 — Topic View (TopicPage)](#спринт-4--topic-view-topicpage)
-11. [Спринт 5 — Members View (MembersPage)](#спринт-5--members-view-memberspage)
-12. [Спринт 6 — Profile (ProfilePage)](#спринт-6--profile-profilepage)
-13. [Спринт 7 — Списки тем: Active Topics, New Replies, Subscriptions](#спринт-7--списки-тем-active-topics-new-replies-subscriptions)
-14. [Спринт 8 — Уведомления (NotificationsPage)](#спринт-8--уведомления-notificationspage)
-15. [Спринт 9 — Создание темы (TopicFormPage)](#спринт-9--создание-темы-topicformpage)
-16. [Спринт 10 — Личные сообщения (MessagesPage + DirectMessages)](#спринт-10--личные-сообщения-messagespage--directmessages)
-17. [Спринт 11 — Аутентификация и служебные страницы](#спринт-11--аутентификация-и-служебные-страницы)
-18. [Спринт 12 — Админка (AdminPage + DesignsTab)](#спринт-12--админка-adminpage--designstab)
-19. [Спринт 13 — Themeable CSS базовый файл](#спринт-13--themeable-css-базовый-файл)
-20. [Спринт 14 — Theme API Reference документация](#спринт-14--theme-api-reference-документация)
-21. [Спринт 15 — Интеграционное тестирование](#спринт-15--интеграционное-тестирование)
-22. [Зависимости между спринтами](#зависимости-между-спринтами)
-23. [Общие правила для агентов](#общие-правила-для-агентов)
+> **Актуальный стек**: Go 1.27 + PocketBase (SQLite) + React 19 (обновлено: Ноябрь 2026).
+> **Ветка**: `feature/theming`. Источник правды — ветка на GitHub, а не локальные копии.
+> **Спецификации DOM**: `markdowns/SPEC_forum-index-theme-dom.md`, `markdowns/SPEC_forum-and-members-theme-dom.md`, `markdowns/SPEC_forum-topic-view-theme-dom.md`, `markdowns/SPEC_REFACTOR_ADMIN_PAGE_ARCHITECTURE.md`, `markdowns/SPEC_REFACTOR_PROFILE_PAGE_ARCHITECTURE.md`.
 
 ---
 
-# 1. Контекст и цель
+## Как пользоваться этим планом (прочти первым)
 
-Aerun Forum — это React + Firebase SPA-форум с системой кастомных дизайнов. Администраторы создают дизайны (CSS + JS), которые инжектятся на страницу через `DesignProvider`.
+Этот документ — инструкция для агента-исполнителя (например, Nemotron в Cline). Он устроен так:
 
-**Проблема:** текущий DOM построен целиком на Bootstrap-компонентах (`Card`, `Table`, `Row`, `Col`, `Badge`) без семантических классов и стабильных `id`. Кастомный CSS не может надёжно стилизовать форум, т.к. нет публичного DOM API.
+1. **Плейбук** — как мигрировать ОДИН компонент, шаг за шагом, чтобы вид не изменился. Прочти его целиком, прежде чем трогать код.
+2. **Спринты A–J** — порядок работы. Бери спринты строго по порядку, внутри спринта — компоненты по одному, сверху вниз.
+3. **Статус и карта повторяющихся элементов** — что уже чисто, что осталось, где элементы повторяются и чем отличаются.
+4. **Справочные мини-спецификации** — целевые DOM для страниц, у которых нет отдельного SPEC-файла.
+5. **Журнал ключевых решений** — почему принято так, а не иначе. Подробный журнал правок 2026-11-05…09 вынесен в `markdowns/Archive/THEME_JOURNAL_2026-11-06.md` — в рабочем плане ему не место, но он сохранён.
 
-**Цель:** перестроить DOM всех страниц форума так, чтобы при активном кастомном дизайне рендерилась стабильная семантическая разметка с `id`, `class` и `data-*` атрибутами, описанная в спецификациях `markdowns/`. Это позволит CSS-темам полностью переоформлять форум без знания внутренней React-реализации.
+Правила, которые нельзя нарушать (подробнее — в «Правилах для агентов» в конце):
 
-**Стратегия безопасности:** существующие 3 встроенные темы (`dark`, `light`, `neutral`) **не изменяются**. Новая семантическая разметка активируется **только** при работе с кастомным дизайном. Тестируем через уже существующий механизм `?preview_design=`.
+- **Один компонент за раз.** Закончил компонент — `npm run build` + `npm test`, отчёт, только потом следующий.
+- **Вид не меняется.** Миграция — это переезд стилей, а не редизайн. Любое визуальное отличие от состояния до изменений — баг, а не «улучшение».
+- **Никаких `isThemeable`-веток.** Семантический DOM — всегда, для всех тем.
+- **Bootstrap и инлайн-стили — в именные классы, 1:1.** Значение берётся из оригинала, а не «похожее».
+- **Новые токены — только цвета.** Паддинги, размеры, радиусы — литералами в классе.
+- **Не трогай бизнес-логику.** Только DOM-атрибуты, классы, теги и CSS.
+
+---
+## 📌 Журнал реализации и ключевые решения
+
+### Архитектурное решение (Ноябрь 2026)
+1. **Полный уход от Bootstrap-классов с `!important`**:
+   - Любой элемент должен переопределяться кастомными темами и CSS без специфических войн и необходимости вешать `!important`.
+   - Никаких инлайн-стилей: ни `style={{ ... }}`, ни Bootstrap-утилитных классов. Только семантический класс в `src/styles/*.css`, а размер/тень/цвет/зазор — через токены в `src/styles/theme-variables.css`. JSX хранит только данные и state.
+
+2. **Аватар и ник — неделимая единица**:
+   -`.author-meta` — `flex-wrap: wrap`: дата может переноситься отдельной строкой.
+   - `.author-meta__identity` держит «аватар + ник» как единый flex-блок и сам не разрывается.
+   - Ломается только сам ник (`white-space: normal`, `overflow-wrap: anywhere`, `min-width: 0`); аватар всегда на строке, с которой начинается ник (в начале flex-строки, `align-self: flex-start`).
+   - Декоративный разделитель (`·`) не рисуется.
+   - Размер аватара задаётся CSS-токеном `--author-meta-avatar-size: 20px`, а не магической константой в JSX. HTML-атрибуты `width`/`height` у `<img>` — только для placeholder/CLS, визуальный размер даёт CSS.
+   - `ForumAuthorAvatar` больше не рендерит инлайн-стили
+   - Compass: не удалять Bootstrap-импорт глобально пока не мигрированы все страницы — другие экраны (TopicPage, Admin, DM, Profile…) ещё на `react-bootstrap`. Удаление `bootstrap.min.css` / `react-bootstrap` — финальный шаг, только после Этапов 3–7.
+2. **Семантический DOM первого класса**:
+   - Вместо дублирования веток JSX (`isThemeable ? new_markup : old_bootstrap`), компоненты напрямую переводятся на семантический HTML5 (`<main id="forum-main">`, `<section id="forum-category-{id}" class="forum-category">`, `<article id="forum-item-{id}" class="forum-item">`, `<section id="forum-statistics">`), сохраняя точный визуальный вид для стандартных тем (`dark`, `light`, `neutral`).
+   - Итоговый вид страниц на этом этапе **не меняется**: Grid заменяет Table, Flex — утилиты, карточки — семантические секции; десктоп и мобильный (≤768px) брейкпоинты повторены 1:1.
+3. **Покомпонентный план миграции**:
+   - Начинаем с крупных сущностей и переходим к атомарным.
+   - Этап 1: Главная страница (`home` / `MainPage`), каркас `Layout`, `Navbar`, `ForumStats`, `LastPostInfo`.
+   - Этап 2: Страница категории (`CategoryPage`) + общие атомы списков (`TopicRow`, `ForumPagination`, `ForumEmptyState`-вызовы, management toolbar) + 3 страницы-списка, которые их потребляют (`ActiveTopicsPage`, `NewRepliesPage`, `SubscriptionsPage`). См. «Расхождения» — фактический DOM отличается от исходного Спринта 3/7 в нескольких именах.
+
+### Единая схема хедеров и сабтайтлов (Ноябрь 2026 — ревизия, supersede старых имён)
+> В этом разделе — фактическая схема после ревизии. Где ниже по журналу встречаются старые
+> имена (`.category-header` как полоса группы, `.category-head`, `.topic-list-head`,
+> `.forum-view-header` и т.п.) — они переименованы этим разделом; исторические записи
+> журнала не правятся, но правильные имена теперь только эти.
+
+Сущности «группа» и «список тем» внешне похожи, но это разные блоки. Один класс = разметка,
+различия = модификаторы (только состояния), визуальные варианты = отдельные именованные блоки
+(не модификаторы), размеры/паддинги/шрифты — литерально в классах, токены — только цветовые.
+
+| Сущность | Класс | Где | Что это |
+|---|---|---|---|
+| Хедер группы (главная) | `.category-group-header` + `.category-group-title` (h2) | forum-index.css | цветная полоса с названием группы |
+| Хедер колонок (главная) | `.category-group-subtitle` | forum-index.css | полоса forum/topics/posts/lastpost, small-caps |
+| Хедер страницы (категория + active/new/subs) | `.category-header`, элементы `-heading/-title/-description/-meta/-actions` | forum-view.css | название + описание + контролы (id остаётся `#forum-view-header`) |
+| Хедер колонок (категория + active/new/subs) | `.category-subtitle` | forum-view.css | полоса topic/[category]/replies/lastpost; **дизайн = хедер группы** |
+| Ячейки колонок (общие атомы) | `.category-col--{forum,topic,topics,posts,replies,category,lastpost}` | forum-index.css | выравнивание/nowrap; используются обоими сабтайтлами |
+| Мобильная полоса LAST POST | `.last-post-strip` (единый класс) | topic-row.css | ОДИН класс для `.forum-last-post` (главная + категория) и `.topic-last-post` (списки). Хром полосы (паддинги, компенсирующие margins, фон, бордер, метка, ховер-подсветка) правится только в topic-row.css — страница-файлы его не дублируют. В author-meta.css мета-блок главной скоуплен на `#forum-index` — не убирать скоуп, иначе форс-stretch ссылки снова перебьёт ховер-подсветку на категории/списках |
+| Строка категории | `.forum-item--topic` | forum-index.css | вариант `.forum-item`: 3 колонки, без counts-topics |
+| Состояние manage | `.has-check` (хедер), `.is-managing` (строка) | — | +фиксированная колонка чекбокса **40px** |
+
+Правила, выверенные со скриншотами деплоя (2026-11-14):
+- **Чекбокс-колонка** — константные **32px** + обычный 10px gap и в хедере (`.category-subtitle-check`),
+  и в строках (`.forum-item--topic.is-managing`, `.topic-item.is-managing`); `.topic-select` —
+  `padding: 0`, ширина колонки и есть визуальная ширина. Ломать «растягивается с колонкой»
+  легаси-Table не воспроизводим. Чекбокс — полностью кастомный нативный input
+  (`.topic-select-input`: рамка/фон из токенов `--topic-check-*`, белая галка на `--primary-color`).
+  На мобильных — «чип» в правом верхнем углу карточки: absolute top/right с подложкой
+  `--topic-check-chip-bg` (сильнее в dark).
+- **Иконки pinned/locked** — inline в flex-строке заголовка (`.forum-title` — flex+wrap),
+  по поведению как буллет: никогда не переносятся на строку выше тайтла.
+- **Last Post**: главная — тайтл темы + таймштамп/автор; категория и списки —
+  только таймштамп + автор (+ unread dot), тайтл уже в первой колонке
+  (`.last-topic-link` на категории не рендерится).
+- **Врапается всё, кроме цифр**: тайтл (длинные названия + мини-пагинация), колонка категории
+  (`.topic-category a` — `white-space: normal; overflow-wrap: anywhere`), last-post
+  (длинные ники/таймштампы). Только counters (`.forum-topics/.forum-posts/.topic-replies`) — nowrap.
+- **Название категории в строках списков — без дублей**: на десктопе оно живёт ТОЛЬКО в
+  колонке `.topic-category`; на мобильных (колонка скрыта) — в строке статов
+  `.topic-mobile-stats`: счётчик слева, категория справа (`.topic-mobile-category`).
+  Инлайн-вариант под тайтлом удалён как мёртвый код.
+- **Типографика строк категории = TopicRow**: `.forum-item--topic .forum-title` —
+  `--topic-title-*` (1rem/700), мини-пагинация регулярного веса, под тайтлом мета
+  создания `дата · автор` (`.topic-author`, AuthorMeta `showAvatar={false}`).
+- **Мобильные ≤768px**: `.category-subtitle` и `.category-group-subtitle` — `display:none`
+  (строки перестраиваются в колонку); хедеры страниц остаются.
+- **Средний диапазон ≤993px**: все сетки сужаются согласованно — счётчики 100px→80px,
+  первая колонка 260px→220px; чекбокс-колонка остаётся 32px. Варианты: `.forum-item`,
+  `.forum-item--topic(.is-managing)`, `.category-group-subtitle`, `.category-subtitle`
+  (`+.has-category`, `+.has-check`), `.topic-item` (те же модификаторы). Media-блоки
+  стоят ПОСЛЕ базовых правил (та же специфичность — решает порядок в файле).
+- **Мини-пагинация** строк — общий компонент `TopicMiniPagination` (TopicRow + строки категории).
+- **Токены**: `--category-group-header-*` (полоса группы), `--category-header-*`
+  (хедер страницы; description-color по темам), `--category-subtitle-bg/-text` —
+  алиасы цветов хедера группы (тема, перекрашивающая полосу, красит и сабтайтл),
+  `--forum-view-btn-danger-*` (Delete в toolbar). `--topic-list-head-*` удалены —
+  геометрия сабтайтла литерально в классе.
+- Обёртки без Bootstrap: `#forum-view` корень категории (`data-forum-id`),
+  `#forum-topic-list` > `.topic-list`, `#forum-pagination-bottom` + `.forum-view-pagination`
+  (border-top внутри карточки), `.forum-view-error`, `.forum-view-empty-actions`,
+  `.forum-view-footer/.forum-view-back`; toolbar — `.management-toolbar-count/-divider/-hint`,
+  кнопки `.forum-view-action-btn--secondary/--danger` + `.forum-view-action-label`
+  (иконка < 992px, иконка+текст ≥ 992px).
+
+### Структура стилей (куда что класть)
+
+| Файл | Зона ответственности |
+|---|---|
+| `src/styles/theme-variables.css` | Все семантические токены (`--*`), значения по умолчанию на `body` + переопределения `body[data-theme='dark'/'light'/'neutral']`. Никаких правил layout здесь — только переменные. `body`, а не `:root`: см. «Фикс тёмной темы Категории» в статусе Этапа 2. |
+| `src/styles/layout.css` | Каркас: `#forum-wrapper`, `#forum`, `#forum-header`, `#forum-title`, `#forum-nav`, `#forum-user-links`, `#forum-status`, `#forum-announcement`, `#forum-about`, футер. |
+| `src/styles/forum-index.css` | Главная: `#forum-index`, `#forum-main`, `.forum-category`, `.category-group-header/.category-group-title`, `.category-group-subtitle`, общие ячейки `.category-col--*` (главная + сабтайтлы списков), `.forum-item` (+`.forum-item--topic` для строк категории), `.forum-last-post`, скелетоны главной. |
+| `src/styles/forum-stats.css` | `ForumStats`: `#forum-statistics`, `.forum-stats-card`, `.stats-*`, `.online-*`. |
+| `src/styles/forum-view.css` | Страница категории + списки тем: `#forum-view`, `#forum-view-header` + `.category-header(-title/-description/-actions)`, `#forum-actions-top`, `#forum-pagination-*`, `#forum-topic-list`, `.category-subtitle` (+`.has-check/.has-category`), `.forum-view-empty`, `.forum-view-back`, `.management-toolbar*`, `.forum-view-spinner`, `.topic-select-input`, классы скелетонов списка. |
+| `src/styles/topic-row.css` | `TopicRow` (общий атом списков): `.topic-item`, `.topic-main/head/title/description/meta`, `.topic-category`, `.topic-replies`, `.topic-last-post`, `.mini-pagination`, `.unread-dot`. |
+| `src/styles/author-meta.css` | `AuthorMeta` + `LastPostInfo`: `.author-meta`, `.author-meta__date`, `.author-meta__identity`, `.author-meta__avatar`, `.author-meta__name`, `.last-post-link-meta`, `.last-post-meta`, `.last-post-empty`. |
+| `src/styles/forum-pagination.css` | `ForumPagination` (общий атом): `.forum-pagination`, `.page-item/.page-link` состояния. Импортируется только из `main.jsx`; локальный `ForumPagination.css` удалён (был `@import`-редирект). |
+| `src/styles/utilities.css` | Остаточные глобальные утилиты (`.cursor-pointer`, `.user-select-none`, `.spin`, `.topic-pinned/.topic-locked` через токены). Management toolbar здесь больше не живёт — переехал в `forum-view.css`. |
+| `src/index.css` | Глобальные темы/база + ещё не мигрированные страницы. Новые семантические правила сюда не добавлять. |
+| `src/main.jsx` | Порядок импортов: `theme-variables.css` → модульные `src/styles/*.css`. Bootstrap CSS остаётся подключённым до конца миграции. |
+
+### Аудит 2026-11-17: остаток миграции (сверено с `feature/theming`, HEAD `2e574979`)
+
+#### Что уже чисто (0 инлайн-стилей, 0 Bootstrap-утилит, 0 react-bootstrap)
+`MainPage`, `CategoryPage`, `TopicPage`, `TopicPostCard`, `TopicHeader`, `TopicActionsBar`, `TopicRow`, `TopicMiniPagination`, `ActiveTopicsPage`, `NewRepliesPage`, `SubscriptionsPage`, `AuthorMeta`, `ForumStats`, `LastPostInfo`, `App.jsx`, `main.jsx` (+ не-UI: `api/`, `hooks/`, `contexts/` кроме `ToastProvider`, `utils/`, `config/`, `i18n/`). Это Этапы 1–2 и ядро Этапа 3.
+
+#### Хвост внутри уже переведённых мест (добить до снятия Bootstrap)
+- `ForumPagination.jsx` — `Pagination` из react-bootstrap (6 тегов), утилит 0.
+- `ForumBreadcrumbs.jsx` — `Breadcrumb` из react-bootstrap (3 тега).
+- `Layout.jsx` — `Container` (2 тега) + 5 утилит (`small`, `fw-medium`, `py-2`, `text-center`, `mb-0`).
+- `ForumRoleBadge` / `ForumCharacterBadge` / `ForumAuthorAvatar` — `Badge` / `Image` (1–4 тега).
+- `ForumTabs.jsx` — 3 утилиты, `LastPostInfo.jsx` — 3 (`text-muted`, `small`, `me-1`), `ForumStats.jsx` — 2 (`mt-5`, `mb-4`), `TopicHeader.jsx` — 1 (`text-nowrap`), `NewRepliesPage.jsx` — 1.
+- `ForumEmptyState.jsx` — ещё на Bootstrap `Card` (Этап 7). `ForumModal.jsx` — обёртка над react-bootstrap `Modal` (9 тегов).
+- `Navbar.jsx` — вопреки записи Этапа 1 («устранены инлайн-стили»): 11 `style={{…}}` (бейдж статуса, точка-индикатор, аватар 32px, плейсхолдеры `width: 16` под галочку темы, `cursor: pointer`) + 94 Bootstrap (75 утилит + 19 RB-тегов). Добить отдельным заходом.
+- `ScrollButtons.jsx` — мёртвый импорт `Button` из react-bootstrap (не используется).
+
+#### Не начато: полный остаток
+Всего: `style={` — 277 в 37 файлах (из них `style={{` — 266; остальное — одиночные `style={…}` с динамикой). Точных Bootstrap-утилит + RB-тегов — 4 596. React-bootstrap импортируют 52 файла. `bootstrap.min.css` всё ещё подключён в `main.jsx:4` — снимать нельзя, пока эти файлы на нём. `index.css` до сих пор несёт 288 hex-значений и Bootstrap-переопределения (живые, не только закомментированные).
+
+| Файл | Inline `style={` | Bootstrap (утилиты + RB-теги) | Таблицы | Статус |
+|---|---|---|---|---|
+| `pages/AdminPage.jsx` | 52 | 875 | 5 таблиц (81 тег) | не начато |
+| `pages/ProfilePage.jsx` | 35 | 763 | 1 (история репутации, 16) | не начато |
+| `components/common/RichEditor.jsx` | 20 | 510 | 1 (хоткеи, 4) | не начато, особый случай |
+| `pages/NotificationsPage.jsx` | 13 | 218 | — | не начато |
+| `components/dm/DirectMessages.jsx` | 33 | 169 | — | не начато |
+| `components/profile/SecurityTab.jsx` | 3 | 171 | — | не начато |
+| `pages/MembersPage.jsx` | 11 | 149 | 1 (список участников, 20) | не начато |
+| `components/common/BBCode.jsx` | 28 | 92 | 1 (пользовательские `[table]`, 10) | особый случай |
+| `components/admin/EmailTemplatesSettings.jsx` | 4 | 114 | — | не начато |
+| `components/layout/Navbar.jsx` | 11 | 94 | — | хвост Этапа 1 |
+| `components/admin/DesignsTab.jsx` | 0 | 102 | — | не начато |
+| `pages/DraftsPage.jsx` | 3 | 91 | — | не начато |
+| `components/topic/TopicReplyComposer.jsx` | 5 | 89 | — | хвост Этапа 3 |
+| `pages/TopicFormPage.jsx` | 0 | 86 | — | не начато |
+| `components/auth/RegisterForm.jsx` | 2 | 84 | — | не начато |
+| `pages/ConfirmPasswordResetPage.jsx` | 1 | 72 | — | не начато |
+| `components/auth/LoginForm.jsx` | 2 | 63 | — | не начато |
+| `components/common/ErrorCard.jsx` | 7 | 61 | — | не начато |
+| `components/topic/TopicModalsContainer.jsx` | 1 | 61 | — | хвост Этапа 3 |
+| `components/modals/TransferRootModal.jsx` | 0 | 55 | — | не начато |
+| `components/common/EmailVerificationBanner.jsx` | 0 | 52 | — | не начато |
+| `pages/ConfirmVerificationPage.jsx` | 1 | 52 | — | не начато |
+| `components/topic/PostInlineEditor.jsx` | 1 | 40 | — | хвост Этапа 3 |
+| `components/modals/MovePostsModal.jsx` | 9 | 37 | — | не начато |
+| `components/modals/UnsentReplyModal.jsx` | 4 | 36 | — | не начато |
+| `components/common/AvatarUploader.jsx` | 6 | 35 | — | не начато |
+| `components/common/PostVotersModal.jsx` | 0 | 34 | — | не начато |
+| `components/auth/ForgotPasswordForm.jsx` | 0 | 32 | — | не начато |
+| `components/common/ReputationHoverPreview.jsx` | 0 | 29 | — | не начато |
+| `pages/LoginPage.jsx` | 1 | 29 | — | не начато |
+| `components/common/ConnectionStatusBanner.jsx` | 2 | 26 | — | не начато |
+| `pages/PendingPage.jsx` | 2 | 25 | — | не начато |
+| `components/modals/AuthModal.jsx` | 0 | 24 | — | не начато |
+| `pages/RegisterPage.jsx` | 1 | 20 | — | не начато |
+| `components/modals/BannedLogoutModal.jsx` | 1 | 19 | — | не начато |
+| `components/modals/DeletedLogoutModal.jsx` | 1 | 19 | — | не начато |
+| `components/modals/MaintenanceLogoutModal.jsx` | 1 | 19 | — | не начато |
+| `pages/BannedPage.jsx` | 2 | 16 | — | не начато |
+| `contexts/ToastProvider.jsx` | 4 | 15 | — | не начато |
+| `components/common/ConfirmModal.jsx` | 0 | 11 | — | не начато |
+| `components/common/ScrollButtons.jsx` | 0 | 10 | — | не начато (+ мёртвый импорт) |
+| `components/common/SmilesPicker.jsx` | 3 | 10 | — | не начато |
+| `pages/MessagesPage.jsx` | 0 | 10 | — | не начато |
+| `components/common/ForumEmptyState.jsx` | 0 | 9 | — | хвост, Этап 7 |
+| `components/common/ForumModal.jsx` | 0 | 9 | — | хвост |
+| `components/common/RealtimeStatusBanner.jsx` | 0 | 9 | — | не начато |
+| `components/common/UnsentReplyNotice.jsx` | 1 | 9 | — | не начато |
+| `components/layout/Layout.jsx` | 0 | 7 | — | хвост Этапа 1 |
+| `components/modals/MoveTopicsModal.jsx` | 0 | 7 | — | не начато |
+| `components/common/ForumPagination.jsx` | 0 | 6 | — | хвост |
+| `components/common/ForumRoleBadge.jsx` | 0 | 4 | — | хвост |
+| `components/common/ForumBreadcrumbs.jsx` | 0 | 3 | — | хвост |
+| `components/common/ForumCharacterBadge.jsx` | 1 | 3 | — | хвост |
+| `components/common/ForumTabs.jsx` | 0 | 3 | — | хвост |
+| `components/common/LastPostInfo.jsx` | 0 | 3 | — | хвост |
+| `components/layout/ForumStats.jsx` | 0 | 2 | — | хвост |
+| `components/common/ForumAuthorAvatar.jsx` | 0 | 1 | — | хвост |
+| `components/topic/TopicHeader.jsx` | 0 | 1 | — | хвост |
+| `pages/NewRepliesPage.jsx` | 0 | 1 | — | хвост |
+| `components/common/ForumAuthorName.jsx` | 1 | 0 | — | хвост |
+| `components/common/Skeleton.jsx` | 1 | 0 | — | хвост (динамика через пропс) |
+| `components/layout/ForumBackground.jsx` | 3 | 0 | — | динамика (opacity), не переводить в статику |
+
+#### Два бага из аудита — ИСПРАВЛЕНО в `2e574979`
+
+- **Баг A — список дополнительных BBCode подчёркивался при редактировании.** Причина: пункты overflow-меню RichEditor — это `<a class="dropdown-item">`, а `.post-content a` их подчёркивает, когда редактор стоит внутри поста. Исправлено скоупленными правилами `.editor-overflow-dropdown-menu .dropdown-item` и `.post-content .editor-overflow-dropdown-menu .dropdown-item` в `src/index.css` (без `!important`). Глобальное правило `.post-content a` не тронуто.
+- **Баг B — линия цитаты в тёмной теме слишком светлая.** Причина: `.bbcode-quote` брал `var(--primary-color)`, а в тёмной теме это почти белый `#f1f5f9`. Исправлен новым цветовым токеном `--quote-border-color` (светлая `#1e293b` / тёмная `#334155` / нейтральная `#666`) в `src/styles/theme-variables.css`; нейтральный оверрайд `border-left-color` удалён как лишний.
+
+#### Правило 1. Уход от жёстких HTML-таблиц к гибким гридам
+Layout-таблицы (`<Table>` из react-bootstrap и голые `<table>`) больше не используются для раскладки страниц. Паттерн замены — тот же, что уже применён на главной/категории/топике: CSS grid с колонками (`forum-index.css`, `forum-view.css`, `topic-row.css`), на ≤768px — перестройка в карточки, а не горизонтальный скролл таблицы. Инвентарь таблиц (всего 131 тег в 5 файлах):
+- `AdminPage.jsx` — 5 таблиц (81 тег): пользователи, роли, группы категорий, категории (с инлайн-редактированием строк), аудит-лог. Все — в гриды/карточки, по одной таблице за заход; `table-active` у редактируемой строки → state-класс `.is-editing`.
+- `MembersPage.jsx` — 1 таблица (20 тегов): список участников. В грид; `data-label` для мобильной вёрстки сохранить как есть (он уже есть и работает как подписи ячеек в карточном виде); `.members-table-*` (`index.css:507–566`) переезжает в новый модуль стилей.
+- `ProfilePage.jsx` — 1 таблица (16 тегов): история репутации. В грид/список.
+- `RichEditor.jsx:1546–1553` — таблица хоткеев в модалке (4 тега). В `<dl>`/грид, не в `<table>`.
+- `BBCode.jsx:1080–1124` — единственное место, где `<table>` остаётся: рендер пользовательских `[table]/[tr]/[td]` из постов. Это не layout, а контент пользователя — таблицу не убирать, а переводить её классы (`bbcode-tr`, `bbcode-td`) с Bootstrap-утилит на свои и убирать инлайн `tableStyle`/`tdStyle` (параметры из поста — через CSS-переменные/санитизацию, отдельным подходом, не 1:1 в классы).
+
+#### Правило 2. В токены — только цвета (обязательно для новых токенов)
+Уже записано в «Единой схеме хедеров» («токены — только цветовые», размеры/паддинги — литерально в классах), но файл этому не следует. Факт на 2026-11-17: `theme-variables.css` — 380 определений, 298 уникальных имён; из них цветовых — 144, геометрии (паддинги/зазоры/размеры/радиусы/тени/opacity/font-size/weight/line-height/letter-spacing) — 154. То есть почти половина токенов — геометрия, которую по правилу там быть не должно. Базовые токены (`--primary-color`, `--border-color`, `--link-color` и др.) вообще живут не здесь, а в `index.css:1–115` — при переносе цветов это учитывать.
+- Новые токены — только цвета (включая цвет текста/фона/бордера; тень — цветовая часть через токен, геометрия тени — литерально в правиле). Новые `--*-size`, `--*-padding`, `--*-radius`, `--*-gap` не заводить.
+- Существующие геометрические токены — заморозить: не удалять одним махом (сломается рендер), новые не добавлять, при касании файла переводить значение литерально в класс и удалять токен.
+- Дефекты токенов к исправлению при следующем касании файла: дубль `--topic-post-skeleton-footer-border` (строки 316–317, идентичные); `--forum-view-btn-ghost-hover-text` дважды внутри `[data-theme='dark']` с конфликтующими значениями (`#f1f5f9`, затем `#0f172a` — работает только за счёт порядка, первое значение равно цвету hover-фона, т.е. невидимый текст при перестановке); нет базового определения у `--last-post-name-color` (только dark `:415` и neutral `:477`) и `--author-date-color` (только dark `:416`); 7 цветовых токенов названы не как цвета (`--category-head-text`, `--category-subtitle-text`, `--forum-footer-text`, `--forum-view-btn-ghost-text`, `--forum-view-btn-primary-text`, `--stats-item-muted`, `--stats-item-text`).
+- Хардкод hex/rgb вне `theme-variables.css` (в `src/styles/*.css`): `author-meta.css` — 8 (`:161–162` `#edeef0`/`#1e293b`, `:168`, `:178` `#ffffff` — живые), `topic-view.css` — 3 (`:513` `#6c757d`, `:515` `#fff`, `:1196` `#198754`) + 17 `rgba()/rgb()` (в основном тени `rgba(0,0,0,…)`, но и нейтральные литералы `:448,452,1060–1062`), `layout.css` — 4 (`:120` `#f59e0b`, `:141` `#ffc107`, `:142`, `:150` `#000000`), `forum-stats.css` — 1 (`:196` `#b91c1c`), `utilities.css` — только fallback в `var()` (безопасно). Чистые (0 hex): `forum-breadcrumbs.css`, `forum-index.css`, `forum-pagination.css`, `forum-view.css`, `topic-row.css`.
+
+#### Карта повторяющихся элементов: где повторяется, чем отличается
+Один элемент — один владелец (компонент + один CSS-модуль). Модификатор — только расположение/состояние, не новый вид. Различия между страницами — в данных и модификаторах, а не в дублировании разметки.
+
+| Элемент | Владелец | Где повторяется | Отличия по страницам |
+|---|---|---|---|
+| Хлебные крошки | `ForumBreadcrumbs.jsx` + `forum-breadcrumbs.css` (`.forum-breadcrumbs`) | `TopicHeader`, `CategoryPage`, `ActiveTopicsPage`, `NewRepliesPage`, `SubscriptionsPage`, `TopicPage`, `AdminPage`, `DraftsPage`, `MembersPage`, `NotificationsPage`, `ProfilePage`, `TopicFormPage` | Только на странице топика — обёртка `.forum-breadcrumbs__wrapper` + модификатор `.forum-breadcrumbs--topic`; везде иначе — голый `.forum-breadcrumbs`. Внутри — всё ещё react-bootstrap `Breadcrumb` (хвост). |
+| Пагинация | `ForumPagination.jsx` + `forum-pagination.css` (`.forum-pagination`) | Списки (`CategoryPage`, `ActiveTopicsPage`, `NewRepliesPage`, `SubscriptionsPage`), топик (`TopicHeader`, `TopicActionsBar`), `AdminPage`, `MembersPage`, `NotificationsPage`, `ProfilePage` | `.forum-pagination-view` — full-width centered row для списков (только `Active/NewReplies/Subscriptions` уже переведены на него; `CategoryPage` до сих пор с обёрткой `<nav id="forum-pagination-bottom" class="forum-view-pagination">` — перевести на модификатор). `.forum-pagination-topic` — компактная строка внутри хедера топика. Внутри — всё ещё react-bootstrap `Pagination` (хвост). |
+| Хедер страницы | `.category-header` (+ `#forum-view-header`) в `forum-view.css` | `CategoryPage` + 3 списка тем (один и тот же корень `#forum-view`, различие — `data-forum-id`: id категории vs `active-topics`/`new-replies`/`subscriptions`) | Actions внутри хедера — только на `CategoryPage`; описание — только у категории; у списков — только заголовок. Не путать с `.category-group-header` главной — это другая сущность (полоса группы, см. «Единую схему хедеров»). |
+| Сабтайтл (шапка колонок) | `.category-subtitle` (`forum-view.css`) / `.category-group-subtitle` (`forum-index.css`) | Списки + категория / главная | Один дизайн (алиасы `--category-subtitle-bg/-text` на цвета хедера группы), но два класса: `.category-subtitle` — для страниц списков, `.category-group-subtitle` — для групп главной. На ≤768px оба `display:none`. |
+| Строка топика | **ДВА владельца — дублирование, зафиксировать как долг.** `TopicRow.jsx` (`.topic-item`, `topic-row.css`) vs инлайн-разметка в `CategoryPage.jsx:344` (`.forum-item--topic`, `forum-index.css`) | `TopicRow` — `ActiveTopicsPage`, `NewRepliesPage`, `SubscriptionsPage`. `.forum-item--topic` — только `CategoryPage` (скелетон — `:250`) | Общее: чекбокс `.topic-select/.topic-select-input` + `.is-managing`, мини-пагинация, иконки pinned/locked инлайн в заголовке, unread-логика, `AuthorMeta` (создание: дата · автор). Различия: `TopicRow` — `.topic-main/.topic-head`, заголовок `h6.topic-title`, есть колонка `.topic-category` (+ `.topic-mobile-category` в мобильных статах), `.topic-replies` с `data-label`, `.topic-last-post.last-post-strip`, `data-topic-id` + `data-category-id`, `.topic-meta` скрывается на мобильных целиком. `.forum-item--topic` — заголовок `h3.forum-title`, ссылка `.cat-link`, колонки категории нет (страница и есть категория), мобильные статы `.forum-mobile-stats`, `data-topic-id` без `data-category-id`. В `CategoryPage.jsx:387` комментарий «same as the TopicRow reference render» — эталоном считается `TopicRow`; при следующем касании категории — свести к одному компоненту, а не править оба места. |
+| Строка форума (главная) | `.forum-item` (`forum-index.css`) | Только `MainPage` | Похожа на строку топика внешне (заголовок + счётчики + last post), но другая сущность: форум, а не топик. Есть описание, счётчики topics/posts, нет мини-пагинации и unread-логики топиков. С `.forum-item--topic` не объединять — вариант `--topic` это строка топика, а не форума. |
+| Last Post / AuthorMeta | `AuthorMeta.jsx` + `LastPostInfo.jsx` + `author-meta.css` (`.author-meta`, `.last-post-strip`) | `MainPage`, `CategoryPage` (через обе строки топиков), `TopicRow` | Главная: тайтл темы + дата/автор. Категория и списки: только дата + автор (`.last-topic-link` не рендерится, тайтл уже в первой колонке). Мобильная полоса — единый класс `.last-post-strip`; хром правится только в `topic-row.css`. |
+| Management toolbar | `.management-toolbar-*` (`forum-view.css`) | `CategoryPage` + 3 списка | Один компонент; чекбокс-колонка — константа 32px + 10px gap в хедере и строках; на мобильных — «чип» в правом верхнем углу карточки. |
+| Карточка поста | `.topic-post` (`topic-view.css`) | Только `TopicPage` (`TopicPostCard.jsx`) | Повторов нет. Остаток Этапа 3 — не карточка, а `TopicReplyComposer` / `PostInlineEditor` / `TopicModalsContainer` (контракты `.topic-reply*` / `.topic-post-editor*` уже готовы в CSS). |
+| Пустое состояние | `ForumEmptyState.jsx` (8 страниц: `MainPage`, `CategoryPage`, `ActiveTopicsPage`, `NewRepliesPage`, `SubscriptionsPage`, `DraftsPage`, `NotificationsPage`, `ProfilePage`) | Везде одинаковый вызов с `className="forum-view-empty-state"` | Внутри — всё ещё Bootstrap `Card` (Этап 7). |
+| BBCode / RichEditor | `BBCode.jsx`, `RichEditor.jsx` | Посты, композер ответа, редактор поста, форма новой темы | Отдельный воркстрим, не «перевести в классы 1:1»: часть инлайн-стилей — данные пользователя (`[color]`, `[size]`, параметры `[table]`/`[td]`, свотчи палитры, динамическая ширина), часть Bootstrap-утилит (92 в `BBCode.jsx`) — в рендере пользовательского контента, снятие `bootstrap.min.css` сломает посты, пока они не заменены. |
+
+#### Порядок следующих шагов (обновлено 2026-11-17)
+
+Новый порядок — спринты A–J ниже в этом документе (старая нумерация Этапов 1–7
+отображена в разделе спринтов). Коротко:
+
+1. **Спринт A** — хвост Этапа 3 (ReplyComposer / PostInlineEditor / TopicModalsContainer) + сведение строк категории к одному `TopicRow` + пагинация категории.
+2. **Спринт B** — хвост Этапа 1: общие атомы (Pagination, Breadcrumbs, Layout, бейджи/аватар, Tabs, EmptyState, Modal, Navbar, ScrollButtons).
+3. **Спринт C** — MembersPage.
+4. **Спринт D** — NotificationsPage + DraftsPage + TopicFormPage (по одной).
+5. **Спринт E** — DirectMessages + MessagesPage.
+6. **Спринт F** — Auth + служебные страницы (Login/Register/Pending/Banned + формы).
+7. **Спринт G** — BBCode + RichEditor (отдельный воркстрим, контент пользователя — не 1:1-конверсия).
+8. **Спринт H** — AdminPage + DesignsTab + EmailTemplatesSettings. ПОСЛЕДНИМ: сначала свериться с веткой реорганизации `feature/admin-reorg`.
+9. **Спринт I** — ProfilePage + SecurityTab. ПОСЛЕДНИМ: по `SPEC_REFACTOR_PROFILE_PAGE_ARCHITECTURE.md`.
+10. **Спринт J** — снятие Bootstrap (`bootstrap.min.css` из `main.jsx`, `react-bootstrap` из зависимостей) + финальная проверка.
+
+Цифры остатка выше — на 2026-11-17, HEAD `1598c0c`; инлайн-счётчики перепроверены 2026-11-17 на HEAD `2e574979` — без изменений.
+
+### Расхождения с исходными спринтами (факт vs план)
+> Ветвления `isThemeable ? new : old` нет — семантический DOM всегда (решение Этапа 1). Имена ниже — фактические.
+
+- `CategoryPage`: корень `<main id="forum-view">`; header `#forum-view-header` (не `#forum-header`), title `.category-header-title`, список `<section id="forum-topic-list">`, шапка `.category-subtitle` + `.category-col--topic/.category-col--category/.category-col--replies/.category-col--lastpost` (не `.topic-list-header/.topic-column`); пагинация `#forum-pagination-top/bottom` + `.forum-view-pagination`; `#forum-actions-bottom`/`#forum-breadcrumbs-bottom` нет — только `.forum-view-footer/.forum-view-back`.
+- `TopicRow`: pinned → `.is-pinned` (не `.is-sticky`); `data-category-id` на article; колонки views нет; mini-pagination — `.mini-pagination` внутри `.topic-head`.
+- Списки тем: отдельных `#*-page/#*-list` нет — общий `#forum-view/#forum-topic-list`, различие только `data-forum-id`.
+
+### Как продолжать в следующей сессии
+
+1. Источник правды — ветка `feature/theming` на GitHub, HEAD=`2e574979` (2026-11-17). Работай из настоящего клона ветки (`git pull` перед началом); локальные копии и zip-снимки без git-контроля — не источник правды, не верить им.
+2. Node (машина Алины, Git Bash): `export PATH="$PATH:/c/nvm4w/nodejs:/c/Users/Alina/AppData/Local/nvm"` → `node v24.14.0`, `npm 11.9.0`. PowerShell-строка с `%NVM_HOME%` в Git Bash не работает.
+3. Статус тестов на HEAD `2e574979`: `npm run build` — OK; `npm test` — 80 OK, падает на `test:account-status-axis` (предсуществующее: `AuthProvider.jsx` не пишет `sessionStorage['banned_logout']`). Проверки `category-subscriber` и `identity-refresh` починены в `2e574979` (обе падали из-за устаревших regex/стабов после введения storage-scoping, код приложения был верен).
+4. Перед чисткой `index.css` — `grep` по `src --include='*.jsx'`: `.forum-table*` и `.empty-state-*` пересекаются с немигрированными страницами.
+5. Новые токены — только `theme-variables.css`, новые правила — только `src/styles/*.css`; `grep -n '!important' src/styles/*.css` должен давать только комментарии.
 
 ---
 
-# 2. Архитектурные решения
+## Исполнительный плейбук: как мигрировать ОДИН компонент
 
-## 2.1. Themeable — это НЕ встроенная тема
+> Этот раздел — главный. Если спринт и плейбук расходятся, прав плейбук.
 
-`Themeable` **не** добавляется в `BUILTIN_THEMES = ['dark', 'light', 'neutral']`. Он не появляется как вариант выбора рядом с dark/light/neutral.
+### Шаг 0. Возьми ровно один компонент
 
-**Themeable** — это каркас (engine), который активируется автоматически, когда пользователь выбирает кастомный дизайн. В будущем возможны разные каркасы (например, «classic», «modern», «minimal»), поэтому механизм должен быть спроектирован как выбираемый framework, а не жёстко привязанный к одному варианту.
+- Один компонент = один JSX-файл (+ его CSS-модуль, если он есть) или один логический блок внутри большого файла (например, один таб админки).
+- Не бери два компонента за раз, не «заодно» правишь соседние файлы. Контекст теряется именно так.
+- Прочти спринт целиком, потом SPEC этой страницы (если есть), потом сам файл.
 
-## 2.2. Механизм активации
+### Шаг 1. Зафиксируй, как выглядит «до»
+
+- Открой страницу в трёх темах (`dark` / `light` / `neutral`) и на трёх ширинах (десктоп, ≤993px, ≤768px), если есть живой стенд. Нет стенда — читай CSS как спецификацию: итоговые computed-стили элемента = истина.
+- Выпиши для компонента: что видно, какие состояния есть (hover, focus, disabled, active, unread, empty, loading, error), какие элементы прячутся на мобиле.
+- Если сомневаешься, как выглядит элемент, — не гадай: напиши в отчёте, что не удалось сверить. Угаданный стиль — это переделка глазами Алины.
+
+### Шаг 2. Составь инвентарь: что именно переезжает
+
+В файле компонента выполни `grep` и выпиши в отчёт (короткой таблицей, не прозой):
+
+- `style={{...}}` — каждый инлайн-стиль с его значениями;
+- Bootstrap-утилиты в `className` — каждый класс;
+- `react-bootstrap` — каждый импортированный компонент и каждый его JSX-тег;
+- `<table>` / `<Table>` — каждая таблица;
+- `id` и `className`, которые уже есть и используются в JS или CSS (их нельзя молча удалять).
+
+### Шаг 3. Переведи Bootstrap-правила в значения
+
+Bootstrap-класс — это не магия, а готовое CSS-правило. Бери значение из `bootstrap.min.css` / `src/index.css` и переноси литерально. Опорная таблица (самое частое):
+
+| Было | Становится (значение — в класс, литерально) |
+|---|---|
+| `m-0..5`, `mt-*/mb-*/ms-*/me-*/mx-*/my-*` | `margin[-*]`: `0 / 0.25rem / 0.5rem / 1rem / 1.5rem / 3rem` |
+| `p-0..5`, `pt-*/pb-*/ps-*/pe-*/px-*/py-*` | `padding[-*]`: та же шкала |
+| `d-none / d-block / d-flex / d-grid / d-inline-flex` | `display: none / block / flex / grid / inline-flex` |
+| `flex-row / flex-column`, `flex-wrap`, `flex-grow-1 / flex-shrink-0` | `flex-direction / flex-wrap / flex` — теми же значениями |
+| `justify-content-start/center/end/between/around` | `justify-content: flex-start / center / flex-end / space-between / space-around` |
+| `align-items-start/center/end/baseline/stretch` | `align-items` — теми же значениями |
+| `gap-0..5` | `gap`: шкала отступов |
+| `text-start / text-center / text-end` | `text-align: left / center / right` |
+| `text-muted` | `color: var(--secondary-color)` (в этом проекте muted — secondary, см. журнал) |
+| `text-decoration-none` | `text-decoration: none` |
+| `fw-light / fw-normal / fw-medium / fw-semibold / fw-bold` | `font-weight: 300 / 400 / 500 / 600 / 700` |
+| `fs-6..1` | `font-size`: `1rem / 1.25rem / 1.5rem / 1.75rem / 2rem / 2.5rem` |
+| `small` | `font-size: 0.875rem` |
+| `rounded / rounded-1/2/3 / rounded-circle / rounded-pill` | `border-radius: 0.375rem / 0.25rem / 0.5rem / 1rem / 50% / 50rem` |
+| `border / border-top/...` | `border[-*]: 1px solid var(--border-color)` — цвет сверяй с оригиналом, не гадай |
+| `shadow-sm / shadow` | `box-shadow`: значение из Bootstrap (`0 .125rem .25rem rgba(0,0,0,.075)` / `0 .5rem 1rem rgba(0,0,0,.15)`) |
+| `w-100 / h-100` | `width / height: 100%` |
+| `text-truncate` | `overflow: hidden; text-overflow: ellipsis; white-space: nowrap` |
+| `visually-hidden` | полный набор правил visually-hidden, а не `display: none` |
+| `btn / btn-primary / btn-outline-primary / btn-outline-secondary / btn-danger / btn-sm / btn-lg` | именной класс кнопки: цвета — из `index.css` (`.btn-primary` и др.) через токены; размеры — литерально (`padding`, `font-size`, `border-radius`) |
+| `Card / Card.Body / Card.Header` | `section`/`div` с тем же `border / border-radius / background / padding` |
+| `Form.Control / Form.Select / Form.Check` | нативный `input`/`select`/кастомный чекбокс по образцу `.topic-select-input` |
+| `Modal` | `ForumModal` (обёртка; сам `ForumModal` мигрируется в спринте B) |
+| `Badge` | именной класс бейджа с цветом по роли/состоянию через токены |
+| `Table` | см. шаг 6 — таблицы не переводятся 1:1 |
+
+Если класса нет в таблице — открой `bootstrap.min.css`, найди его правило и скопируй значения. Не подбирай «на глаз».
+
+### Шаг 4. Вынеси в именной класс
+
+- Один элемент — один именной класс в духе готовых модулей (`forum-view.css`, `topic-row.css`, `author-meta.css`): `.members-search-input`, `.notification-item`, `.dm-message-content`. Не `.item1`, не `.custom-1`.
+- Все значения — литерально из шага 3. Не округляй, не «улучшай».
+- Специфичность — плоская: один-два класса, `(0,1,0)`–`(0,2,0)`. Без `!important` в нативных модулях — никогда, даже в медиа-запросах (каскад решается порядком правил, см. журнал).
+- Состояния — модификаторами: `.is-active`, `.is-unread`, `.is-read`, `.is-managing`, `.is-editing`. Состояние — это класс, а не новый элемент.
+- JSX-структуру не меняй без нужды. Теги меняются только если этого требует концепт: `<table>` → grid-разметка (шаг 6), `Card` → `section`/`article`, `Button` → `<button class="...">`. Поведение (обработчики, state, API) не трогается вообще.
+- Класс, который уже используется в JS (`document.querySelector`, `getElementById`) или в другом CSS, — не удаляй и не переименовывай молча. Добавь новый рядом, старый убери только когда убедился, что его никто не ищет.
+- Новый CSS — в модуль своей страницы (`src/styles/*.css`), а не в `src/index.css`. В `index.css` новые семантические правила не добавляются.
+
+### Шаг 5. Цвета — через токены, и сверь все три темы
+
+- Каждый цвет в новом классе — через токен (`var(--...)`). Hex напрямую в правиле — нельзя (кроме случаев, где hex — само значение токена).
+- Новый токен — только цвет. Паддинги, размеры, радиусы, тени, шрифты — литералами в классе, не токенами. Существующие геометрические токены заморожены: новые не создавать.
+- Токены живут на `body`, не на `:root` (алиасы на `:root` запекаются в светлые значения — см. журнал, «Фикс тёмной темы Категории»). Дефолт — в `body { ... }` в `theme-variables.css`, переопределения — в `body[data-theme='dark'/'light'/'neutral']`.
+- Сверь каждый цвет в трёх темах: значение в `light` — дефолт, в `dark` и `neutral` — переопределение. Оригинал — в `index.css` (`:root` и `[data-theme]`-блоки) и в Bootstrap-правилах. Если в одной теме цвет «поплыл» — ищи, какой токен не переопределён, а не добавляй локальный hex.
+- Проверь состояния: `hover`, `focus`, `disabled`, `active` — у каждого цвета есть своё значение в оригинале, и оно тоже переезжает в токен/класс.
+
+### Шаг 6. Таблицы — в гриды, а не 1:1
+
+- `<table>`/`<Table>` для раскладки — не переводится класс-в-класс. Она заменяется grid-разметкой по образцу `forum-index.css` / `forum-view.css` / `topic-row.css`:
+  - колонки таблицы → `grid-template-columns` с теми же ширинами (фиксированные колонки — фиксированными значениями, как чекбокс-колонка 32px);
+  - `thead` → полоса заголовков колонок в духе `.category-subtitle` (тот же дизайн — цветная полоса, small-caps);
+  - состояние редактирования строки (`table-active` и подобные) → state-класс, например `.is-editing`;
+  - на ≤768px таблица не скроллится горизонтально — она перестраивается в карточки (каждая строка — карточка, подписи полей — через `data-label` или отдельные лейблы).
+- Исключение — единственное: `[table]` в BBCode — это контент пользователя, а не раскладка. Там `<table>` остаётся, а инлайн-стили ячеек переводятся на CSS-переменные (см. спринт G).
+
+### Шаг 7. Адаптив — три ширины, без «потом»
+
+- Проверяй каждую мигрированную страницу на трёх ширинах: десктоп (>993px), планшет (≤993px), мобильный (≤768px).
+- Что прячется на мобиле — `display: none` в мобильном блоке того же файла (пример: `.category-subtitle` на ≤768px). Что перестраивается — grid → одна колонка; что становится чипом — как чекбокс manage-режима в правом верхнем углу карточки.
+- Длинные строки (ники, названия тем, даты) — `overflow-wrap: anywhere` + `min-width: 0` у flex-детей, иначе текст выдавит карточку. Цифры и счётчики — `white-space: nowrap`.
+- Media-блоки — ПОСЛЕ базовых правил в том же файле (та же специфичность — решает порядок).
+- Сетки на ≤993px сужаются согласованно (образец: счётчики 100px→80px, первая колонка 260px→220px, чекбокс-колонка остаётся 32px).
+
+### Шаг 8. Проверка компонента — что значит «готово»
+
+После каждого компонента, до перехода к следующему:
+
+1. `npm run build` — обязательно, exit 0.
+2. `npm test` — цепочка до конца. Если падает проверка, которой не было в списке известных падений (см. «Как продолжать»), — это твоё, чини. Падение в уже известном месте — не твоё, зафиксируй в отчёте.
+3. `grep` по изменённым файлам: не осталось `style={{`, Bootstrap-утилит из шага 3 и `react-bootstrap`-импорта (если спринт требует их убрать).
+4. `git diff --stat` — только файлы этого компонента (+ его CSS-модуль, + токены, если добавлял). Соседние файлы в diff — признак, что ты взял лишнего.
+5. Отчёт (коротко): что сделано, по каким правилам сверялся, что не проверено глазами. Визуальная сверка глазами — за Алиной после аудита, не за тобой.
+
+Компонент НЕ готов, если: build красный; остался инлайн/Bootstrap там, где спринт требует убрать; цвет в одной из тем «поплыл»; на мобиле что-то вылезает за карточку; diff задел соседний компонент.
+
+### Шаг 9. Ловушки — прочитай до начала работы
+
+- **`.post-content a` подчёркивает всё.** Правило `.post-content a { text-decoration: underline }` бьёт и по ссылкам в тексте поста, и по любым `<a>` внутри редактора (см. баг с overflow-меню BBCode, починен в `2e574979`). Элементы внутри `.post-content`, которые не ссылки, — только скоупленными селекторами, без ослабления глобального правила.
+- **React-bootstrap рендерит `<a>`.** `Dropdown.Item`, `Nav.Link`, `Pagination.Item` по умолчанию — это `<a>`. Проверяй, во что рендерится компонент, прежде чем стилизовать его как кнопку.
+- **Глобальные `a` в `index.css`.** `a { text-decoration: none }` и `a:hover` действуют на всё. Новый класс ссылки должен явно задавать своё `text-decoration` и `color`, иначе его перебьёт глобальное правило.
+- **Порядок импортов в `main.jsx`.** Модуль, импортированный позже, выигрывает при равной специфичности. Новый CSS — в конец списка компонентных импортов, если он должен перебивать дубликаты.
+- **Токены на `body`.** См. шаг 5: `:root` запекает светлые значения.
+- **Мёртвые импорты.** `ScrollButtons.jsx` импортировал `Button` из react-bootstrap и не использовал. После миграции проверяй `grep react-bootstrap` — пустой импорт тоже считается остатком.
+- **Legacy-блок `.forum-table*` в `index.css`.** Закомментирован, но частично жив для немигрированных страниц. Не удаляй и не раскомментируй без отдельного аудита.
+- **Чекбокс-колонка — 32px + 10px gap.** Константа, см. журнал. Не «резиновая».
+- **Мини-пагинация — общий компонент.** `TopicMiniPagination` один на всех; не изобретай вторую.
+- **Маски и аватары.** `ForumAuthorAvatar` / маски рендерятся в нескольких местах; меняешь класс — проверь все места.
+
+---
+## Спринты: порядок и шаги
+
+> Цифры в скобках — остаток на 2026-11-17 (инлайн `style={` / Bootstrap-утилиты + react-bootstrap-теги, по аудиту; инлайн перепроверены на HEAD `2e574979`). Утилиты для страниц авторизации — приближённые, перепроверь `grep` перед работой.
+> Соответствие старой нумерации: Этап 1 (главная+каркас) — готов, кроме хвоста (спринт B). Этап 2 (категория+списки) — готов. Этап 3 (топик) — готов, кроме хвоста (спринт A). Этап 4 Members — спринт C. Этап 5 Profile — спринт I (последним). Этап 6 списки — готовы. Этап 7 (уведомления/сообщения/auth/админка + снятие Bootstrap) — спринты D, E, F, H, J.
+
+### Спринт A — Хвост Этапа 3: редактор топика
+
+Файлы: `src/components/topic/TopicReplyComposer.jsx` (5 / 89), `src/components/topic/PostInlineEditor.jsx` (1 / 40), `src/components/topic/TopicModalsContainer.jsx` (1 / 61). Плюс сведение строк категории и пагинации (ниже).
+SPEC: `markdowns/SPEC_forum-topic-view-theme-dom.md`. Контракты `.topic-reply*` / `.topic-post-editor*` уже готовы в CSS.
+
+Шаги — строго по одному:
+1. **TopicReplyComposer** — редактор ответа под постом: инлайн и утилиты в именные классы; тулбар и кнопки — по шагу 3 плейбука. Сам `RichEditor` внутри не трогать (спринт G).
+2. **PostInlineEditor** — редактор внутри `.post-content`. Ловушка: overflow-меню и mask-picker внутри поста (см. шаг 9 плейбука — баг уже починен, не сломай его своими правилами).
+3. **TopicModalsContainer** — модалки топика на `ForumModal` (сам `ForumModal` мигрируется в спринте B — здесь только замена вызовов).
+4. **Сведение строк категории к одному `TopicRow`.** `CategoryPage.jsx:344` рендерит строки топиков инлайн как `.forum-item--topic`, а `TopicRow.jsx` (`.topic-item`) — эталон (см. карту повторяющихся элементов). Переведи `CategoryPage` на `TopicRow`, скелетон `:250` — тоже. Комментарий `:387` «same as the TopicRow reference render» после сведения удалить вместе с дублем.
+5. **Пагинация категории.** `<nav id="forum-pagination-bottom" class="forum-view-pagination">` → `ForumPagination className="forum-pagination-view"` (модификатор уже есть, см. карту).
+
+Критерий готовности: в трёх файлах — 0 `style={{`, 0 `react-bootstrap`; строки категории — один компонент; `npm run build` + `npm test` без новых падений.
+
+### Спринт B — Хвост Этапа 1: общие атомы
+
+Порядок внутри спринта — сверху вниз, не перемешивать:
+1. **ForumPagination.jsx** — react-bootstrap `Pagination` (6 тегов) → нативные `button`/`a` с `.forum-pagination` (CSS уже есть в `forum-pagination.css`). Модификаторы `.forum-pagination-view` / `.forum-pagination-topic` не трогать — это только расположение.
+2. **ForumBreadcrumbs.jsx** — react-bootstrap `Breadcrumb` (3 тега) → `nav` + `ol`/`li` с `.forum-breadcrumbs` (CSS уже есть). Модификатор `--topic` — только расположение.
+3. **Layout.jsx** — `Container` (2 тега) + 5 утилит (`small`, `fw-medium`, `py-2`, `text-center`, `mb-0`) → семантические `div`.
+4. **ForumRoleBadge / ForumCharacterBadge / ForumAuthorAvatar** — `Badge` / `Image` (1–4 тега) → `span`/`img` с классами; цвета ролей — через токены.
+5. **ForumTabs.jsx** — 3 утилиты → класс.
+6. **ForumEmptyState.jsx** — Bootstrap `Card` → `section` с классом. Используется на 8 страницах — проверь все места вызова.
+7. **ForumModal.jsx** — обёртка над react-bootstrap `Modal` (9 тегов) → нативный `<dialog>` или `div`-модалка с тем же видом (оверлей, центрирование, закрытие по Esc и клику вне). Проверь все вызовы (мобильное меню RichEditor, TopicModalsContainer).
+8. **Navbar.jsx** (11 / 94) — самый большой атом, делать последним в спринте: status badge, индикатор, аватар 32px, плейсхолдеры `width: 16`, `cursor: pointer`; цвета ссылок — через токены `--nav-*`.
+9. **ScrollButtons.jsx** — убрать мёртвый импорт `Button` из react-bootstrap (логики — 0 строк).
+
+Критерий готовности: `grep -r "react-bootstrap" src/components/common src/components/layout` — 0; в `Navbar.jsx` — 0 `style={{`.
+
+### Спринт C — MembersPage
+
+Файл: `src/pages/MembersPage.jsx` (11 / 149, 1 таблица).
+SPEC: `markdowns/SPEC_forum-and-members-theme-dom.md`, разделы 17–37 + мини-спецификация в приложении.
+
+Шаги:
+1. Фильтры (поиск / сортировка / направление) — `form` с именными классами (`.members-search-input`, `.members-sort-select`, ...).
+2. Таблица участников → grid (`.member-item` как `article`, `data-user-id` / `data-group-id`, `.is-online` / `.is-offline`). Образец — шаг 6 плейбука.
+3. Пагинация сверху/снизу — `ForumPagination`; breadcrumbs — `ForumBreadcrumbs`.
+4. Мобильная версия — карточки, а не скролл.
+
+Ловушки: `.members-table-*` в `index.css:507–566` живёт для этой страницы — переносить в модуль, а не удалять молча; `data-label` для мобильных подписей.
+
+### Спринт D — NotificationsPage + DraftsPage + TopicFormPage (по одной)
+
+1. **NotificationsPage.jsx** (13 / 218): табы `user`/`admin`; `.notification-item` + `.is-read` / `.is-unread` + `.notification-{type}`; mark-all-read / delete-all; пагинация. Мини-спецификация в приложении.
+2. **DraftsPage.jsx** (3 / 91): карточки черновиков (Bootstrap `Card` → `section`; legacy `.forum-group-card` — проверить, прежде чем трогать). Поведение не трогать: Guest-автор никогда, маска сохраняется при публикации.
+3. **TopicFormPage.jsx** (0 / 86): форма создания темы; `RichEditor` внутри — не трогать сам редактор (спринт G); submit/cancel.
+
+### Спринт E — DirectMessages + MessagesPage
+
+Файлы: `src/components/dm/DirectMessages.jsx` (33 / 169), `src/pages/MessagesPage.jsx` (0 / 10).
+Мини-спецификация в приложении.
+
+Шаги: `.dm-container`, режимы inbox/chat; список диалогов (`.is-active` / `.is-unread`, unread-badge); сообщения sent/received; ввод + отправка; мобильный переход sidebar↔chat.
+
+### Спринт F — Auth + служебные страницы
+
+Файлы: `src/pages/LoginPage.jsx` (1 / ~21), `src/pages/RegisterPage.jsx` (1 / ~17), `src/pages/PendingPage.jsx` (2 / ~16), `src/pages/BannedPage.jsx` (2 / ~13), `src/components/auth/LoginForm.jsx` (2 / ~51), `src/components/auth/RegisterForm.jsx` (2 / ~61).
+Мини-спецификации в приложении.
+
+Шаги: `.auth-card` / `.auth-form` / `.auth-field` / `.auth-submit` / `.auth-link`; white wall (`whitelistMode` + `maintenance-message`); `.system-page` / `.system-card` / `.system-title` / `.system-message` / `.system-actions`.
+
+### Спринт G — BBCode + RichEditor (отдельный воркстрим)
+
+Файлы: `src/components/common/BBCode.jsx` (28 / 92, 4 raw `<table>`), `src/components/common/RichEditor.jsx` (20 / 510, 1 таблица hotkeys).
+
+Правило спринта: это рендер пользовательского контента, а не раскладка. Здесь нет 1:1-конверсии — менять только то, что не меняет вид постов.
+
+Шаги:
+1. `[table]` в BBCode: `<table>` остаётся (контент!), инлайн `tableStyle`/`tdStyle` — на CSS-переменные/санитизацию.
+2. `[quote]` уже на токене `--quote-border-color`; инлайн-стиль цвета заголовка цитаты (`BBCode.jsx:694`, `style={{ color: 'var(--primary-color)' }}`) — в токен.
+3. Таблица хоткеев в RichEditor → `<dl>`/grid (шаг 6 плейбука).
+4. Overflow-меню (56 пунктов) — `<a>` против `as="button"`: решить, не сломав `.post-content a` (см. шаг 9). То же — для mask-picker.
+5. Тулбар, кнопки форматирования, состояния disabled/active — по плейбуку.
+
+### Спринт H — AdminPage (ПОСЛЕДНИМ)
+
+Файлы: `src/pages/AdminPage.jsx` (52 / 875, 5 таблиц), `src/components/admin/DesignsTab.jsx` (0 / 102), `src/components/admin/EmailTemplatesSettings.jsx` (4 / 114).
+SPEC: `markdowns/SPEC_REFACTOR_ADMIN_PAGE_ARCHITECTURE.md` + мини-спецификация в приложении.
+
+Сначала: свериться с веткой реорганизации **`feature/admin-reorg`** (HEAD `69e7231d`) — что там уже переделано. Мигрировать в координации с реоргом, а не поверх старой формы. Если реорг ещё не влит в `feature/theming` — не начинать этот спринт, а дождаться решения Алины.
+
+Шаги: 5 таблиц (users, roles, category groups, categories с инлайн-редактированием, audit log) → гриды (шаг 6 плейбука); редактируемая строка → `.is-editing`; табы админки — по одному; DesignsTab — карточки дизайнов; EmailTemplates — формы шаблонов.
+
+### Спринт I — ProfilePage (ПОСЛЕДНИМ)
+
+Файлы: `src/pages/ProfilePage.jsx` (35 / 763, 1 таблица), `src/components/profile/SecurityTab.jsx` (3 / 171).
+SPEC: `markdowns/SPEC_REFACTOR_PROFILE_PAGE_ARCHITECTURE.md` + мини-спецификация в приложении.
+
+Шаги — по табам, один за раз: overview / reputation / characters / posts / settings / security. Reputation history → grid. Формы настроек: поведение сида по серверным значениям не трогать. Аватар — загрузка отдельным эндпоинтом (не смешивать с профилем).
+
+### Спринт J — Снятие Bootstrap
+
+Только когда `grep` даёт 0 по всем трём проверкам:
+
+- `grep -r "react-bootstrap" src/` — 0;
+- `grep -r "style={{" src/` — 0;
+- Bootstrap-утилиты из шага 3 плейбука в `className` — 0.
+
+Шаги:
+1. Убрать `bootstrap.min.css` из `src/main.jsx`.
+2. Убрать `bootstrap` и `react-bootstrap` из `package.json` (`package-lock.json` — пересобрать через `npm install` на машине Алины, не руками).
+3. Прогон: `npm test` + `npm run build`; финальный чек-лист (раздел ниже).
+
+---
+## Зависимости между спринтами
 
 ```
-Пользователь выбирает кастомный дизайн (в профиле или через админку)
-→ DesignProvider находит design в Firestore
-→ DesignProvider инжектит CSS/JS
-→ ThemeProvider устанавливает на <body>:
-     data-theme-engine="themeable"
-     data-theme="dark"  (или другая базовая тема — base fallback)
-→ Компоненты через хук useThemeable() узнают, что нужно рендерить семантическую разметку
-```
-
-Когда custom design не активен (стандартная тема dark/light/neutral):
-- `data-theme-engine` **отсутствует** на `<body>`
-- Компоненты рендерят текущий JSX без изменений
-- Никакого влияния на существующий UI
-
-## 2.3. Что меняется в компонентах
-
-При `isThemeable === true` компоненты добавляют:
-1. **Семантические `id`** на структурные контейнеры (`#forum-wrapper`, `#forum-main`, `#topic-page`, etc.)
-2. **Семантические `class`** на все значимые элементы (`.forum-item`, `.topic-item`, `.post-author`, etc.)
-3. **`data-*` атрибуты** на сущности (`data-topic-id`, `data-post-id`, `data-user-id`, etc.)
-4. **State-классы** (`.is-pinned`, `.is-locked`, `.is-online`, `.is-new`, `.is-unread`, etc.)
-
-Bootstrap-классы **сохраняются** для внутреннего layout. Семантические классы добавляются **рядом**, не вместо.
-
-Пример:
-```jsx
-// До (сейчас):
-<tr className="topic-row-hover">
-
-// После (при isThemeable):
-<article id="topic-42" className="topic-item topic-42 is-pinned topic-row-hover"
-         data-topic-id="42">
-```
-
-## 2.4. Файловая структура
-
-Новые файлы:
-```
-src/
-  hooks/
-    useThemeable.js          ← хук для проверки isThemeable
-  styles/
-    themeable.css             ← базовые стили для [data-theme-engine="themeable"]
-    utilities.css             ← существующий файл
-markdowns/
-  THEMEABLE_SPRINT_PLAN.md    ← этот документ
-  theme-api-reference.md      ← итоговая справка Theme API (создаётся в спринте 14)
+Спринт A (хвост топика)
+    ↓
+Спринт B (общие атомы)
+    ↓
+Спринт C (Members)
+    ↓
+Спринт D (Notifications / Drafts / TopicForm)
+    ↓
+Спринт E (DM)
+    ↓
+Спринт F (Auth + служебные)
+    ↓
+Спринт G (BBCode / RichEditor — можно параллельно с C–F, не пересекается)
+    ↓
+Спринт H (Admin — после реорга feature/admin-reorg)
+    ↓
+Спринт I (Profile)
+    ↓
+Спринт J (снятие Bootstrap)
 ```
 
 ---
-
-# 3. Текущая структура проекта
-
-## 3.1. Система тем
-
-| Файл | Назначение |
-|------|-----------|
-| `src/contexts/ThemeProvider.jsx` | Устанавливает `data-theme` на `<body>`, управляет dark/light/neutral |
-| `src/contexts/DesignProvider.jsx` | Загружает кастомные дизайны из Firestore, инжектит CSS/JS через `<style>` и `<script>` |
-| `src/components/admin/DesignsTab.jsx` | UI админки для создания/редактирования дизайнов |
-| `src/index.css` | 4062 строки — все стили, CSS-переменные для 3 тем |
-| `src/styles/utilities.css` | Утилитарные стили |
-
-## 3.2. Все страницы форума
-
-| Маршрут | Файл | Размер | Сложность DOM-рефакторинга |
-|---------|------|--------|---------------------------|
-| `/` | `pages/MainPage.jsx` | 231 стр. | Средняя |
-| `/category/:id` | `pages/CategoryPage.jsx` | 392 стр. | Средняя |
-| `/topic/:id` | `pages/TopicPage.jsx` | **3681 стр.** | **Высокая** ⚠️ |
-| `/members` | `pages/MembersPage.jsx` | 345 стр. | Средняя |
-| `/profile/:uid` | `pages/ProfilePage.jsx` | **1802 стр.** | **Высокая** |
-| `/admin` | `pages/AdminPage.jsx` | **2032 стр.** | Средняя |
-| `/active-topics` | `pages/ActiveTopicsPage.jsx` | 106 стр. | Низкая |
-| `/new-replies` | `pages/NewRepliesPage.jsx` | 206 стр. | Низкая |
-| `/subscriptions` | `pages/SubscriptionsPage.jsx` | 144 стр. | Низкая |
-| `/notifications` | `pages/NotificationsPage.jsx` | 687 стр. | Средняя |
-| `/category/:id/new-topic` | `pages/TopicFormPage.jsx` | 326 стр. | Низкая |
-| `/messages`, `/messages/:uid` | `pages/MessagesPage.jsx` | 77 стр. | Низкая |
-| `/login` | `pages/LoginPage.jsx` | 67 стр. | Минимальная |
-| `/register` | `pages/RegisterPage.jsx` | 60 стр. | Минимальная |
-| `/pending` | `pages/PendingPage.jsx` | 57 стр. | Минимальная |
-| `/banned` | `pages/BannedPage.jsx` | 45 стр. | Минимальная |
-
-## 3.3. Общие компоненты (layout и common)
-
-| Файл | Назначение | Изменения нужны |
-|------|-----------|----------------|
-| `components/layout/Layout.jsx` | Общий каркас: Navbar + main + footer | **Да** — `#forum-wrapper`, `#forum`, `#forum-about` |
-| `components/layout/Navbar.jsx` | Навигация | **Да** — `#forum-nav`, `#forum-title`, `#forum-user-links` |
-| `components/layout/ForumStats.jsx` | Статистика внизу главной | **Да** — `#forum-statistics`, `.stat-*` |
-| `components/layout/ForumBackground.jsx` | Фоновое изображение | Нет |
-| `components/common/ForumBreadcrumbs.jsx` | Хлебные крошки | **Да** — `id`, `.breadcrumb-item`, `.breadcrumb-link` |
-| `components/common/ForumPagination.jsx` | Пагинация | **Да** — `id`, `.pagination-item`, `.pagination-current` |
-| `components/common/TopicRow.jsx` | Строка темы в списке | **Да** — `.topic-item`, `.topic-title`, `.is-*` |
-| `components/common/LastPostInfo.jsx` | Блок последнего сообщения | **Да** — `.last-post-*` |
-| `components/common/AuthorMeta.jsx` | Мета автора | **Да** — `.topic-author`, `.topic-author-name` |
-| `components/common/ForumAuthorAvatar.jsx` | Аватар автора | **Да** — `.author-avatar` |
-| `components/common/ForumAuthorName.jsx` | Имя автора | **Да** — `.author-name` |
-| `components/common/ForumRoleBadge.jsx` | Бейдж роли | **Да** — `.author-rank` |
-| `components/common/BBCode.jsx` | Рендер BB-кода | Нет (внутри `.post-content`) |
-| `components/common/RichEditor.jsx` | Редактор сообщений | Нет (внутри `.reply-editor`) |
-| `components/common/Timestamp.jsx` | Компонент даты/времени | Минимально — `.post-date` |
-| `components/dm/DirectMessages.jsx` | Личные сообщения | **Да** — `.dm-*` классы |
-| `components/auth/LoginForm.jsx` | Форма входа | Да — `.login-form` |
-| `components/auth/RegisterForm.jsx` | Форма регистрации | Да — `.register-form` |
-| `components/profile/SecurityTab.jsx` | Таб безопасности профиля | Да — `.profile-security` |
-
----
-
 # 4. Спецификации по страницам — что уже есть
 
 Существуют 3 подробные спецификации в `markdowns/`:
 
 | Спецификация | Покрывает |
 |-------------|----------|
-| `forum-index-theme-dom-spec.md` | **Forum Index** — главная страница (`/`). Категории, форумы, статистика |
-| `forum-and-members-theme-dom-spec.md` | **Forum View** — страница категории (`/category/:id`) + **Members View** — участники (`/members`) |
-| `forum-topic-view-theme-dom-spec.md` | **Topic View** — просмотр темы (`/topic/:id`) |
+| `SPEC_forum-index-theme-dom.md` | **Forum Index** — главная страница (`/`). Категории, форумы, статистика |
+| `SPEC_forum-and-members-theme-dom.md` | **Forum View** — страница категории (`/category/:id`) + **Members View** — участники (`/members`) |
+| `SPEC_forum-topic-view-theme-dom.md` | **Topic View** — просмотр темы (`/topic/:id`) |
 
 Эти спецификации являются **основным источником истины** для DOM-контракта. Агент ОБЯЗАН прочитать соответствующую спецификацию перед началом работы над компонентом.
 
@@ -177,9 +556,9 @@ markdowns/
 
 # 5. Спецификации по страницам — что нужно создать
 
-Для страниц, **не** покрытых существующими спецификациями, агент должен следовать общим принципам из раздела 1 файла `forum-index-theme-dom-spec.md` и нижеприведённым мини-спецификациям в этом документе.
+Для страниц, **не** покрытых существующими спецификациями, агент должен следовать общим принципам из раздела 1 файла `SPEC_forum-index-theme-dom.md` и нижеприведённым мини-спецификациям в этом документе.
 
-Страницы, для которых нужны DOM-спецификации (мини-спецификации приведены ниже в спринтах):
+Страницы, для которых нужны DOM-спецификации (мини-спецификации приведены в приложении «Справочные мини-спецификации»):
 
 1. **Profile** (`/profile/:uid`) — профиль пользователя
 2. **Active Topics** (`/active-topics`) — активные темы
@@ -198,515 +577,11 @@ markdowns/
 
 ---
 
-# Спринт 0 — Инфраструктура
-
-## Цель
-Создать базовую инфраструктуру: хук `useThemeable`, атрибут `data-theme-engine`, пустой CSS-файл. После этого спринта ни один компонент ещё не изменён, но механизм переключения работает.
-
-## Файлы
-
-### [НОВЫЙ] `src/hooks/useThemeable.js`
-
-```js
-// Хук, который компоненты используют для определения режима themeable
-// Возвращает { isThemeable: boolean, engineName: string | null }
-//
-// isThemeable = true когда DesignProvider имеет activeDesign !== null
-// engineName = "themeable" (в будущем возможны другие каркасы)
-//
-// Использование в компоненте:
-//   const { isThemeable } = useThemeable();
-//   return (
-//     <div id={isThemeable ? "forum-main" : undefined}
-//          className={`existing-class ${isThemeable ? 'forum-main' : ''}`}>
-//   );
-```
-
-Реализация:
-- Импортирует `useDesign` из `DesignProvider`
-- Возвращает `{ isThemeable: !!activeDesign, engineName: activeDesign ? 'themeable' : null }`
-
-### [ИЗМЕНИТЬ] `src/contexts/ThemeProvider.jsx`
-
-Добавить логику:
-- Когда `DesignProvider.activeDesign !== null` → установить `document.body.setAttribute('data-theme-engine', 'themeable')`
-- Когда `activeDesign === null` → `document.body.removeAttribute('data-theme-engine')`
-- Координация: `ThemeProvider` должен получать информацию об `activeDesign`. Варианты:
-  - (a) Импортировать `useDesign` в `ThemeProvider`
-  - (b) Вынести эту логику в `DesignProvider` (он уже знает про `activeDesign`)
-  - **Рекомендация: вариант (b)** — добавить `data-theme-engine` прямо в `DesignProvider.jsx`, рядом с существующей логикой инжекта CSS/JS
-
-### [ИЗМЕНИТЬ] `src/contexts/DesignProvider.jsx`
-
-В `useEffect` где инжектится CSS/JS, добавить:
-```js
-if (activeDesign) {
-  document.body.setAttribute('data-theme-engine', 'themeable');
-  // ... existing CSS/JS injection ...
-} else {
-  document.body.removeAttribute('data-theme-engine');
-  // ... existing cleanup ...
-}
-```
-
-### [НОВЫЙ] `src/styles/themeable.css`
-
-Пустой файл-заготовка. Все стили за selector `[data-theme-engine="themeable"]`. Будет наполнен в спринте 13.
-
-```css
-/* Themeable Engine — базовые стили для кастомных дизайнов */
-/* Все правила ниже действуют ТОЛЬКО при data-theme-engine="themeable" */
-
-[data-theme-engine="themeable"] {
-  /* CSS-переменные для кастомных тем будут добавлены позже */
-}
-```
-
-### [ИЗМЕНИТЬ] `src/main.jsx`
-
-Добавить `import './styles/themeable.css';` после импорта `index.css`.
-
-## Критерий готовности
-- При активном custom design на `<body>` появляется `data-theme-engine="themeable"`
-- При стандартной теме (dark/light/neutral) атрибута нет
-- `useThemeable()` возвращает `{ isThemeable: true }` при custom design
-- Визуально ничего не изменилось — ни для стандартных тем, ни для custom designs
-
 ---
 
-# Спринт 1 — Layout, Navbar, общий каркас
+## Справочные мини-спецификации (целевые DOM)
 
-## Цель
-Привести `Layout.jsx`, `Navbar.jsx`, `ForumStats.jsx`, `ForumBreadcrumbs.jsx`, `ForumPagination.jsx` к стабильной DOM-структуре. Эти компоненты общие для ВСЕХ страниц.
-
-## Целевая структура (при `isThemeable`)
-
-```
-<div id="forum-wrapper">
-  <div id="forum">
-    <ForumBackground />
-    <header id="forum-header">
-      <div id="forum-title">              ← логотип + название форума
-        <a class="forum-logo">...</a>
-        <span class="forum-name">...</span>
-      </div>
-      <nav id="forum-nav">                ← навигационные ссылки
-        <a class="nav-link nav-home">...</a>
-        <a class="nav-link nav-members">...</a>
-        <a class="nav-link nav-active-topics">...</a>
-        ...
-      </nav>
-      <div id="forum-user-links">         ← ссылки пользователя
-        <a class="user-profile">...</a>
-        <a class="user-notifications">...</a>
-        <a class="user-messages">...</a>
-        <a class="user-settings">...</a>
-        <a class="user-logout">...</a>
-      </div>
-    </header>
-    <div id="forum-announcement">...</div>  ← welcomeMessage, только на главной
-    <div id="forum-status">...</div>        ← maintenance banner, verification banner
-    <main>                                  ← каждая страница добавит свой id через children
-      {children}
-    </main>
-    <footer id="forum-about">              ← copyright, ссылки
-      ...
-    </footer>
-  </div>
-</div>
-```
-
-## Файлы
-
-### [ИЗМЕНИТЬ] `src/components/layout/Layout.jsx`
-
-**Текущий DOM:**
-```
-<>
-  <ForumBackground />
-  <div className="app-wrapper">
-    <ConnectionStatusBanner />
-    <Navigation />
-    ...maintenance banner...
-    ...email verification banner...
-    ...welcome message...
-    <main className="py-2"><Container>{children}</Container></main>
-  </div>
-  <footer className="footer-custom py-2">...</footer>
-  <ScrollButtons />
-</>
-```
-
-**Что изменить при `isThemeable`:**
-- Обернуть всё в `<div id="forum-wrapper">` → `<div id="forum">`
-- `<Navigation />` обернуть в `<header id="forum-header">`
-- Banners → `<div id="forum-status">`
-- Welcome message → `<div id="forum-announcement">`
-- Footer → `<footer id="forum-about">`
-- **Bootstrap-классы и `<Container>` сохраняются** для layout, добавляются семантические id/class
-
-**Что НЕ менять при `!isThemeable`:**
-- Весь текущий JSX остаётся без изменений
-
-### [ИЗМЕНИТЬ] `src/components/layout/Navbar.jsx`
-
-- На корневой `<Navbar>` (Bootstrap) добавить: при isThemeable id не ставить на Navbar (Bootstrap уже контролирует его), но внутренние блоки снабдить id
-- Блок с логотипом/названием форума → `id="forum-title"`, `.forum-logo`, `.forum-name`
-- Навигационные ссылки → каждая получает семантический класс: `.nav-home`, `.nav-members`, `.nav-active`, `.nav-search`, `.nav-new-replies`, `.nav-subscriptions`, `.nav-admin`
-- Блок пользовательских ссылок (профиль, уведомления, тема, выход) → `id="forum-user-links"`, внутренние элементы: `.user-profile`, `.user-notifications`, `.user-messages`, `.user-theme-picker`, `.user-logout`
-
-### [ИЗМЕНИТЬ] `src/components/layout/ForumStats.jsx`
-
-- Обернуть в `<section id="forum-statistics">`
-- Каждый показатель → семантический класс:
-  - `.stat-topics` — всего тем
-  - `.stat-posts` — всего сообщений
-  - `.stat-members` — всего участников
-  - `.stat-newest-member` — последний зарегистрированный
-  - `.stat-online` — онлайн
-  - `.stat-visitors` — посетители
-
-### [ИЗМЕНИТЬ] `src/components/common/ForumBreadcrumbs.jsx`
-
-- Добавить props: `position` (`"top"` | `"bottom"`) и `pagePrefix` (строка, напр. `"forum"`, `"topic"`, `"members"`)
-- При `isThemeable` рендерить `id="{pagePrefix}-breadcrumbs-{position}"` на `<nav>`
-- Внутренние элементы: `.breadcrumb-item`, `.breadcrumb-link`
-
-### [ИЗМЕНИТЬ] `src/components/common/ForumPagination.jsx`
-
-- Добавить prop `paginationId` (строка, напр. `"forum-pagination-top"`)
-- При `isThemeable` рендерить `id={paginationId}` на контейнере
-- Внутренние элементы: `.pagination-item`, `.pagination-link`, `.pagination-current`, `.pagination-prev`, `.pagination-next`
-
-## Критерий готовности
-- При `isThemeable`: в DOM видны `#forum-wrapper`, `#forum`, `#forum-header`, `#forum-title`, `#forum-nav`, `#forum-user-links`, `#forum-about`
-- При `!isThemeable`: DOM идентичен текущему
-- Визуально ничего не поломано ни для одной темы
-
----
-
-# Спринт 2 — Forum Index (MainPage)
-
-## Спецификация
-**Основной источник:** `markdowns/forum-index-theme-dom-spec.md`
-
-## Файлы
-
-### [ИЗМЕНИТЬ] `src/pages/MainPage.jsx`
-
-**Текущий DOM (упрощённо):**
-```
-<div className="pt-5 pb-4">
-  {groups.map(group => (
-    <Card className="forum-group-card bg-transparent">
-      <div className="forum-group-header"><h4>{group.title}</h4></div>
-      <Table hover responsive className="forum-table forum-table-sub">
-        <thead><tr>...</tr></thead>
-        <tbody>
-          {categories.map(cat => (
-            <tr>
-              <td>link + description</td>
-              <td>topics count</td>
-              <td>posts count</td>
-              <td>last post info</td>
-            </tr>
-          ))}
-        </tbody>
-      </Table>
-    </Card>
-  ))}
-  <ForumStats />
-</div>
-```
-
-**Целевой DOM при `isThemeable`:**
-```
-<div id="forum-index" class="forum-index">
-  <nav id="forum-breadcrumbs-top">...</nav>
-  
-  <main id="forum-main">
-    <!-- Каждый group → section.forum-category -->
-    <section id="forum-category-{groupId}" 
-             class="forum-category category-{groupId}"
-             data-category-id="{groupId}">
-      <header class="category-header">
-        <h2 class="category-title">{group.title}</h2>
-      </header>
-      <div class="category-content">
-        <!-- Каждая категория в группе → article.forum-item -->
-        <article id="forum-item-{catId}" 
-                 class="forum-item forum-item-{catId} [is-new] [is-unread]"
-                 data-forum-id="{catId}">
-          <div class="forum-icon">...</div>
-          <div class="forum-info">
-            <h3 class="forum-title"><a href="/category/{catId}">...</a></h3>
-            <div class="forum-description">...</div>
-          </div>
-          <div class="forum-topics" data-value="{N}">{N}</div>
-          <div class="forum-posts" data-value="{N}">{N}</div>
-          <div class="forum-last-post">
-            <div class="last-post-avatar">...</div>
-            <a class="last-post-link" href="...">...</a>
-            <time class="last-post-date">...</time>
-            <a class="last-post-author" href="...">...</a>
-          </div>
-        </article>
-      </div>
-    </section>
-  </main>
-  
-  <section id="forum-statistics">...</section>
-  <nav id="forum-breadcrumbs-bottom">...</nav>
-</div>
-```
-
-**Маппинг терминов:**
-- В коде `group` → в спецификации `category` (группа категорий)
-- В коде `category` → в спецификации `forum-item` (подфорум внутри категории)
-
-### [ИЗМЕНИТЬ] `src/components/common/LastPostInfo.jsx`
-
-- Добавить prop `contextClass` (`"forum-last-post"` или `"topic-last-post"`)
-- При `isThemeable` обернуть в `<div class="{contextClass}">`
-- Внутри: `.last-post-avatar`, `.last-post-link`, `.last-post-date`, `.last-post-author`
-
-## Критерий готовности
-- Чек-лист из раздела 48 `forum-and-members-theme-dom-spec.md` → Forum View → все пункты проходят
-- Главная страница визуально и функционально работает при обеих режимах
-
----
-
-# Спринт 3 — Forum View (CategoryPage + TopicRow)
-
-## Спецификация
-**Основной источник:** `markdowns/forum-and-members-theme-dom-spec.md`, разделы 2-16
-
-## Файлы
-
-### [ИЗМЕНИТЬ] `src/pages/CategoryPage.jsx`
-
-**Целевой DOM при `isThemeable`:**
-```
-<div id="forum-view" class="forum-view forum-{categoryId}" data-forum-id="{categoryId}">
-  <nav id="forum-breadcrumbs-top">...</nav>
-  <header id="forum-header">
-    <h1 class="forum-title">{category.title}</h1>
-    <div class="forum-description">{category.description}</div>
-  </header>
-  <div id="forum-actions-top">
-    <!-- кнопки управления: новая тема, manage -->
-  </div>
-  <nav id="forum-pagination-top" class="forum-pagination is-top">...</nav>
-  <div id="forum-topic-list">
-    <div class="topic-list-header">
-      <div class="topic-column">...</div>
-      <div class="topic-replies">...</div>
-      <div class="topic-views">...</div>
-      <div class="topic-last-post">...</div>
-    </div>
-    <div class="topic-list">
-      <!-- pinned topics -->
-      <!-- regular topics -->
-    </div>
-  </div>
-  <nav id="forum-pagination-bottom" class="forum-pagination is-bottom">...</nav>
-  <div id="forum-actions-bottom">...</div>
-  <nav id="forum-breadcrumbs-bottom">...</nav>
-</div>
-```
-
-### [ИЗМЕНИТЬ] `src/components/common/TopicRow.jsx`
-
-**Критически важный компонент** — используется на 4 страницах: CategoryPage, ActiveTopicsPage, NewRepliesPage, SubscriptionsPage.
-
-**Текущий DOM:** `<tr className="topic-row-hover">` с `<td>` внутри
-
-**Целевой DOM при `isThemeable`:**
-```
-<article id="topic-{topicId}" 
-         class="topic-item topic-{topicId} [is-sticky] [is-locked] [is-new] [is-unread]"
-         data-topic-id="{topicId}">
-  <div class="topic-icon">...</div>
-  <div class="topic-main">
-    <a class="topic-title" href="/topic/{id}">{title}</a>
-    <div class="topic-author">
-      <a class="topic-author-link" href="/profile/{authorId}">
-        <span class="topic-author-name">{authorName}</span>
-      </a>
-    </div>
-    <nav class="topic-pagination"><!-- mini-pagination --></nav>
-  </div>
-  <div class="topic-replies" data-value="{N}">{N}</div>
-  <div class="topic-views" data-value="{N}">{N}</div>
-  <div class="topic-last-post">
-    <a class="last-post-avatar" href="/profile/{id}"><img ...></a>
-    <a class="last-post-link" href="/topic/{id}">...</a>
-    <time class="last-post-date" datetime="...">...</time>
-    <a class="last-post-author" href="/profile/{id}">...</a>
-  </div>
-</article>
-```
-
-**ВАЖНО**: При `isThemeable` компонент должен рендерить `<article>` вместо `<tr>`. Это значит, что страницы, использующие TopicRow, должны при `isThemeable` рендерить контейнер как `<div class="topic-list">` вместо `<Table>`. Сам TopicRow должен определять через prop или хук, какой элемент рендерить.
-
-**State-классы на `.topic-item`:**
-- `topic.is_pinned` → `.is-sticky`
-- `topic.is_locked` → `.is-locked`
-- `hasUnread` → `.is-unread` / `.is-new`
-
-### [ИЗМЕНИТЬ] `src/components/common/AuthorMeta.jsx`
-- При `isThemeable` добавить `.topic-author`, `.topic-author-name`, `.topic-author-link`
-
-## Критерий готовности
-- Чек-лист из раздела 48 `forum-and-members-theme-dom-spec.md` → Forum View → все пункты проходят
-- Все 4 страницы, использующие TopicRow, работают корректно
-
----
-
-# Спринт 4 — Topic View (TopicPage)
-
-## Спецификация
-**Основной источник:** `markdowns/forum-topic-view-theme-dom-spec.md`
-
-## ⚠️ Предупреждение
-
-**TopicPage.jsx — 3681 строка, 172KB.** Самый большой и сложный файл проекта. Содержит огромное количество бизнес-логики: посты, черновики, реакции, цитирование, редактирование, модерация, real-time подписки, пагинация, голоса, уведомления.
-
-**Правила для агента:**
-1. **ТОЛЬКО DOM-изменения.** Ноль изменений в бизнес-логике, state management, API-вызовах, useEffect, обработчиках событий.
-2. Перед началом — полностью прочитать файл и понять его структуру.
-3. Каждый пост в JSX найти и обернуть семантическими элементами.
-4. Тестировать после каждого блока изменений.
-
-## Целевой DOM при `isThemeable`
-
-### Корневой контейнер темы
-```
-<main id="topic-page" 
-      class="topic topic-{topicId} [is-pinned] [is-locked] [is-closed]"
-      data-topic-id="{topicId}">
-```
-
-### Заголовок темы
-```
-<header id="topic-header">
-  <h1 class="topic-title">{topic.title}</h1>
-  <div class="topic-description">{topic.description}</div>
-  <div class="topic-meta">
-    <!-- автор, дата создания, количество сообщений, статус -->
-  </div>
-</header>
-```
-
-### Breadcrumbs и пагинация
-```
-<nav id="topic-breadcrumbs-top">...</nav>
-<div id="topic-actions-top">
-  <button class="topic-action-reply">...</button>
-  <button class="topic-action-subscribe">...</button>
-  ...
-</div>
-<nav id="topic-pagination-top">...</nav>
-```
-
-### Список постов
-```
-<section id="topic-posts">
-  <article id="post-{postId}" 
-           class="topic-post post-{postId} [is-first] [is-topic-starter] [is-edited] [is-deleted]"
-           data-post-id="{postId}" data-user-id="{authorId}">
-    
-    <header class="post-header">
-      <a class="post-number">#{N}</a>
-      <time class="post-date" datetime="...">{date}</time>
-      <a class="post-permalink" href="#post-{id}">⟶</a>
-      <div class="post-actions">
-        <button class="post-action-quote">...</button>
-        <button class="post-action-edit">...</button>
-        <button class="post-action-delete">...</button>
-        <button class="post-action-report">...</button>
-      </div>
-    </header>
-    
-    <div class="post-container">
-      <div class="post-author [is-online] [is-offline]" 
-           data-user-id="{id}" data-group-id="{roleId}">
-        <div class="author-status"><!-- online dot --></div>
-        <a class="author-name" href="/profile/{uid}">{name}</a>
-        <div class="author-rank">{role badge}</div>
-        <div class="author-avatar"><img src="..." alt="..."></div>
-        <div class="author-custom-fields">
-          <div class="author-field">
-            <span class="author-field-name">...</span>
-            <span class="author-field-value">...</span>
-          </div>
-        </div>
-        <div class="author-post-count">{N}</div>
-        <div class="author-reputation">{N}</div>
-      </div>
-      
-      <div class="post-body">
-        <div class="post-content">
-          <!-- user HTML content (BBCode rendered) -->
-          <!-- blockquote.post-quote внутри контента -->
-        </div>
-        <div class="post-attachments">
-          <div class="post-attachment">...</div>
-        </div>
-        <div class="post-signature">...</div>
-      </div>
-    </div>
-    
-    <footer class="post-footer">
-      <div class="post-reactions">
-        <button class="post-reaction [is-active]">...</button>
-      </div>
-      <div class="post-links">
-        <a class="post-link-reply">...</a>
-        <a class="post-link-quote">...</a>
-      </div>
-    </footer>
-  </article>
-</section>
-```
-
-### Нижняя часть
-```
-<nav id="topic-pagination-bottom">...</nav>
-<div id="topic-actions-bottom">...</div>
-<section id="topic-reply">
-  <div class="reply-header">...</div>
-  <form class="reply-form">
-    <div class="reply-editor"><!-- RichEditor --></div>
-    <div class="reply-actions">
-      <button class="reply-submit">...</button>
-    </div>
-  </form>
-</section>
-<nav id="topic-breadcrumbs-bottom">...</nav>
-```
-
-## State-классы
-
-**На `#topic-page`:**
-- `topic.is_pinned` → `.is-pinned`
-- `topic.is_locked` → `.is-locked`
-
-**На `.topic-post`:**
-- Первый пост → `.is-first`
-- Автор совпадает с автором темы → `.is-topic-starter`
-- `post.edited_at` → `.is-edited`
-
-**На `.post-author`:**
-- `isUserOnline(uid)` → `.is-online` / `.is-offline`
-
-## Критерий готовности
-- Чек-лист из раздела 38 `forum-topic-view-theme-dom-spec.md`
-- Все посты рендерятся, цитаты работают, реакции работают, пагинация работает
-- Форма ответа работает
-- Якоря `#post-{id}` работают для навигации
-
----
+Целевые DOM из исходных спринтов 5–12. Рамка `isThemeable` в них — устаревшая: семантический DOM теперь всегда, веток нет. Имена классов — фактические, сверены с журналом; где мини-спецификация расходится с кодом, прав код и карта повторяющихся элементов в аудите.
 
 # Спринт 5 — Members View (MembersPage)
 
@@ -848,73 +723,6 @@ ProfilePage — вторая по сложности страница (1802 ст
 .profile-tabs
 .profile-tab
 .profile-tab-content
-```
-
----
-
-# Спринт 7 — Списки тем: Active Topics, New Replies, Subscriptions
-
-## Мини-спецификация
-
-Эти 3 страницы имеют одинаковую структуру — список тем с TopicRow. После спринта 3 TopicRow уже поддерживает семантическую разметку. Здесь нужно добавить обёртки страниц.
-
-### ActiveTopicsPage
-
-```
-<div id="active-topics-page" class="active-topics-page topic-list-page">
-  <nav id="active-topics-breadcrumbs-top">...</nav>
-  <header id="active-topics-header">
-    <h1 class="page-title">{t('stats.top_discussed')}</h1>
-    <div class="page-description">{t('stats.top_discussed_desc')}</div>
-  </header>
-  <div id="active-topics-list" class="topic-list-container">
-    <div class="topic-list-header">...</div>
-    <div class="topic-list">
-      <!-- TopicRow components (already themed from Sprint 3) -->
-    </div>
-  </div>
-  <nav id="active-topics-breadcrumbs-bottom">...</nav>
-</div>
-```
-
-### NewRepliesPage
-
-```
-<div id="new-replies-page" class="new-replies-page topic-list-page">
-  <nav id="new-replies-breadcrumbs-top">...</nav>
-  <header id="new-replies-header">
-    <h1 class="page-title">...</h1>
-    <div class="page-actions">
-      <button class="mark-all-read-btn">...</button>
-    </div>
-  </header>
-  <nav class="page-tabs">
-    <button class="page-tab [is-active]" data-tab="all">...</button>
-    <button class="page-tab [is-active]" data-tab="new">...</button>
-  </nav>
-  <nav id="new-replies-pagination-top">...</nav>
-  <div id="new-replies-list" class="topic-list-container">
-    <div class="topic-list">...</div>
-  </div>
-  <nav id="new-replies-pagination-bottom">...</nav>
-</div>
-```
-
-### SubscriptionsPage
-
-```
-<div id="subscriptions-page" class="subscriptions-page topic-list-page">
-  <nav id="subscriptions-breadcrumbs-top">...</nav>
-  <header id="subscriptions-header">
-    <h1 class="page-title">...</h1>
-    <div class="page-description">...</div>
-  </header>
-  <nav id="subscriptions-pagination-top">...</nav>
-  <div id="subscriptions-list" class="topic-list-container">
-    <div class="topic-list">...</div>
-  </div>
-  <nav id="subscriptions-pagination-bottom">...</nav>
-</div>
 ```
 
 ---
@@ -1124,70 +932,60 @@ ProfilePage — вторая по сложности страница (1802 ст
 
 Админка менее приоритетна для кастомизации пользовательскими темами, но должна быть адресуемой через CSS (администратор может захотеть стилизовать её под свой форум).
 
-Навигация админки — боковой сайдбар со СГРУППИРОВАННЫМИ разделами, а не плоский ряд табов (реализовано в `INPROGRESS_SPRINT_PLAN_admin_reorg.md`). Разделы, к которым у посетителя нет доступа, не отрисовываются вовсе, и группа, у которой не осталось ни одного доступного раздела, исчезает вместе с ними.
-
 ```
 <div id="admin-page" class="admin-page">
-  <div id="admin-breadcrumbs" class="admin-breadcrumbs">...</div>
-  <header id="admin-header" class="admin-header">
-    <h1 class="admin-page-title">...</h1>
+  <nav id="admin-breadcrumbs">...</nav>
+  <header id="admin-header">
+    <h1 class="page-title">...</h1>
   </header>
-  <div class="row admin-layout">
-    <div class="col-lg-3 admin-sidebar-column">
-      <!-- На узких экранах это Offcanvas-drawer, на широких — статичная колонка.
-           Разметка навигации существует в DOM ровно в одном экземпляре. -->
-      <nav id="admin-sidebar" class="admin-nav">
-        <div class="admin-sidebar-group [is-open|is-collapsed]" data-group="userManagement">
-          <button class="admin-sidebar-group-header" aria-expanded="true">...</button>
-          <ul class="admin-sidebar-list">
-            <li class="admin-nav-item">
-              <button class="admin-nav-link [is-active]" data-tab="users" aria-current="page">...</button>
-            </li>
-          </ul>
-        </div>
-      </nav>
+  <nav class="admin-tabs">
+    <button class="admin-tab [is-active]" data-tab="users">...</button>
+    <button class="admin-tab [is-active]" data-tab="categories">...</button>
+    <button class="admin-tab [is-active]" data-tab="roles">...</button>
+    <button class="admin-tab [is-active]" data-tab="designs">...</button>
+    <button class="admin-tab [is-active]" data-tab="settings">...</button>
+    <button class="admin-tab [is-active]" data-tab="audit">...</button>
+  </nav>
+  <div id="admin-content" class="admin-tab-content">
+    <!-- Active tab content -->
+    
+    <!-- Users tab -->
+    <div class="admin-users-tab">
+      <div class="admin-users-filters">...</div>
+      <div class="admin-users-list">
+        <div class="admin-user-item" data-user-id="{uid}">...</div>
+      </div>
     </div>
-    <div id="admin-content" class="col-lg-9 admin-content">
-      <!-- Active section content -->
-
-      <!-- Users section -->
-      <div class="admin-users-tab">
-        <div class="admin-users-filters">...</div>
-        <div class="admin-users-list">
-          <div class="admin-user-item" data-user-id="{uid}">...</div>
+    
+    <!-- Categories tab -->
+    <div class="admin-categories-tab">
+      <div class="admin-category-groups">
+        <div class="admin-category-group" data-group-id="{id}">...</div>
+      </div>
+      <div class="admin-categories-list">
+        <div class="admin-category-item" data-category-id="{id}">...</div>
+      </div>
+    </div>
+    
+    <!-- Designs tab -->
+    <div class="admin-designs-tab">
+      <div class="admin-designs-settings">...</div>
+      <div class="admin-designs-list">
+        <div class="design-card" data-design-id="{id}">
+          <div class="design-card-name">...</div>
+          <div class="design-card-status">...</div>
+          <div class="design-card-actions">...</div>
         </div>
       </div>
-
-      <!-- Categories section -->
-      <div class="admin-categories-tab">
-        <div class="admin-category-groups">
-          <div class="admin-category-group" data-group-id="{id}">...</div>
-        </div>
-        <div class="admin-categories-list">
-          <div class="admin-category-item" data-category-id="{id}">...</div>
-        </div>
-      </div>
-
-      <!-- Designs section -->
-      <div class="admin-designs-tab">
-        <div class="admin-designs-settings">...</div>
-        <div class="admin-designs-list">
-          <div class="design-card" data-design-id="{id}">
-            <div class="design-card-name">...</div>
-            <div class="design-card-status">...</div>
-            <div class="design-card-actions">...</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Settings section -->
-      <div class="admin-settings-tab">...</div>
-
-      <!-- Audit section -->
-      <div class="admin-audit-tab">
-        <div class="audit-log-list">
-          <div class="audit-log-item">...</div>
-        </div>
+    </div>
+    
+    <!-- Settings tab -->
+    <div class="admin-settings-tab">...</div>
+    
+    <!-- Audit tab -->
+    <div class="admin-audit-tab">
+      <div class="audit-log-list">
+        <div class="audit-log-item">...</div>
       </div>
     </div>
   </div>
@@ -1196,62 +994,9 @@ ProfilePage — вторая по сложности страница (1802 ст
 
 ---
 
-# Спринт 13 — Themeable CSS базовый файл
-
-## Цель
-Создать `src/styles/themeable.css` — полноценный файл базовых стилей, которые действуют только при `[data-theme-engine="themeable"]`.
-
-## Содержимое
-
-1. **CSS-переменные** — расширенный набор переменных для кастомных тем:
-   - Все существующие переменные из `:root` / `[data-theme]` (наследуются)
-   - Дополнительные переменные для новых элементов:
-     - `--forum-header-bg`, `--forum-header-text`
-     - `--category-header-bg`, `--category-header-text`
-     - `--topic-item-bg`, `--topic-item-hover-bg`
-     - `--post-author-bg`, `--post-body-bg`
-     - `--post-header-bg`, `--post-footer-bg`
-     - и т.д.
-
-2. **Базовые стили** для каждого семантического контейнера:
-   - Layout: `#forum-wrapper`, `#forum`, `#forum-header`, `#forum-about`
-   - Forum Index: `#forum-main`, `.forum-category`, `.forum-item`
-   - Forum View: `#forum-view`, `.topic-item`
-   - Topic View: `#topic-page`, `.topic-post`, `.post-author`, `.post-body`
-   - Members: `#members-page`, `.member-item`
-   - и т.д.
-
-3. **Reset Bootstrap конфликтов** — где Bootstrap-классы мешают семантическому layout, переопределить их за `[data-theme-engine="themeable"]`
-
-4. **Responsive breakpoints** — мобильные стили для семантических контейнеров
-
-## Принцип
-Этот файл — **минимальный**, работающий скелет. Он не должен навязывать конкретный дизайн. Он обеспечивает, что при активном themeable-каркасе форум выглядит «адекватно по умолчанию», а кастомный CSS поверх него может полностью переоформить любой элемент.
-
 ---
 
-# Спринт 14 — Theme API Reference документация
-
-## Цель
-Создать `markdowns/theme-api-reference.md` — полный справочник Theme DOM API для дизайнеров.
-
-## Содержимое
-
-1. **Введение** — что такое Theme API, как работает, как подключать CSS/JS
-2. **Полный список селекторов** по страницам:
-   - Structural IDs
-   - Semantic classes
-   - State classes
-   - Data attributes
-   - Entity-specific IDs/classes
-3. **CSS-переменные** — полный список с описанием и значениями по умолчанию
-4. **Примеры** — 3-5 примеров кастомных CSS-тем (смена цветовой палитры, смена layout, скрытие элементов, etc.)
-5. **Гайд для дизайнеров** — пошаговая инструкция «как создать свой дизайн»
-6. **Чек-лист** — полный чек-лист проверки DOM-контракта
-
----
-
-# Спринт 15 — Интеграционное тестирование
+## Финальный чек-лист (бывший спринт 15)
 
 ## Чек-лист
 
@@ -1299,87 +1044,30 @@ ProfilePage — вторая по сложности страница (1802 ст
 
 ---
 
-# Зависимости между спринтами
-
-```
-Спринт 0 (Инфраструктура)
-    ↓
-Спринт 1 (Layout, Navbar, каркас)
-    ↓
-    ├── Спринт 2 (Forum Index)
-    ├── Спринт 3 (Forum View + TopicRow) ─→ Спринт 4 (Topic View)
-    ├── Спринт 5 (Members View)
-    └── Спринт 6 (Profile)
-            ↓
-    Спринт 7 (Active/New/Subs) ← зависит от спринта 3 (TopicRow)
-    Спринт 8 (Notifications)
-    Спринт 9 (Topic Form)
-    Спринт 10 (Messages)
-    Спринт 11 (Auth + служебные)
-    Спринт 12 (Admin)
-            ↓
-    Спринт 13 (CSS)
-    Спринт 14 (Docs)
-            ↓
-    Спринт 15 (Тестирование)
-```
-
-**Параллельно** можно выполнять:
-- Спринты 2, 3, 5, 6 — после спринта 1
-- Спринты 7-12 — после спринта 3 (TopicRow готов)
-- Спринты 13, 14 — после завершения всех DOM-спринтов
-
 ---
 
-# Общие правила для агентов
+## Правила для агентов
 
-## Что ДЕЛАТЬ
+> Этот раздел заменяет старые «Общие правила» (isThemeable-ветки, «сохранять Bootstrap-классы», «не запускать build») — те правила устарели и противоречат журналу.
 
-1. **Читать спецификацию** перед началом работы. Для страниц с подробной спецификацией в `markdowns/` — читать соответствующий файл целиком. Для остальных — следовать мини-спецификации из этого документа.
+### Что ДЕЛАТЬ
 
-2. **Использовать хук `useThemeable()`** для определения, нужна ли семантическая разметка. Пример:
-   ```jsx
-   const { isThemeable } = useThemeable();
-   
-   return (
-     <div 
-       id={isThemeable ? "forum-view" : undefined}
-       className={`existing-class ${isThemeable ? 'forum-view' : ''}`}
-     >
-   ```
+1. **Читать плейбук, спринт и SPEC** перед началом работы над компонентом.
+2. **Один компонент за раз.** После него — `npm run build` + `npm test` + короткий отчёт.
+3. **Семантический DOM всегда.** `id` на структурных контейнерах, `data-*` на сущностях (`data-topic-id`, `data-post-id`, `data-user-id`, `data-group-id`, `data-category-id`, `data-forum-id`), state — классами `.is-*` по реальным данным из модели.
+4. **Значения — литерально из оригинала** (Bootstrap / `index.css`). Не округлять, не «улучшать».
+5. **Цвета — через токены; новые токены — только цвета.** Геометрия — литералами в классе.
+6. **Проверять три темы и три ширины** (десктоп / ≤993px / ≤768px).
+7. **Если не можешь сверить вид — напиши в отчёте**, что не сверено. Не гадай.
 
-3. **Сохранять Bootstrap-классы** — они отвечают за внутренний layout и не должны удаляться. Семантические классы добавляются РЯДОМ:
-   ```jsx
-   // Правильно:
-   className="row forum-item forum-item-25"
-   
-   // Неправильно:
-   className="forum-item forum-item-25"  // удалён row — layout сломан
-   ```
-
-4. **Добавлять `data-*` атрибуты** на все сущности:
-   - `data-category-id`, `data-forum-id`, `data-topic-id`, `data-post-id`, `data-user-id`, `data-group-id`
-
-5. **Добавлять state-классы** на основании реальных данных из модели. Не изобретать несуществующие состояния.
-
-6. **Проверять обратную совместимость** — если существующий JS ищет элементы по классу, не удалять этот класс. Можно добавить новый рядом.
-
-7. **Тестировать при обоих режимах** — убедиться, что при `!isThemeable` UI идентичен текущему.
-
-## Что НЕ делать
+### Что НЕ делать
 
 1. **НЕ менять бизнес-логику** — ноль изменений в state management, API-вызовах, useEffect, обработчиках событий, маршрутизации.
-
-2. **НЕ удалять существующие CSS-классы** без проверки, что они не используются в JS или CSS.
-
-3. **НЕ использовать Bootstrap-классы как Theme API** — тема не должна стилизоваться через `.row`, `.col`, `.card`, `.btn`. Эти классы для внутреннего layout.
-
-4. **НЕ копировать старую MyBB/Rusff разметку** — не использовать `.tcl`, `.tc2`, `.isticky`, `.pa-author`, `.item1` и подобные. Подробный список запрещённых классов в каждой спецификации.
-
-5. **НЕ использовать порядковые классы** — `.item1`, `.item2`, `.item3` для сущностей с собственным ID.
-
-6. **НЕ привязывать тему к тексту** — подписи колонок, лейблы фильтров, названия групп могут быть на разных языках. Тема стилизует по классу, не по тексту.
-
-7. **НЕ рендерить пустые контейнеры** — если элемент не имеет данных (нет описания, нет вложений, нет подписи), не создавать пустой `<div class="forum-description"></div>`. Если данных нет — элемент не рендерится.
-
-8. **НЕ запускать `npm run build`, `firebase deploy`** и подобные команды. Только модификация кода.
+2. **НЕ использовать `!important`** в нативных модулях (`src/styles/*.css`) — никогда, даже в медиа-запросах.
+3. **НЕ переписывать файл целиком и НЕ брать два компонента за раз.**
+4. **НЕ удалять классы/`id`, которые ищет JS или CSS**, без проверки.
+5. **НЕ добавлять новые правила в `src/index.css`** и новые токены геометрии.
+6. **НЕ запускать `firebase deploy`** и подобные команды. `npm run build` и `npm test` — можно и нужно.
+7. **НЕ придумывать новые состояния/классы** без данных из модели.
+8. **НЕ привязывать тему к тексту** — подписи и лейблы бывают на разных языках; тема стилизует по классу, не по тексту.
+9. **НЕ рендерить пустые контейнеры** — нет данных, нет элемента.

@@ -46,6 +46,7 @@ export const notificationsResource = (uid) =>
     },
     intervalMs: 15000,
     initialValue: [],
+    skipConnectReplayMs: 1000,
     onError: (err) => console.warn('[subscribeToUserNotifications error]', err),
     // THE FIRST RESOURCE TO RIDE REALTIME, and the reason it is this one.
     //
@@ -60,12 +61,11 @@ export const notificationsResource = (uid) =>
     // exactly the behaviour they had before this feature existed.
     realtime: canReceiveSignals()
       ? (onDelivered, onDead, onStateChange) => subscribeToRealtimeSignals(
-        // Every signal re-reads the list; the topic is not filtered here on
-        // purpose. Distinguishing "this signal is mine" from "that one is" in
-        // the browser would mean trusting the payload, and the payload is an id
-        // precisely because it is not to be trusted. One re-read per coalesced
-        // burst is cheap, and the server decides what the member may see.
-        () => onDelivered(),
+        // Strict signal filtering: only a brand-new notification for THIS topic
+        // triggers a re-read. A `topic.post`, `presence.update` or any other
+        // system signal must NOT cause this resource to hammer
+        // GET /me/notifications?unread=true&type=quote&topic_id=...
+        (signalTopic) => { if (signalTopic === 'notification.new') onDelivered(); },
         () => onDead(),
         // A quiet forum emits no signal for minutes, so the connection itself has
         // to be what marks this stream healthy — see the note in realtime-signals.
@@ -94,10 +94,11 @@ export const topicNotificationsResource = (uid, topicId) =>
     },
     intervalMs: 15000,
     initialValue: [],
+    skipConnectReplayMs: 1000,
     onError: (err) => console.warn('[subscribeToTopicNotifications error]', err),
     realtime: canReceiveSignals()
       ? (onDelivered, onDead, onStateChange) => subscribeToRealtimeSignals(
-        () => onDelivered(),
+        (signalTopic) => { if (signalTopic === 'notification.new') onDelivered(); },
         () => onDead(),
         onStateChange,
       )

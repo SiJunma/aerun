@@ -105,11 +105,9 @@ export const fetchUserSubscribedTopics = async (userId, page = 1, pageSize = 20)
       : [];
 
     const validTopics = [...embedded, ...fetched].filter(Boolean);
-    // `last_post_at_ms` is what normalizeTopic derived, so a topic whose last
-    // post is the opening one still sorts by its real activity instead of by
-    // an undefined field.
-    validTopics.sort((a, b) => (b.last_post_at_ms || 0) - (a.last_post_at_ms || 0));
-
+    // Порядок задаёт сервер (ORDER BY topics.last_post_created DESC, id DESC
+    // в listUserSubscriptionsHandler). Клиентская пересортировка только внутри
+    // страницы ломала межстраничный порядок — убрана. Один источник порядка.
     // `total` is the server's count over the WHOLE list, not this page — it is
     // what the pager divides by, exactly as on a category page.
     //

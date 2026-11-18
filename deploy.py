@@ -23,6 +23,8 @@ CHUNK = 256 << 10
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 WORK = os.path.join(ROOT, ".deploy")
+BACKUP_DIR = os.path.join(WORK, "backups")
+BACKUP_GLOB = "pb_data-backup-*.tgz"
 FRONT_LOCAL = os.path.join(WORK, "dist.tgz")
 BACK_LOCAL = os.path.join(WORK, "aerun-linux.tar.gz")
 BACK_BIN = os.path.join(WORK, "aerun-linux")
@@ -102,6 +104,66 @@ def ssh(cmd: str, *, user: str = DEPLOY_USER, timeout: int = 300) -> str:
     if err.strip():
         log(f"  ! stderr: {err.strip()[:500]}")
     return out
+
+
+def sftp_download(remote: str, local: str) -> None:
+    """SFTP download with progress + sha256 verification (mirror of sftp_put)."""
+    import paramiko
+
+    os.makedirs(os.path.dirname(local), exist_ok=True)
+    transport = paramiko.Transport((HOST, 22))
+    transport.set_keepalive(15)
+    transport.connect(username=DEPLOY_USER, pkey=_key())
+    sftp = paramiko.SFTPClient.from_transport(transport)
+    try:
+        size = sftp.stat(remote).st_size
+        log(f"download {remote} -> {local} ({size} bytes)")
+        last = [0]
+
+        def _cb(transferred, total):
+            if transferred - last[0] >= 8 << 20 or transferred == total:
+                last[0] = transferred
+                log(f"  ... {transferred}/{total} ({transferred * 100 // total if total else 100}%)")
+
+        sftp.get(remote, local, callback=_cb)
+    finally:
+        sftp.close()
+        transport.close()
+    if os.path.getsize(local) != size:
+        raise Fail(f"size mismatch for {remote}: expected {size}, got {os.path.getsize(local)}")
+    digest = sha256_file(local)
+    log(f"  local sha256: {digest}")
+    out = ssh(f"sha256sum {remote}")
+    if digest not in out:
+        raise Fail(f"sha256 mismatch for {remote}:\nlocal  {digest}\nremote {out}")
+    log(f"  sha256 OK: {digest[:16]}...")
+
+
+def latest_backup():
+    """Newest pb_data-backup-*.tgz on the VPS (by mtime), or None."""
+    out = ssh("ls -1t ~/project/%s 2>/dev/null | head -n 1" % BACKUP_GLOB)
+    name = out.strip().splitlines()[0].strip() if out.strip() else ""
+    return name or None
+
+
+def cmd_backup_download(args) -> None:
+    name = args.file
+    if not name:
+        log("== no --file given, picking newest backup on VPS ==")
+        name = latest_backup()
+        if not name:
+            raise Fail("no %s found on VPS - run: python deploy.py db backup" % BACKUP_GLOB)
+        log(f"  newest: {name}")
+    remote = name if name.startswith(("/","~/")) else "~/project/" + name.lstrip("~/")
+    if args.out:
+        local = args.out
+    else:
+        local = os.path.join(BACKUP_DIR, os.path.basename(remote.rstrip("/")))
+    if os.path.exists(local) and not args.overwrite:
+        raise Fail(f"{local} already exists (use --overwrite or --out <path>)")
+    sftp_download(remote, local)
+    log(f"DOWNLOAD OK: {local}")
+    log("  restore locally: extract over backend/pb_data (stop local backend first)")
 
 
 def sftp_put(local: str, remote: str) -> None:
@@ -301,8 +363,7 @@ def step_swap_backend() -> None:
 
 def step_sync_repo() -> None:
     log("== 7. sync VPS clone (fetch only, no hard reset) ==")
-    out = ssh("cd ~/project && git fetch origin --prune"
-              " && git rev-parse --short HEAD" % BRANCH)
+    out = ssh(f"cd ~/project && git fetch origin --prune && git rev-parse --short HEAD")
     lines = [l for l in out.strip().splitlines() if l.strip()]
     log("  VPS HEAD: " + (lines[-1] if lines else "?"))
     ssh("rm -f %s.q* %s.q* /tmp/*.part; true" % (FRONT_REMOTE, BACK_REMOTE))
@@ -332,9 +393,44 @@ def step_verify() -> None:
 
 def cmd_caddy(args) -> None:
     action = args.caddy_action
-    if action == "reload":
-        log("== reload caddy ==")
-        ssh("systemctl reload caddy", user=ROOT_USER, timeout=60)
+    # IaC drift that caused the QUIC/SSE reconnect storm: the repo Caddyfile
+    # had been edited after the live /etc/caddy/Caddyfile was installed,
+    # so the fix never reached the VPS. This pulls the repo file from
+    # origin/main, validates it, and reloads — never a bare reload of a
+    # stale file.
+    def install_and_reload(extra_verify=False):
+        # NOTE: root's HOME is /root, deploy's is /home/deploy. Using
+        # ~/project under ROOT_USER fails; use the absolute path.
+        # git under root trips "dubious ownership" on the deploy-owned
+        # tree, so fetch/show happen as `deploy` and only the privileged
+        # copy/validate/reload runs as root. safe.directory is set for
+        # deploy already (see _ensure_git_safe).
+        def _ensure_git_safe():
+            code, _, _ = ssh_exec(
+                "git config --global --add safe.directory /home/deploy/project",
+                user=DEPLOY_USER, timeout=10)
+
+        _ensure_git_safe()
+        fetch = "cd /home/deploy/project && git fetch origin --prune && git show origin/main:backend/deploy/Caddyfile > backend/deploy/Caddyfile"
+        code, out, err = ssh_exec(fetch, user=DEPLOY_USER, timeout=60)
+        if code != 0:
+            raise Fail("git fetch/show failed (%d): %s %s" % (code, out, err))
+        cmd = (
+            "cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak-$(date +%Y%m%d) && "
+            "cp /home/deploy/project/backend/deploy/Caddyfile /etc/caddy/Caddyfile && "
+            "caddy validate --config /etc/caddy/Caddyfile && "
+            "systemctl reload caddy"
+        )
+        if extra_verify:
+            cmd += " && sleep 1 && curl -sI http://127.0.0.1/api/realtime | head -20 || true"
+        ssh(cmd, user=ROOT_USER, timeout=60)
+
+    if action == "install":
+        log("== install Caddyfile (origin/main) + validate + reload ==")
+        install_and_reload(extra_verify=True)
+    elif action == "reload":
+        log("== install Caddyfile (origin/main) + validate + reload ==")
+        install_and_reload()
     elif action == "restart":
         log("== restart caddy ==")
         ssh("systemctl restart caddy", user=ROOT_USER, timeout=60)
@@ -397,12 +493,19 @@ def build_parser():
     sub.add_parser("sync", help="git fetch/reset on VPS only (no artifacts)")
     sub.add_parser("status", help="service state + deployed commit + disk use")
     sub.add_parser("health", help="VPS loopback + public API + frontend checks")
-    caddy = sub.add_parser("caddy", help="manage Caddy reverse proxy (reload/restart/status)")
-    caddy.add_argument("caddy_action", choices=["reload", "restart", "status"])
+    caddy = sub.add_parser("caddy", help="manage Caddy reverse proxy (install/reload/restart/status)")
+    caddy.add_argument("caddy_action", choices=["install", "reload", "restart", "status"])
     db = sub.add_parser("db", help="pre-release database helpers")
     db.add_argument("db_action", choices=["backup", "migrate", "restore"])
     db.add_argument("--file", default=None, help="backup file for db restore")
     db.add_argument("--yes", action="store_true", help="skip confirmation for restore")
+    backup = sub.add_parser("backup", help="download a DB backup from VPS to this PC")
+    backup.add_argument("--file", default=None,
+                          help="backup on VPS (default: newest pb_data-backup-*.tgz)")
+    backup.add_argument("--out", default=None,
+                        help="local path (default: .deploy/backups/<name>)")
+    backup.add_argument("--overwrite", action="store_true",
+                        help="overwrite existing local file")
     return p
 
 
@@ -491,6 +594,8 @@ def main() -> int:
             cmd_caddy(args)
         elif args.cmd == "db":
             cmd_db(args)
+        elif args.cmd == "backup":
+            cmd_backup_download(args)
         return 0
     except Fail as exc:
         log("FATAL: %s" % exc)

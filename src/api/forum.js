@@ -1,7 +1,7 @@
 import { sendApi } from './pocketbase';
-import { processDiceRolls } from '../utils/dice';
 import { sharedPoll } from './shared-poll';
 import { subscribeToRealtimeSignals, canReceiveSignals } from './realtime-signals';
+import { toMillis } from '../utils/dates';
 
 // normalizeTopic maps a server topic row onto the field names the renderers
 // read. EXPORTED because three different topic lists exist (the category page,
@@ -23,8 +23,8 @@ export const normalizeTopic = (t) => {
     is_locked: !!(t.locked || t.is_locked),
     created_at: createdDate,
     last_post_at: lastPostDate,
-    created_at_ms: createdDate ? new Date(createdDate).getTime() : 0,
-    last_post_at_ms: lastPostDate ? new Date(lastPostDate).getTime() : 0,
+    created_at_ms: createdDate ? toMillis(createdDate) : 0,
+    last_post_at_ms: lastPostDate ? toMillis(lastPostDate) : 0,
   };
 };
 
@@ -41,6 +41,8 @@ const normalizePost = (p) => {
     content: p.content || '',
     created_at: p.created,
     updated_at: p.updated,
+    edited_at: p.edited_at || p.edited || null,
+    editor_id: p.editor_id || null,
     created_at_ms: p.created ? new Date(p.created).getTime() : 0,
   };
 };
@@ -140,8 +142,11 @@ export const fetchTopicStats = async (topicId) => {
   if (!res) return null;
   // Deleted / missing topic answers 200 {deleted: true} instead of a cascade
   // of 404s. Fold into null so the page renders the "Topic Not Found" card
-  // via the existing !stats branch in TopicPage.
-  if (res.deleted) return null;
+  // via the existing !stats branch in TopicPage. A restricted topic also
+  // answers 200 {deleted: true, restricted: true} — that is folded into a
+  // stats object carrying the restricted flag so the client can show
+  // "Access denied" instead of "Topic not found".
+  if (res.deleted && !res.restricted) return null;
   const createdDate = res.created || res.created_at || null;
   const lastPostDate = res.last_post_at || res.last_post_created || createdDate;
   return {
@@ -186,7 +191,13 @@ export const subscribeToTopicStats = (topicId, callback) => {
     fetch: () => fetchTopicStats(topicId),
     intervalMs: 15000,
     initialValue: null,
-    onError: (err) => console.warn('[subscribeToTopicStats err]', err),
+    // 403 is a truthful server answer (restricted category), not a failure —
+    // no point flooding the console with it on every 15s poll.
+    onError: (err) => {
+      if (err?.status !== 403) {
+        console.warn('[subscribeToTopicStats err]', err);
+      }
+    },
     realtime: canReceiveSignals()
       ? (onDelivered, onDead, onStateChange) => subscribeToRealtimeSignals(
         (signalTopic, entityId) => {
@@ -206,11 +217,14 @@ export const subscribeToTopicStats = (topicId, callback) => {
   });
 
   // Same (data, err) SHAPE as subscribeToTopic: 404/403 means "not visible
-  // to you" (renders the not-found card), anything else is a real error.
+  // to you". 404 keeps the topic-not-found card (topic is gone). 403 means
+  // the topic exists but the caller's role is not in the category's
+  // allowed_roles — the caller must see "access denied", not "not found",
+  // so the raw error is passed through with its status intact.
   return poll.subscribe((stats, err) => {
     if (!err) {
       callback(stats, null);
-    } else if (err?.status === 404 || err?.status === 403) {
+    } else if (err?.status === 404) {
       callback(null, null);
     } else {
       callback(null, err);
@@ -279,7 +293,9 @@ export const fetchSecuredTopics = async (categoryId, page = 1, pageSize = 20) =>
     topics: items.filter(t => !t.is_pinned),
     total: res?.total ?? items.length,
     page: res?.page || page,
-    limit: res?.per_page || pageSize
+    limit: res?.per_page || pageSize,
+    restricted: res?.restricted || false,
+    message: res?.message || ''
   };
 };
 
@@ -314,17 +330,19 @@ export const subscribeToLastTopicInCategory = (categoryId, callback) => {
 // where the topic-not-found card greeted a topic that had in fact been created
 // successfully. A missing id is now an error the caller shows, not a URL.
 export const createTopic = async (topicData, firstPostData) => {
-  // Same reason as createPost: the dice results are part of the opening message
-  // and were being dropped, so a throw in a new topic never resolved for anyone.
-  const { content: processedContent, rolls } = processDiceRolls(firstPostData.content);
+  // SEC-08: raw body only; the server throws [dice=N] with crypto/rand.
 
   const res = await sendApi('/api/aerun/topics', {
     method: 'POST',
     body: {
       category_id: topicData.category_id,
       title: topicData.title,
-      content: processedContent.trim(),
-      rolls: rolls && Object.keys(rolls).length > 0 ? rolls : undefined,
+      // The topic's short subtitle ("Краткое описание"). Dropped here before:
+      // the create form held it in state and sent it, but this body never
+      // forwarded it, so the server stored an empty description and the
+      // header/category list lost it on every reload.
+      description: topicData.description || '',
+      content: firstPostData.content.trim(),
       // Both of these used to be dropped on the floor. The form held
       // `selectedCharacterId` and `pinFirstPost` in state and sent neither, so
       // the server had nothing to record: every message came out under the
@@ -516,19 +534,28 @@ export const subscribeToUserPosts = (uid, limitCount, callback) => {
 // the SAME key for every request of one logical submit makes the server replay
 // the first response instead. See utils/inflight.js.
 export const createPost = async (postData, idempotencyKey) => {
-  // The throws MUST travel with the text. `rolls` used to be destructured away
-  // here — `const { content } = processDiceRolls(...)` — so the roll was rendered
-  // in the optimistic card and then dropped on the floor: the `[roll=<id>]` tag
-  // reached the server with nothing pointing at it, and every reader after a
-  // reload saw the raw tag. The tag is a pointer; this map is the payload.
-  const { content: processedContent, rolls } = processDiceRolls(postData.content);
-
+  // SEC-08: the server decides the dice values (crypto/rand).
+  //
+  // The old path ran processDiceRolls here and sent the map it produced —
+  // the browser decided the outcome and the server merely range-checked
+  // it. That is the forgery this step removed: a client could submit any
+  // value in 1..sides and have it rendered to every reader.
+  //
+  // The body is therefore sent UNSCANнed: the reply path (useTopicMutations)
+  // sent already-processed content with an optimistic map, and re-scanning
+  // here finds no [dice] tags, yields an empty map, and wipes the throws
+  // again. When the caller passes rolls, we DROP them — the server has no
+  // map from them. We send only the body; the server parses [dice=N] and
+  // builds the real map with crypto/rand.
+  //
+  // The optimistic card keeps its placeholder: src/utils/dice.js still
+  // rewrites [dice] into [roll=id] for the card to paint, but its `rolls`
+  // map is provisional and never becomes the form body.
   const res = await sendApi(`/api/aerun/topics/${postData.topic_id}/posts`, {
     method: 'POST',
     headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
     body: {
-      content: processedContent.trim(),
-      rolls: rolls && Object.keys(rolls).length > 0 ? rolls : undefined,
+      content: postData.content.trim(),
       // The reply composer's mask picker, sent for the same reason the topic
       // form's is. Empty falls back to the mask stored on the profile, which is
       // what the picker writes when the author selects one.
@@ -664,23 +691,16 @@ export const locateUnreadPost = async (_topicId, _lastVisitMs, _itemsPerPage = 2
 // inside the same transaction (see forum_posts.go / forum_topics.go). The
 // parameters stay so call sites do not change.
 export const updatePost = async (postId, content, metadata = {}, _performerId, _authorId, _topicUpdates = null) => {
-  const { content: processedContent, rolls: freshRolls } = processDiceRolls(content);
-  const body = { content: processedContent.trim() };
-
-  // Editing a post is the one write where the throws need MERGING rather than
-  // replacing. The text being edited already carries the post's existing
-  // `[roll=<id>]` references, so processDiceRolls finds no `[dice=…]` and returns
-  // nothing — sending that alone would leave the stored results untouched, and a
-  // throw typed fresh into the edit would be lost. Merging with what the post
-  // already has covers both.
-  //
-  // Deleting a throw needs no special case: the server only keeps rolls the new
-  // body still references, so entries the edit removed are dropped server-side.
-  const existingRolls = metadata?.rolls || {};
-  const mergedRolls = { ...existingRolls, ...(freshRolls || {}) };
-  if (Object.keys(mergedRolls).length > 0) {
-    body.rolls = mergedRolls;
-  }
+  // SEC-08: edit sends the RAW body (with [dice=N] tags intact), exactly
+  // as on create. The server:
+  //   - freezes the values of already-stored rolls (an incoming roll id
+  //     whose entry differs from what's stored is rejected), and
+  //   - throws each fresh [dice=N] tag with crypto/rand.
+  // Merging client-side (existing + fresh) built a map from optimistic
+  // client values and sent them to the server to be validated — the
+  // forgery the freeze exists to catch. No client map is sent at all
+  // now; the server has the stored map and re-rolls the fresh tags.
+  const body = { content: content.trim() };
 
   // The edit form's mask picker used to be dropped here: `metadata` was named
   // `_metadata` and never read, so the server received only `content` and the
@@ -706,6 +726,16 @@ export const updateTopic = async (topicId, data, _performerId, _authorId) => {
   if (data.title !== undefined) body.title = data.title;
   if (data.is_locked !== undefined) body.locked = data.is_locked;
   if (data.is_pinned !== undefined) body.pinned = data.is_pinned;
+  // The in-topic pin of the OPENING post (`first_post_pinned`) is a first-class
+  // key of the server's updateTopicForm (a *bool: absent = untouched). This
+  // whitelist used to carry only title/locked/pinned, so the hook's flag was
+  // dropped HERE — PATCH /topics arrived as {title} and the edit form's
+  // checkbox silently did nothing, no matter what the hook above it sent.
+  if (data.first_post_pinned !== undefined) body.first_post_pinned = data.first_post_pinned;
+  // The topic's short subtitle ("Краткое описание"): the first-post editor
+  // edits it together with the title. The server validates and stores it
+  // (topics.description, max 200); dropped by the whitelist until Session 37.
+  if (data.description !== undefined) body.description = data.description;
 
   return await sendApi(`/api/aerun/topics/${topicId}`, {
     method: 'PATCH',
@@ -809,8 +839,11 @@ export const moveTopics = async (topicIds, targetCategoryId, _performerId) => {
   }
 };
 
-export const movePosts = async (postIds, targetTopicId, _performerId) => {
-  return await sendApi(`/api/aerun/topics/${targetTopicId}/posts/move`, {
+// The route is /topics/{SOURCE}/posts/move: the path carries the topic the
+// posts LEAVE, the body carries the topic they arrive at. Swapping them made
+// the server see source == target and refuse every move.
+export const movePosts = async (postIds, sourceTopicId, targetTopicId, _performerId) => {
+  return await sendApi(`/api/aerun/topics/${sourceTopicId}/posts/move`, {
     method: 'POST',
     body: {
       target_topic_id: targetTopicId,
@@ -819,7 +852,7 @@ export const movePosts = async (postIds, targetTopicId, _performerId) => {
   });
 };
 
-export const createTopicFromPosts = async (postIds, topicData, performerId) => {
+export const createTopicFromPosts = async (postIds, sourceTopicId, topicData, performerId) => {
   const newTopic = await sendApi('/api/aerun/topics', {
     method: 'POST',
     body: {
@@ -830,7 +863,7 @@ export const createTopicFromPosts = async (postIds, topicData, performerId) => {
   });
 
   const newTopicId = newTopic?.topic?.id || newTopic?.id;
-  await movePosts(postIds, newTopicId, performerId);
+  await movePosts(postIds, sourceTopicId, newTopicId, performerId);
   return newTopicId;
 };
 

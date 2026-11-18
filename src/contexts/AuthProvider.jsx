@@ -10,18 +10,22 @@ import {
   subscribeToReadMap,
   recordTopicVisit as apiRecordTopicVisit,
   normalizeUserProfile,
-  fetchUserProfile
+  fetchUserProfile,
+  migrateLegacyReadMap
 } from '../api/auth-resources';
 import {
   initRtdbPresence,
   setRtdbOnline,
+  updateRtdbActiveCharacter,
   setRtdbOffline,
   subscribeToOnlineUsers,
   initRtdbGuestPresence,
-  removeRtdbGuestPresence
+  removeRtdbGuestPresence,
+  setLastActivityAt
 } from '../api/rtdb-presence';
 import { subscribeToUnreadCounts, refreshUnreadCounts } from '../api/dms';
 import { subscribeToRealtimeSignals, canReceiveSignals } from '../api/realtime-signals';
+import { makeStorageKey, migrateLegacyGuestStorage } from '../utils/storageScope';
 import { fetchSecuredMainPageData, INHERIT_ROLES } from '../api/categories';
 import { subscribeToRoles, getGlobalSettings } from '../api/admin';
 import { CHIEF_ADMIN_ID, PERMISSIONS, DEFAULT_ROLES, normalizePermissions, isChiefAdmin } from '../constants/permissions';
@@ -70,12 +74,33 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [emailUnverified, setEmailUnverified] = useState(false);
   const [isPendingApproval, setIsPendingApproval] = useState(false);
+  // The session restore has settled: until this flips, every effect keyed on
+  // identity must wait. Firing them earlier means they run in the GUEST phase of
+  // a returning member — a guest heartbeat, a guest /me resource and a guest
+  // forum read that the member phase then has to duplicate or cancel.
+  const [restored, setRestored] = useState(false);
+
+  // Debounce guard for refreshUnreadCounts & refreshUnreadTopics: rapid successive reads
+  // (markTopicRead after a reply, then markAllRead, then notification mark-read)
+  // collapse into a single network request instead of firing one per call.
+  const refreshUnreadCountsTimerRef = useRef(null);
+  const debouncedRefreshUnreadCounts = useCallback((uid) => {
+    if (!uid) return;
+    if (refreshUnreadCountsTimerRef.current) {
+      clearTimeout(refreshUnreadCountsTimerRef.current);
+    }
+    refreshUnreadCountsTimerRef.current = setTimeout(() => {
+      refreshUnreadCountsTimerRef.current = null;
+      refreshUnreadCounts(uid);
+      refreshUnreadTopics();
+    }, 250);
+  }, []);
 
   // canPostGlobally mirrors the backend's AccessContext.CanPostGlobally():
   // staff always pass; everyone else needs active status AND a confirmed email.
   const canPostGlobally = useMemo(() => {
     if (!profile) return false;
-    const roleId = profile.role_id || 'player';
+    const roleId = profile.role || 'player';
     const isStaffRole = roleId === 'root' || roleId === 'admin' || roleId === 'moderator';
     if (isStaffRole) return true;
     return profile.status === 'active' && profile.verified === true;
@@ -111,6 +136,12 @@ export const AuthProvider = ({ children }) => {
   // by account status, and only the command layer knows the narrowing. Keeping them
   // in one place is what lets `GET /roles` stop publishing the matrix.
   const [effectivePermissions, setEffectivePermissions] = useState([]);
+  // The STORED role, from the same /me projection the permissions above ride
+  // on — one poll, both halves of "who is this caller". The profile row is a
+  // server read too, but a boot-time one: a role a moderator changed in
+  // another session arrives here within the poll's interval, which the
+  // profile alone cannot do.
+  const [meRole, setMeRole] = useState('');
   const [dmUnread, setDmUnread] = useState({ total: 0, conversations: {}, topics: 0 });
   const [activeDmConvId, setActiveDmConvId] = useState(null);
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
@@ -127,6 +158,16 @@ export const AuthProvider = ({ children }) => {
   const lastForumRefreshTimeRef = useRef(0);
   const readMapRef = useRef({});
   readMapRef.current = readMap;
+  const inFlightTopicVisitsRef = useRef(new Map());
+  // The last read cursor each topic was pinned to by a COMPLETED server write,
+  // keyed by `uid:topicId` — read state is per-account, so keying by uid keeps
+  // a shared-machine account switch from suppressing the new member's write.
+  const recordedTopicReadCursorsRef = useRef(new Map());
+  // The same latest-value mirror for profile: presence and recordActivity
+  // read it so they do not depend on the whole profile object (a new identity
+  // on every refreshOwnProfile write re-beat presence twice per cold start).
+  const profileRef = useRef(null);
+  profileRef.current = profile;
 
   // getOrCreateGuestId returns the opaque per-browser visitor id used for
   // anonymous presence. It is generated once (the legacy generator: a random
@@ -143,12 +184,12 @@ export const AuthProvider = ({ children }) => {
   // Re-reading after the write makes both tabs converge on whichever value
   // ended up stored, instead of each keeping its own.
   const getOrCreateGuestId = useCallback(() => {
-    const stored = localStorage.getItem('guest_id');
+    const stored = localStorage.getItem(makeStorageKey('guest_id', 'guest'));
     if (stored) return stored;
 
     const candidate = Math.random().toString(36).substring(2) + Date.now().toString(36);
-    localStorage.setItem('guest_id', candidate);
-    return localStorage.getItem('guest_id') || candidate;
+    localStorage.setItem(makeStorageKey('guest_id', 'guest'), candidate);
+    return localStorage.getItem(makeStorageKey('guest_id', 'guest')) || candidate;
   }, []);
 
   // The caller's OWN profile: the shared normalizer plus the mailbox fallback.
@@ -204,15 +245,16 @@ export const AuthProvider = ({ children }) => {
               photoURL: fresh.avatar_url || prev.photoURL
             }
           : prev));
-        setProfile({
+        setProfile(prev => ({
           ...toOwnProfile(fresh),
+          settings: prev?.settings,
           // `last_selected_character_id` is a private field the `/api/aerun/users/{id}`
           // profile DTO deliberately does not return, so a server profile refresh
           // must not wipe the mask the author chose. It survives in the auth store
           // snapshot (kept in step with the DB by `setLastSelectedMask`) and is the
           // value the reply/topic "Post as…" pickers read back on reload.
           last_selected_character_id: pb.authStore.record?.last_selected_character_id ?? ''
-        });
+        }));
       } catch (err) {
         // Everything that reaches here is a real failure: fetchUserProfile already
         // answers null for a cancellation. The snapshot is on screen regardless, so
@@ -231,10 +273,38 @@ export const AuthProvider = ({ children }) => {
     return promise;
   }, [toOwnProfile]);
 
+  // Signature of the last sync: if the auth store record has not changed, a
+  // repeat sync must not mint new state objects and restart every subscriber.
+  // The auth store fires onChange twice on boot (once from authRefresh's
+  // internal save, once from the .then after restoreSession), and every field
+  // written back through authStore.save() flows through here too — so the list
+  // below must cover everything the UI reads off the record: identity and
+  // status (user/profile), theme and the whole settings blob, and the mask,
+  // whose save in setLastSelectedMask relies on onChange rebuilding profile.
+  const lastSyncedSignatureRef = useRef(null);
+
   // Initialize Auth State from PocketBase authStore
   const syncUserFromAuthStore = useCallback(() => {
-    if (pb.authStore.isValid && pb.authStore.record) {
-      const rec = pb.authStore.record;
+    const rec = pb.authStore.record;
+    const signature = rec
+      ? [
+          rec.id,
+          rec.verified,
+          rec.role,
+          rec.status,
+          rec.nickname,
+          rec.email,
+          rec.avatar_url,
+          rec.last_selected_character_id,
+          JSON.stringify(rec.settings ?? null)
+        ].join('|')
+      : 'guest';
+    if (signature === lastSyncedSignatureRef.current) {
+      return; // idempotent sync: nothing changed, so leave the state alone
+    }
+    lastSyncedSignatureRef.current = signature;
+
+    if (pb.authStore.isValid && rec) {
       const u = {
         uid: rec.id,
         id: rec.id,
@@ -256,13 +326,65 @@ export const AuthProvider = ({ children }) => {
       setEmailUnverified(false);
       setIsPendingApproval(false);
     }
+    // Idempotent: repeating the same set is a no-op, so late onChange events
+    // after the first sync cannot re-gate the effects below.
+    setRestored(true);
   }, [toOwnProfile, refreshOwnProfile]);
 
   useEffect(() => {
-    syncUserFromAuthStore();
+    // Restore a possibly-expired session before syncing identity. Without this,
+    // a returning member's stale token makes `isValid` false, so no
+    // Authorization header is sent and the backend answers /api/aerun/me as a
+    // guest — heartbeats, notifications and the online list all break.
+    const restoreSession = async () => {
+      if (pb.authStore.record) {
+        try {
+          await pb.collection('users').authRefresh();
+        } catch (refreshErr) {
+          // Auto-cancelled requests say NOTHING about the session: a Vite HMR
+          // remount fires a second authRefresh and the SDK aborts the
+          // in-flight first one (ClientResponseError 0 / AbortError). The
+          // newer instance re-runs this refresh — clearing the store here
+          // logged members out on every hot reload.
+          if (refreshErr?.isAbort || refreshErr?.status === 0) {
+            return;
+          }
+          // Dead session: tokenKey rotated or account deleted. Never re-send a
+          // stale token; clear so subsequent /me reads land as an honest guest.
+          console.warn('[AuthProvider] session refresh failed; clearing stale store', refreshErr);
+          pb.authStore.clear();
+        }
+      }
+    };
+    void restoreSession().then(syncUserFromAuthStore);
+
     const unsubAuth = pb.authStore.onChange(() => {
       syncUserFromAuthStore();
     });
+
+    // Multi-tab sync. All tabs of one browser share localStorage, so a
+    // login or logout in one tab changes the auth store the other tabs are
+    // sitting on. The `storage` event fires in every OTHER tab when the
+    // key changes; without this listener a tab left open kept beating as a
+    // member after the account had been signed out of the browser (or kept
+    // beating as a guest after a login), until it was reloaded (§1 п.4).
+    const onStorage = (event) => {
+      if (event.key === 'pocketbase_auth') {
+        syncUserFromAuthStore();
+      }
+    };
+    window.addEventListener('storage', onStorage);
+
+    // The belt to the storage event's braces: a tab that was hidden while
+    // another tab signed in or out re-syncs its identity on becoming
+    // visible again, so it never keeps beating in the old role until the
+    // next storage event that may never come (§1 п.4).
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        syncUserFromAuthStore();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
 
     // Load global settings
     const unsubSettings = getGlobalSettings(data => {
@@ -281,6 +403,8 @@ export const AuthProvider = ({ children }) => {
 
     return () => {
       unsubAuth();
+      window.removeEventListener('storage', onStorage);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       unsubSettings();
       unsubRoles();
       clearTimeout(timer);
@@ -296,18 +420,63 @@ export const AuthProvider = ({ children }) => {
   // permissions. `/me` answers it for a guest too, so this subscription is what
   // makes the fallback in hasPermission unreachable in normal operation.
   useEffect(() => {
-    const unsubscribe = subscribeToEffectivePermissions(user?.uid, setEffectivePermissions);
+    // Wait for the session restore: subscribing as 'guest' before the restore
+    // settles is what made a returning member read /me twice (guest resource,
+    // then the member one).
+    if (!restored) return;
+    const unsubscribe = subscribeToEffectivePermissions(user?.uid, (me) => {
+      // null is the "not asked yet" value from the poll: keep whatever the
+      // previous state was rather than locking every control.
+      if (!me) return;
+      setEffectivePermissions(me.permissions || []);
+      setMeRole(me.role || '');
+    });
     return unsubscribe;
-  }, [user?.uid]);
+  }, [user?.uid, restored]);
+
+  // Legacy localStorage migration: once the session is settled and we have a uid,
+  // move any data from the old unscoped key `aerun_readmap_${uid}` onto the new
+  // scoped key `aerun_readmap_${scope}_${uid}`, then delete the old key. Runs
+  // once per (uid, scope); phantom offsets are neutralized later by Effect 15's
+  // loadedPage guard + offset clamp and by markTopicRead's isTopicEnd exemption.
+  useEffect(() => {
+    if (!restored || !user?.uid) return;
+    migrateLegacyReadMap(user.uid);
+  }, [restored, user?.uid, migrateLegacyReadMap]);
+
+  // Legacy guest-storage migration: once the session has settled, copy any
+  // values left under the old unscoped keys (guest_id, guest_theme, language,
+  // auth_error, pending_*, banned_logout, deleted_logout, …) onto the new
+  // scoped keys `aerun_<scope>_<prefix>_guest`, then delete the old keys.
+  // Runs for guests and members alike; safe to repeat — missing keys are
+  // skipped and already-scoped keys are left alone.
+  useEffect(() => {
+    if (!restored) return;
+    migrateLegacyGuestStorage();
+  }, [restored, migrateLegacyGuestStorage]);
 
   // Presence and DM subscriptions. A signed-in visitor beats as a member; an
   // anonymous one beats as a guest so the stats panel can count them.
+  //
+  // guestPresenceStartedRef records whether THIS session actually opened a
+  // guest presence: without it, a returning member whose browser still holds a
+  // guest_id from an earlier guest session sent POST /presence/guest/leave on
+  // every page load, announcing a departure that never happened here.
+  const guestPresenceStartedRef = useRef(false);
   useEffect(() => {
-    if (user?.uid && profile) {
-      return initRtdbPresence(user.uid, profile);
+    if (!restored) return;
+    if (user?.uid) {
+      // A member beats as a member. The profile may still be null while the
+      // first /me read is in flight — that must NOT fall through to the
+      // guest branch (the init race of §3.1: a signed-in member opening a
+      // guest row). initRtdbPresence needs only the uid; the profile is
+      // re-read from the ref on every later beat.
+      guestPresenceStartedRef.current = false;
+      return initRtdbPresence(user.uid, profileRef.current, profileRef.current?.last_selected_character_id || null);
     }
+    guestPresenceStartedRef.current = true;
     return initRtdbGuestPresence(getOrCreateGuestId());
-  }, [user?.uid, profile, getOrCreateGuestId]);
+  }, [user?.uid, restored, getOrCreateGuestId]);
 
   // Logging in ends the guest session: the guest_presence row goes, so a visitor
   // who registers or signs in is never counted as a guest (the heartbeat
@@ -335,6 +504,11 @@ export const AuthProvider = ({ children }) => {
   // uid, so the effect runs only where the identity actually changed.
   const previousUidRef = useRef(undefined);
   useEffect(() => {
+    // Wait for the session restore. Until then a returning member's uid is not
+    // set, and treating the post-restore sync as a guest→member transition
+    // would announce a departure that never happened; the first observation
+    // AFTER the restore is a mount, not a transition.
+    if (!restored) return;
     const uid = user?.uid;
     const previousUid = previousUidRef.current;
     previousUidRef.current = uid;
@@ -344,10 +518,13 @@ export const AuthProvider = ({ children }) => {
     if (previousUid === undefined) return;
 
     if (!uid || uid === previousUid) return;
-    const guestId = localStorage.getItem('guest_id');
+    // Only remove a guest presence THIS session actually started — a stale
+    // guest_id in localStorage from an earlier visit is not a live guest row.
+    if (!guestPresenceStartedRef.current) return;
+    const guestId = localStorage.getItem(makeStorageKey('guest_id', 'guest'));
     if (!guestId) return;
     removeRtdbGuestPresence(guestId);
-  }, [user?.uid]);
+  }, [user?.uid, restored]);
 
   useEffect(() => {
     return subscribeToOnlineUsers(setActiveUsers);
@@ -384,28 +561,44 @@ export const AuthProvider = ({ children }) => {
     }
   }, [user?.uid]);
 
-  // Activity tracking
+  // Activity tracking. The 15-minute rule is one rule for members AND
+  // guests: a visitor counts as online exactly IDLE_TIMEOUT_MS after their
+  // last click/keypress, whether the tab is open or closed (§1 п.1). The
+  // click itself is the only thing that extends presence — heartbeat ticks
+  // are transport and never move last_active_at.
   const recordActivity = useCallback(() => {
     const now = Date.now();
     lastActivityRef.current = now;
-    if (user?.uid && profile) {
+    // The shared clock both heartbeats read (member and guest).
+    setLastActivityAt(now);
+    if (user?.uid && profileRef.current) {
       const PUSH_INTERVAL_MS = 2 * 60 * 1000;
       if (!isRtdbOnlineRef.current || (now - lastPushTimeRef.current >= PUSH_INTERVAL_MS)) {
         isRtdbOnlineRef.current = true;
         lastPushTimeRef.current = now;
-        setRtdbOnline(user.uid, profile).catch(() => {});
+        setRtdbOnline(user.uid, profileRef.current, profileRef.current?.last_selected_character_id || null).catch(() => {});
       }
     }
-  }, [user, profile]);
+  }, [user?.uid]);
 
   useEffect(() => {
-    if (!user?.uid || !profile) return;
+    // NO identity gate here. The old `if (!user?.uid || !profile) return`
+    // meant a guest's clicks were never tracked at all, so a guest stayed
+    // counted long after they stopped doing anything (the phantom-guest
+    // factor of §3.1). Guests age out by the same 15-minute click clock as
+    // members; the server window does the counting, the client only reports
+    // the last click.
     const interval = setInterval(() => {
       const now = Date.now();
       const idleTime = now - (lastActivityRef.current || now);
       if (idleTime >= IDLE_TIMEOUT_MS && isRtdbOnlineRef.current) {
         isRtdbOnlineRef.current = false;
-        setRtdbOffline(user.uid, false).catch(() => {});
+        // Idle is not a departure: no leave call, the member simply stops
+        // beating and the server expires them presenceTTL after the last
+        // click, writing that exact moment to users.last_seen.
+        if (user?.uid) {
+          setRtdbOffline(user.uid, false).catch(() => {});
+        }
       }
     }, 15000);
 
@@ -426,12 +619,12 @@ export const AuthProvider = ({ children }) => {
       window.removeEventListener('click', onUserInteraction);
       window.removeEventListener('keydown', onUserInteraction);
     };
-  }, [user?.uid, profile, recordActivity]);
+  }, [user?.uid, recordActivity]);
 
   const loginWithGoogle = useCallback(async () => {
     const authData = await pb.collection('users').authWithOAuth2({ provider: 'google' });
-    const isRegistering = sessionStorage.getItem('is_registering') === 'true';
-    const pendingNickname = sessionStorage.getItem('pending_nickname');
+    const isRegistering = sessionStorage.getItem(makeStorageKey('is_registering', 'guest')) === 'true';
+    const pendingNickname = sessionStorage.getItem(makeStorageKey('pending_nickname', 'guest'));
     if (isRegistering && pendingNickname && pendingNickname.trim()) {
       try {
         await sendApi('/api/aerun/me/nickname', {
@@ -453,8 +646,8 @@ export const AuthProvider = ({ children }) => {
         await pb.collection('users').authRefresh().catch(() => {});
         const stored = pb.authStore.record?.settings || {};
         const seed = {};
-        const pendingTheme = sessionStorage.getItem('pending_theme') || '';
-        const pendingLang = sessionStorage.getItem('pending_language') || '';
+        const pendingTheme = sessionStorage.getItem(makeStorageKey('pending_theme', 'guest')) || '';
+        const pendingLang = sessionStorage.getItem(makeStorageKey('pending_language', 'guest')) || '';
         if (pendingTheme && stored.theme === undefined) seed.theme = pendingTheme;
         if (pendingLang && stored.language === undefined) seed.language = pendingLang;
         if (Object.keys(seed).length > 0) {
@@ -469,15 +662,15 @@ export const AuthProvider = ({ children }) => {
           await pb.collection('users').authRefresh().catch(() => {});
         }
       } finally {
-        sessionStorage.removeItem('pending_theme');
-        sessionStorage.removeItem('pending_language');
+        sessionStorage.removeItem(makeStorageKey('pending_theme', 'guest'));
+        sessionStorage.removeItem(makeStorageKey('pending_language', 'guest'));
       }
     }
-    sessionStorage.removeItem('is_registering');
-    sessionStorage.removeItem('pending_nickname');
-    sessionStorage.removeItem('pending_message');
+    sessionStorage.removeItem(makeStorageKey('is_registering', 'guest'));
+    sessionStorage.removeItem(makeStorageKey('pending_nickname', 'guest'));
+    sessionStorage.removeItem(makeStorageKey('pending_message', 'guest'));
     // Clean up any previous guest presence when a new user logs in
-    const guestId = localStorage.getItem('guest_id');
+    const guestId = localStorage.getItem(makeStorageKey('guest_id', 'guest'));
     if (guestId) {
       removeRtdbGuestPresence(guestId);
     }
@@ -501,7 +694,7 @@ export const AuthProvider = ({ children }) => {
     });
     const authData = await pb.collection('users').authWithPassword(email, password);
     // Clean up any previous guest presence when a new user registers
-    const guestId = localStorage.getItem('guest_id');
+    const guestId = localStorage.getItem(makeStorageKey('guest_id', 'guest'));
     if (guestId) {
       removeRtdbGuestPresence(guestId);
     }
@@ -515,7 +708,7 @@ export const AuthProvider = ({ children }) => {
   const loginWithEmail = useCallback(async (email, password) => {
     const authData = await pb.collection('users').authWithPassword(email, password);
     // Clean up any previous guest presence when a new user logs in
-    const guestId = localStorage.getItem('guest_id');
+    const guestId = localStorage.getItem(makeStorageKey('guest_id', 'guest'));
     if (guestId) {
       removeRtdbGuestPresence(guestId);
     }
@@ -570,6 +763,11 @@ export const AuthProvider = ({ children }) => {
   const logout = useCallback(async (skipPresenceCleanup = false) => {
     const uid = user?.uid;
     if (uid && !skipPresenceCleanup) {
+      // The sign-out click is the last activity: stamp last_seen with it
+      // (instant update on logout, §1 п.3), before the leave call goes out.
+      const now = Date.now();
+      lastActivityRef.current = now;
+      setLastActivityAt(now);
       await setRtdbOffline(uid, true);
     }
     // No cache to wipe here any more. The DM local cache existed so one member's
@@ -638,6 +836,9 @@ export const AuthProvider = ({ children }) => {
   // The flag is written BEFORE the eviction and is NOT cleared on mount —
   // `GlobalModals` removes it only on hide, so it survives the redirect and the
   // page transitions in between until the member acknowledges the modal.
+  // Guest-scoped, not uid-scoped: `GlobalModals` reads the flag after the
+  // logout, when no uid is available — a uid-scoped write would never be
+  // read, and the member would be evicted silently again.
   //
   // `logout(true)` skips presence cleanup deliberately: a banned account has
   // already lost every permission, so setRtdbOffline would be a
@@ -651,7 +852,7 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     if (!user || !profile || loading) return;
     if (profile.status !== 'banned') return;
-    sessionStorage.setItem('banned_logout', 'true');
+    sessionStorage.setItem(makeStorageKey('banned_logout', 'guest'), 'true');
     logout(true);
   }, [user, profile, loading, logout]);
 
@@ -670,7 +871,8 @@ export const AuthProvider = ({ children }) => {
   //
   // The flag is written BEFORE the eviction and is NOT cleared on mount (the
   // modal removes it on hide), so the explanation survives the redirect and
-  // the page transitions in between.
+  // the page transitions in between. Guest-scoped, not uid-scoped — same reason
+  // as the ban flag above, and the same key `pocketbase.js` writes on a dead session.
   //
   // `logout(true)` skips the presence cleanup: the account has lost every
   // permission, so the offline write would be a permission-denied request
@@ -678,7 +880,7 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     if (!user || !profile || loading) return;
     if (profile.status !== 'deleted') return;
-    sessionStorage.setItem('deleted_logout', 'true');
+    sessionStorage.setItem(makeStorageKey('deleted_logout', 'guest'), 'true');
     logout(true);
   }, [user, profile, loading, logout]);
 
@@ -831,6 +1033,9 @@ export const AuthProvider = ({ children }) => {
     if (record && record.last_selected_character_id !== id) {
       pb.authStore.save(pb.authStore.token, { ...record, last_selected_character_id: id });
     }
+    // The online list shows the active mask — push it into presence right
+    // away instead of waiting for the next beat.
+    updateRtdbActiveCharacter(user.uid, id || null).catch(() => {});
   }, [user?.uid]);
 
   // ONE refresh in flight at a time, with at most ONE queued behind it.
@@ -919,11 +1124,14 @@ export const AuthProvider = ({ children }) => {
   // `updated` is deliberately NOT a dependency. It changes on every profile
   // keystroke-driven save, and re-reading the forum because a status line was
   // edited would be a request per save for a list that did not change.
-  const identityKey = `${user?.uid || ''}|${profile?.role_id || ''}|${profile?.status || ''}`;
+  const identityKey = `${user?.uid || ''}|${profile?.role || ''}|${profile?.status || ''}`;
 
   useEffect(() => {
+    // The restore gate keeps the '||' pre-restore key from firing a read that
+    // the real identity then has to repeat.
+    if (!restored) return;
     refreshForumState(true);
-  }, [identityKey, refreshForumState]);
+  }, [identityKey, refreshForumState, restored]);
 
   // Members leaving the online list are the OTHER half of the sign-out symptom,
   // and they arrive through a different channel: `activeUsers` is fed by the
@@ -1025,7 +1233,7 @@ export const AuthProvider = ({ children }) => {
     if (canReceiveSignals()) {
       unsubRealtime = subscribeToRealtimeSignals(
         (topic) => {
-          if (topic === 'topic.post') {
+          if (topic === 'topic.post' || topic === 'presence.update') {
             triggerDebouncedForumRefresh();
           }
         },
@@ -1080,22 +1288,84 @@ export const AuthProvider = ({ children }) => {
 
   const updateLocalTopicPostsCount = useCallback((_topicId, _delta) => {}, []);
 
-  const markTopicRead = useCallback(async (topicId, offset = null, lastVisiblePostId = null) => {
+  const markTopicRead = useCallback(async (topicId, offset = null, lastVisiblePostId = null, isTopicEnd = false) => {
     if (!user?.uid || !topicId) return;
     const now = Date.now();
-    setReadMap(prev => ({ ...prev, [topicId]: now }));
+    // Only move the read cursor forward, never backward. Going back to an
+    // earlier page must not overwrite the read position set by a later page —
+    // otherwise goLast resolves against the older cursor and drops the user
+    // onto a page they already read instead of the last page.
+    //
+    // However, if the visit is at the topic's end (isTopicEnd), an existingOffset
+    // that exceeds offset is either poisoned/inflated from a previous page race
+    // or reflects deleted posts that shrank the topic. In that case the cursor
+    // must advance rather than deadlock.
+    // Furthermore, the server already enforces monotonic forward-only cursor
+    // advancement based on post creation timestamp (applyTopicReadStateUpdate).
+    const existing = readMapRef.current[topicId];
+    const existingOffset = existing?.offset ?? null;
+    if (offset !== null && existingOffset !== null && offset < existingOffset && !isTopicEnd) {
+      // We are not moving the server cursor here, so there is nothing to
+      // refresh on the client — the server state is already correct. Do not
+      // touch refreshUnreadCounts/refreshUnreadTopics, or we risk overwriting a
+      // just-arrived correct 0 with a stale cached 1 from an earlier visit.
+      return;
+    }
+    // Update ref immediately so rapid subsequent calls in the same tick don't double-fire
+    readMapRef.current[topicId] = offset !== null ? { timestamp: now, offset } : now;
+    setReadMap(prev => ({
+      ...prev,
+      [topicId]: offset !== null ? { timestamp: now, offset } : now,
+    }));
     setCategories(prev => (Array.isArray(prev) ? prev.map(c => (
       c.last_post_topic_id === topicId ? { ...c, unread: false } : c
     )) : prev));
-    await apiRecordTopicVisit(user.uid, topicId, offset, lastVisiblePostId);
+
+    // The server cursor is pinned to (created, id) of last_visible_post_id, so
+    // a second POST whose body carries the SAME post id cannot move anything —
+    // it is a byte-for-byte no-op. Two entry-path callers legitimately pin the
+    // same cursor: Effect 15 (posts displayed) and the jump-scroll effect
+    // (?post= / ?goLast=1 landing) both compute it from the last rendered
+    // post, with offsets that differ by one. The in-flight map below only
+    // collapses CONCURRENT callers, and the second call usually lands after
+    // the first POST has completed — exactly the duplicate pair the network
+    // log showed. This session-level record closes that gap. Only a pinned
+    // cursor is deduplicated: a null lastVisiblePostId stamps "now", and
+    // re-stamping later is NOT a no-op (it can swallow a reply that landed
+    // between the stamps), so those stay retryable.
+    const cursorKey = `${user.uid}:${topicId}`;
+    if (lastVisiblePostId && recordedTopicReadCursorsRef.current.get(cursorKey) === lastVisiblePostId) {
+      return;
+    }
+
+    // Single-flight deduplication per topic: if an identical visit is already
+    // traveling, reuse its promise so back-to-back callers don't issue
+    // concurrent duplicate POSTs. The key is the REQUEST BODY — offset is
+    // local bookkeeping the server never sees, so keying on it (as this used
+    // to) split identical bodies into two flights.
+    const inFlightKey = `${topicId}:${lastVisiblePostId ?? ''}`;
+    let visitPromise = inFlightTopicVisitsRef.current.get(inFlightKey);
+    if (!visitPromise) {
+      visitPromise = (async () => {
+        try {
+          const recorded = await apiRecordTopicVisit(user.uid, topicId, offset, lastVisiblePostId);
+          if (recorded && lastVisiblePostId) {
+            recordedTopicReadCursorsRef.current.set(cursorKey, lastVisiblePostId);
+          }
+        } finally {
+          inFlightTopicVisitsRef.current.delete(inFlightKey);
+        }
+      })();
+      inFlightTopicVisitsRef.current.set(inFlightKey, visitPromise);
+    }
+    await visitPromise;
+
     // The server state already moved, but the navbar badge, the tab title and
     // the /new-replies tab render the last POLLED values (15s / 20s ticks).
-    // Without an explicit re-read they stay stale — the exact "clears itself
-    // after a while" from the report. Best effort: a missed refresh only
-    // delays the badge to the next tick.
-    refreshUnreadCounts(user.uid);
-    refreshUnreadTopics();
-  }, [user?.uid]);
+    // debouncedRefreshUnreadCounts collapses unread-counts and unread-topics
+    // refreshes into a single 250ms debounced window.
+    debouncedRefreshUnreadCounts(user.uid);
+  }, [user?.uid, debouncedRefreshUnreadCounts]);
 
   // markAllRead sends the ids to the server, which owns the read state now.
   //
@@ -1131,6 +1401,9 @@ export const AuthProvider = ({ children }) => {
       // full set, so rows that were never on screen (page two, or posted after the
       // last poll) go dark here as well, matching the badge and the feed.
       const now = Date.now();
+      ids.forEach(id => {
+        readMapRef.current[id] = now;
+      });
       setReadMap(prev => {
         const next = { ...prev };
         ids.forEach(id => { next[id] = now; });
@@ -1140,12 +1413,11 @@ export const AuthProvider = ({ children }) => {
       apiRecordAllTopicVisits(user.uid, ids);
       // Same staleness as the single read above: the badge counts the whole
       // board server-side, so re-read it instead of waiting for the next tick.
-      refreshUnreadCounts(user.uid);
-      refreshUnreadTopics();
+      debouncedRefreshUnreadCounts(user.uid);
     } finally {
       setIsMarkingAllRead(false);
     }
-  }, [user?.uid, isMarkingAllRead]);
+  }, [user?.uid, isMarkingAllRead, debouncedRefreshUnreadCounts]);
 
   // Permission checks.
   //
@@ -1223,7 +1495,7 @@ export const AuthProvider = ({ children }) => {
           // Explicit category role list: membership grants, non-membership
           // denies, even when the global right differs. An empty list is
           // root-only.
-          const effectiveRoleId = user ? profile?.role_id || 'player' : 'guest';
+          const effectiveRoleId = user ? profile?.role || 'player' : 'guest';
           const isRoot = effectiveRoleId === 'root' || effectiveRoleId === CHIEF_ADMIN_ID;
           if (isRoot) return true; // root bypasses any explicit category override
           if (override.length === 0) {
@@ -1244,7 +1516,7 @@ export const AuthProvider = ({ children }) => {
       return !!normalizePermissions(guestRole?.permissions).includes(perm);
     }
 
-    const effectiveRoleId = profile?.role_id || 'player';
+    const effectiveRoleId = profile?.role || 'player';
     if (effectiveRoleId === 'root' || effectiveRoleId === CHIEF_ADMIN_ID) return true;
 
     const userRole = roles.find(r => r.id === effectiveRoleId) || DEFAULT_ROLES.find(r => r.id === effectiveRoleId);
@@ -1256,11 +1528,12 @@ export const AuthProvider = ({ children }) => {
     return activeUserIds.has(uid);
   }, [activeUserIds]);
 
-  const isRootAdmin = isChiefAdmin(user?.email, profile?.role_id);
+  const isRootAdmin = isChiefAdmin(user?.email, profile?.role);
 
   const value = useMemo(() => ({
     user,
     profile,
+    meRole,
     setProfile,
     authError,
     isRootAdmin,
@@ -1309,7 +1582,7 @@ export const AuthProvider = ({ children }) => {
     PERMISSIONS,
     DEFAULT_ROLES
   }), [
-    user, profile, authError, isRootAdmin, settings, loading, readMap, readMapReady, categories, categoryGroups, forumStateLoading, forumStateError,
+    user, profile, meRole, authError, isRootAdmin, settings, loading, readMap, readMapReady, categories, categoryGroups, forumStateLoading, forumStateError,
     unreadTopicsCount, dmUnread, activeDmConvId, setActiveDmConvId, isMarkingAllRead, markTopicRead, markAllRead,
     loginWithGoogle, registerWithEmail, loginWithEmail, resetPassword,
     resendVerificationEmail, checkVerificationStatus, emailUnverified, isPendingApproval, canPostGlobally, logout,

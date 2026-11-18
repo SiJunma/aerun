@@ -58,8 +58,13 @@ jobs:
           echo "vet=ok" >> .ci-status
 
       - name: Test
+        # internal/platform/pocketbase boots a fresh PocketBase app
+        # (and full migration chain) for ~380 tests, so the package
+        # legitimately needs well over Go's default 10m per-package
+        # timeout. Without this the run panics with "test timed out
+        # after 10m0s" while merely running the suite.
         run: |
-          go test ./... -count=1
+          go test ./... -count=1 -timeout 30m
           echo "test=ok" >> .ci-status
 
       # Machine-readable result published to the `ci-report` branch of this

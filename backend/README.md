@@ -22,7 +22,7 @@
 # Aerun backend (Go + PocketBase)
 
 Isolated local-first replacement for the Firebase backend. Sprint 1 of
-`BACKEND_MIGRATION_AUDIT_AND_SPRINT_PLAN.md`: an empty folder must bootstrap a
+`markdowns/Archive/DONE_BACKEND_MIGRATION_AUDIT_AND_SPRINT_PLAN.md`: an empty folder must bootstrap a
 healthy server with applied migrations and no production secrets.
 
 ## Layout

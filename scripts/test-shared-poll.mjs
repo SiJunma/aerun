@@ -21,7 +21,7 @@ import test from 'node:test';
 // The module reads `document` for tab visibility; each test installs its own.
 const { createSharedPoll, sharedPoll, __resetSharedPolls } =
   await import('../src/api/shared-poll.js');
-const { REALTIME_GRACE_MS, REFRESH_COALESCE_MS } =
+const { REALTIME_GRACE_MS, REFRESH_COALESCE_MS, REPLAY_FRESH_MS } =
   await import('../src/api/shared-poll.js');
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -306,6 +306,173 @@ test('the transport is observable, and unsubscribing closes the stream', async (
     'a removed listener must stop receiving, or a long session accumulates them');
 });
 
+test('connect replay is skipped within the freshness window when opted in', async () => {
+  let calls = 0;
+  const poll = createSharedPoll({
+    name: 'replay-skip-fresh',
+    intervalMs: 0,
+    skipConnectReplayMs: REPLAY_FRESH_MS,
+    fetch: async () => { calls += 1; return calls; },
+    realtime: (_o, _d, onStateChange) => { setTimeout(() => onStateChange(true), 10); return () => {}; },
+  });
+  const stop = poll.subscribe(() => {});
+  try {
+    await tick();
+    assert.equal(calls, 1, 'primary read');
+    await wait(REFRESH_COALESCE_MS + 400);
+    assert.equal(poll.getTransport(), 'realtime');
+    assert.equal(calls, 1, 'no replay within the freshness window');
+  } finally { stop(); }
+});
+
+test('connect replay is skipped when primary read is still in flight', async () => {
+  let calls = 0;
+  let resolveRead;
+  let setState = null;
+  const poll = createSharedPoll({
+    name: 'replay-skip-inflight',
+    intervalMs: 0,
+    skipConnectReplayMs: REPLAY_FRESH_MS,
+    fetch: () => new Promise(r => { calls += 1; resolveRead = r; }),
+    realtime: (_o, _d, onStateChange) => { setState = onStateChange; return () => {}; },
+  });
+  const stop = poll.subscribe(() => {});
+  try {
+    await tick();
+    assert.equal(calls, 1, 'primary read started');
+    // SSE connects WHILE the primary read is still in flight
+    setState(true);
+    await wait(REFRESH_COALESCE_MS + 60);
+    assert.equal(calls, 1, 'no replay while primary read is in flight');
+    // Now resolve the primary read
+    resolveRead(42);
+    await tick();
+    assert.equal(calls, 1, 'still just one read total');
+  } finally { stop(); }
+});
+
+test('a SYNCHRONOUSLY connected hub costs ONE read, not a cold read plus a coalesced replay', async () => {
+  // The topic-page duplicate: an ALREADY-ESTABLISHED hub reports its state to
+  // a late joiner synchronously inside subscribeToRealtimeSignals — i.e.
+  // DURING start(), before the primary read has been initiated. The old
+  // ordering (realtime bind first, cold read last) let onConnected see
+  // `lastReadOkAt === 0 && !inFlight` and schedule its catch-up, which then
+  // ran behind the cold read as a byte-for-byte duplicate. The fix initiates
+  // the cold read BEFORE the bind, so the connect callback sees inFlight.
+  let calls = 0;
+  const poll = createSharedPoll({
+    name: 'sync-connect-replay',
+    intervalMs: 0,
+    skipConnectReplayMs: REPLAY_FRESH_MS,
+    fetch: async () => { calls += 1; return calls; },
+    realtime: (_o, _d, onStateChange) => { onStateChange(true); return () => {}; },
+  });
+  const stop = poll.subscribe(() => {});
+  try {
+    await tick();
+    await settle(); // the 250ms coalesce window elapses; a replay would have fired by now
+    assert.equal(calls, 1, 'a synchronous connect must not schedule a replay behind the cold read');
+  } finally {
+    stop();
+    poll.stopIfIdle();
+  }
+});
+
+
+test('a STALE re-entry connect does not replay behind the in-flight cold read', async () => {
+  // Leave a topic and come back: the resource stops (last subscriber left)
+  // and restarts, and the ALREADY-ESTABLISHED hub reports connected
+  // synchronously during start() — while the re-entry cold read is in
+  // flight. lastReadOkAt still holds the PREVIOUS visit's timestamp, so the
+  // stale clause fired there and scheduled a replay ~250ms behind the cold
+  // read: two identical quote-notification GETs on every topic re-entry.
+  // The in-flight cold read IS the catch-up; the replay must not fire.
+  let calls = 0;
+  let setState = null;
+  const poll = createSharedPoll({
+    name: 'reentry-connect-replay',
+    intervalMs: 0,
+    skipConnectReplayMs: REPLAY_FRESH_MS,
+    fetch: async () => { calls += 1; return calls; },
+    realtime: (_o, _d, onStateChange) => { setState = onStateChange; return () => {}; },
+  });
+
+  const stopFirst = poll.subscribe(() => {});
+  await tick();
+  assert.equal(calls, 1);
+  stopFirst(); // leave: the resource stops, the read timestamp goes stale
+  await wait(1100); // past skipConnectReplayMs — a naive stale check would replay
+
+  const stopSecond = poll.subscribe(() => {});
+  setState(true); // the hub is already up: synchronous onConnected mid-flight
+  try {
+    await tick();
+    await settle(); // the coalesce window elapses; a replay would have fired
+    assert.equal(calls, 2, 're-entry costs exactly ONE read — the cold read covers the connect');
+  } finally {
+    stopSecond();
+    poll.stopIfIdle();
+  }
+});
+
+test('connect replay still runs when stale', async () => {
+  let calls = 0;
+  let setState = null;
+  const poll = createSharedPoll({
+    name: 'replay-stale',
+    intervalMs: 0,
+    skipConnectReplayMs: 1,
+    fetch: async () => { calls += 1; return calls; },
+    realtime: (_o, _d, onStateChange) => { setState = onStateChange; return () => {}; },
+  });
+  const stop = poll.subscribe(() => {});
+  try {
+    await tick();
+    assert.equal(calls, 1);
+    await wait(20);
+    setState(true);
+    await wait(REFRESH_COALESCE_MS + 60);
+    assert.equal(calls, 2, 'stale read must trigger the catch-up replay');
+  } finally { stop(); }
+});
+
+test('connect replay still runs when primary never succeeded', async () => {
+  let calls = 0;
+  let setState = null;
+  const poll = createSharedPoll({
+    name: 'replay-never-ok',
+    intervalMs: 0,
+    skipConnectReplayMs: REPLAY_FRESH_MS,
+    fetch: async () => { calls += 1; throw new Error('down'); },
+    realtime: (_o, _d, onStateChange) => { setState = onStateChange; return () => {}; },
+  });
+  const stop = poll.subscribe(() => {});
+  try {
+    await tick();
+    assert.equal(calls, 1);
+    setState(true);
+    await wait(REFRESH_COALESCE_MS + 60);
+    assert.equal(calls, 2, 'a failed primary read must not suppress the replay');
+  } finally { stop(); }
+});
+
+test('connect replay is unconditional without opt-in', async () => {
+  let calls = 0;
+  const poll = createSharedPoll({
+    name: 'replay-default',
+    intervalMs: 0,
+    fetch: async () => { calls += 1; return calls; },
+    realtime: (_o, _d, onStateChange) => { setTimeout(() => onStateChange(true), 10); return () => {}; },
+  });
+  const stop = poll.subscribe(() => {});
+  try {
+    await tick();
+    assert.equal(calls, 1);
+    await wait(REFRESH_COALESCE_MS + 400);
+    assert.equal(calls, 2, 'without the opt-in the replay must still happen');
+  } finally { stop(); }
+});
+
 test('a hidden tab is not polled, and is read once on return', async () => {
   let calls = 0;
   const doc = fakeDocument('hidden');
@@ -332,8 +499,13 @@ test('a hidden tab is not polled, and is read once on return', async () => {
       // otherwise the handler reads 'hidden' and correctly does nothing.
       doc.visibilityState = 'visible';
       doc.emit();
-      await tick();
+      // The catch-up read is SYNCHRONOUS: the visibility handler calls read()
+      // and the fetch stub increments before its first await, so the count is
+      // final the moment emit() returns. Asserting here is what makes the test
+      // deterministic — asserting after `await tick()` raced the 5ms poll
+      // interval, and under load the interval won, counting a third read.
       assert.equal(calls, 2, 'returning to the tab re-reads once');
+      await tick();
     } finally {
       stop();
     }
@@ -458,6 +630,87 @@ test('different names are different resources', () => {
   const first = sharedPoll('notifications:u1', { intervalMs: 0, fetch: async () => 1 });
   const second = sharedPoll('notifications:u2', { intervalMs: 0, fetch: async () => 2 });
   assert.notEqual(first, second, 'two accounts must not share a cached value');
+});
+
+test('a restart within restartFreshMs hands the cached value and costs no request', async () => {
+  // The profile-page duplicate: the effect that subscribes to the resource
+  // cleans up and re-runs (its deps changed identity) inside the same page
+  // view, so the resource stops (last subscriber left) and starts again
+  // moments after a successful read. Without the fresh-restart window each
+  // such cycle pays a second identical request — the network log showed
+  // the pair the user reported (characters ×2, users/{uid} ×2).
+  let calls = 0;
+  const poll = createSharedPoll({
+    name: 'restart-fresh',
+    intervalMs: 0,
+    restartFreshMs: 30_000,
+    fetch: async () => { calls += 1; return calls; },
+  });
+
+  const seen = [];
+  const stopFirst = poll.subscribe((v) => seen.push(v));
+  await tick();
+  assert.equal(calls, 1);
+  stopFirst(); // the effect's cleanup — the resource goes idle
+
+  // Re-mount moments later, with the last read still inside the window.
+  const stopSecond = poll.subscribe((v) => seen.push(v));
+  try {
+    await tick();
+    assert.equal(calls, 1, 'a fresh restart must not re-read');
+    assert.deepEqual(seen, [1, 1], 'both subscribers see the one read');
+  } finally {
+    stopSecond();
+    poll.stopIfIdle();
+  }
+});
+
+test('a restart outside restartFreshMs re-reads, and without the opt-in always re-reads', async () => {
+  let calls = 0;
+  const poll = createSharedPoll({
+    name: 'restart-stale',
+    intervalMs: 0,
+    restartFreshMs: 1, // immediately stale
+    fetch: async () => { calls += 1; return calls; },
+  });
+
+  const stopFirst = poll.subscribe(() => {});
+  await tick();
+  assert.equal(calls, 1);
+  stopFirst();
+
+  // Past the (1ms) window: the restart is stale, so it must re-read.
+  await wait(5);
+  const stopSecond = poll.subscribe(() => {});
+  try {
+    await tick();
+    assert.equal(calls, 2, 'a stale restart must re-read');
+  } finally {
+    stopSecond();
+    poll.stopIfIdle();
+  }
+
+  // Without the opt-in the behaviour is exactly the old one: every restart reads.
+  let plainCalls = 0;
+  const plain = createSharedPoll({
+    name: 'restart-plain',
+    intervalMs: 0,
+    fetch: async () => { plainCalls += 1; return plainCalls; },
+  });
+
+  const stopA = plain.subscribe(() => {});
+  await tick();
+  assert.equal(plainCalls, 1);
+  stopA();
+
+  const stopB = plain.subscribe(() => {});
+  try {
+    await tick();
+    assert.equal(plainCalls, 2, 'no opt-in means no cache across a restart');
+  } finally {
+    stopB();
+    plain.stopIfIdle();
+  }
 });
 
 test('the poll still starts when no realtime hook is passed', async () => {

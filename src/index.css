@@ -41,6 +41,8 @@
   /* Accent badge (unread counter etc.) */
   --badge-bg: #0284c7;
   --badge-text: #ffffff;
+  --badge-bg-rgb: 75, 85, 99;
+  /* Default gray 600 */
 }
 
 [data-theme='dark'] {
@@ -416,10 +418,6 @@ label.fw-bold {
 }
 
 
-.text-primary {
-  color: var(--primary-color) !important;
-}
-
 [data-theme='neutral'] .form-select {
   background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23433422' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e") !important;
 }
@@ -475,12 +473,6 @@ label.fw-bold {
 
 [data-theme='dark'] .form-switch .form-check-input:checked {
   background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='rgba(0,0,0,0.5)'/%3e%3c/svg%3e") !important;
-}
-
-[data-theme='neutral'] .form-check-input:checked {
-  background-color: #8c7152 !important;
-  /* Slightly darker than primary for better contrast on Sepia */
-  border-color: #8c7152 !important;
 }
 
 [data-theme='dark'] .form-control:focus,
@@ -1043,6 +1035,7 @@ label.fw-bold {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04) !important;
   /* overflow: hidden; Removed to allow internal dropdowns to render outside */
   scroll-margin-top: 80px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 
@@ -1125,7 +1118,7 @@ strike:hover,
 }
 
 .bbcode-quote {
-  border-left: 4px solid var(--primary-color);
+  border-left: 4px solid var(--quote-border-color, var(--primary-color));
   padding: 0.2rem 0.75rem;
   margin-top: 1rem;
   margin-bottom: 0;
@@ -1140,10 +1133,16 @@ strike:hover,
 
 .bbcode-code {
   background: rgba(30, 41, 59, 0.05);
+  border: 1px solid rgba(0, 0, 0, 0.08);
   border-left: 4px solid var(--secondary-color);
+  border-radius: 6px;
   color: var(--text-color);
   font-size: 0.875rem;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  margin: 0;
   overflow-x: auto;
+  padding: 0.75rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 [data-theme='dark'] .bbcode-code {
@@ -1156,9 +1155,82 @@ strike:hover,
   border-left-color: #8c8679;
 }
 
+/* ── Кнопка копирования для блоков кода ───────────────────────────────── */
+.bbcode-code-wrapper {
+  position: relative;
+  display: inline-block;
+  width: 100%;
+  margin-top: 0.35rem;
+}
+
+.bbcode-copy-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.04);
+  color: #666;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  line-height: 0;
+  padding: 0;
+}
+
+.bbcode-copy-btn:hover {
+  background: rgba(0, 0, 0, 0.08);
+  border-color: rgba(0, 0, 0, 0.25);
+  color: #111;
+  transform: scale(0.95);
+}
+
+.bbcode-copy-btn:active {
+  transform: scale(0.9);
+}
+
+.bbcode-copy-check {
+  font-size: 10px;
+  font-weight: bold;
+  color: #10b981;
+  line-height: 1;
+}
+
+[data-theme='dark'] .bbcode-copy-btn {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: #aaa;
+}
+
+[data-theme='dark'] .bbcode-copy-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+[data-theme='neutral'] .bbcode-copy-btn {
+  border-color: rgba(0, 0, 0, 0.15);
+  background: rgba(0, 0, 0, 0.05);
+  color: #666;
+}
+
+[data-theme='neutral'] .bbcode-copy-btn:hover {
+  background: rgba(0, 0, 0, 0.1);
+  border-color: rgba(0, 0, 0, 0.3);
+  color: #111;
+}
+
+[data-theme='neutral'] .bbcode-copy-check {
+  color: #10b981;
+}
+
 [data-theme='neutral'] .bbcode-quote {
   background: #ede9df;
-  border-left-color: #666;
 }
 
 [data-theme='dark'] .bbcode-quote {
@@ -1291,23 +1363,8 @@ strike:hover,
   color: var(--primary-color) !important;
 }
 
-.editor-toolbar .vr {
-  background-color: var(--border-color);
-}
-
 .editor-dropdown-toggle.no-caret::after {
   display: none !important;
-}
-
-/* Global Dropdown Hover/Background fixes for themes */
-.dropdown-menu {
-  background-color: var(--card-bg) !important;
-  border-color: var(--border-color) !important;
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.2) !important;
-}
-
-.dropdown-item {
-  color: var(--text-color) !important;
 }
 
 .dropdown-item:hover,
@@ -1353,6 +1410,56 @@ strike:hover,
 .bbcode-columns.stacked-forced .bbcode-col {
   flex: 1 1 100% !important;
   max-width: 100% !important;
+}
+
+/* BBCode Table */
+.bbcode-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.bbcode-table td.bbcode-td,
+.bbcode-table th {
+  border: 1px solid var(--border-color);
+  padding: 6px 8px;
+  vertical-align: top;
+  text-align: left;
+}
+
+.bbcode-table.bbcode-table-no-borders td.bbcode-td,
+.bbcode-table.bbcode-table-no-borders th {
+  border: none;
+}
+
+
+.bbcode-table td.bbcode-td[valign="top"],
+.bbcode-table td.bbcode-td[style*="vertical-align: top"] {
+  vertical-align: top;
+}
+
+.bbcode-table td.bbcode-td[valign="middle"],
+.bbcode-table td.bbcode-td[style*="vertical-align: middle"] {
+  vertical-align: middle;
+}
+
+.bbcode-table td.bbcode-td[valign="bottom"],
+.bbcode-table td.bbcode-td[style*="vertical-align: bottom"] {
+  vertical-align: bottom;
+}
+
+.bbcode-table td.bbcode-td[align="center"],
+.bbcode-table td.bbcode-td[style*="text-align: center"] {
+  text-align: center;
+}
+
+.bbcode-table td.bbcode-td[align="right"],
+.bbcode-table td.bbcode-td[style*="text-align: right"] {
+  text-align: right;
+}
+
+.bbcode-table td.bbcode-td[align="justify"],
+.bbcode-table td.bbcode-td[style*="text-align: justify"] {
+  text-align: justify;
 }
 
 /* BBCode Spoiler */
@@ -1577,24 +1684,9 @@ strike:hover,
  * opaque than before: at 0.4 the card nearly vanished into the light
  * background photo and took its muted copy with it. */
 .empty-state-card {
-  background: rgba(255, 255, 255, 0.55) !important;
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.35) !important;
-  border-radius: 20px !important;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.08);
-}
-
-[data-theme='dark'] .empty-state-card {
-  background: rgba(15, 23, 42, 0.55) !important;
-  border-color: rgba(255, 255, 255, 0.1) !important;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
-}
-
-[data-theme='neutral'] .empty-state-card {
-  background: rgba(224, 219, 202, 0.7) !important;
-  border-color: rgba(67, 52, 34, 0.12) !important;
-  box-shadow: 0 6px 24px rgba(56, 45, 29, 0.12);
+  text-align: center;
+  border: none;
+  ;
 }
 
 .empty-state-icon {
@@ -1635,14 +1727,6 @@ strike:hover,
   /* Reduced padding for a sleeker look */
 }
 
-.premium-modal .modal-title,
-.confirm-modal .modal-title {
-  font-size: 1.1rem;
-  /* Slightly smaller text */
-  font-weight: 600;
-  color: var(--text-color);
-}
-
 .premium-modal .modal-body {
   background: transparent !important;
   padding: 1.25rem !important;
@@ -1673,10 +1757,8 @@ strike:hover,
   background-color: var(--input-bg) !important;
   color: var(--text-color) !important;
   border: 1px solid var(--border-color) !important;
-}
-
-[data-theme='dark'] .modal-section-themed {
-  background-color: var(--input-bg) !important;
+  border-left: 3px solid var(--primary-color);
+  /* Add a tiny accent line to differentiate from inputs */
 }
 
 .modal-inner-card {
@@ -1784,6 +1866,9 @@ strike:hover,
 .premium-modal .modal-title,
 .confirm-modal .modal-title {
   color: var(--text-color);
+  font-size: 1.1rem;
+  /* Slightly smaller text */
+  font-weight: 600;
 }
 
 .premium-modal .btn-primary,
@@ -1849,15 +1934,19 @@ strike:hover,
   display: inline-block;
   padding: 0.2rem 0.75rem;
   font-size: 0.75rem;
-  font-weight: 600;
   border-radius: 6px;
   background: transparent;
-  color: var(--primary-color);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   -webkit-user-select: none;
   user-select: none;
   white-space: nowrap;
   line-height: 1.2;
+  /* "Calm Down" — ghost/subtle style for all themes (was a separate block) */
+  background-color: rgba(var(--badge-bg-rgb, 148, 163, 184), 0.08) !important;
+  color: var(--badge-bg) !important;
+  border: 1px solid rgba(var(--badge-bg-rgb, 148, 163, 184), 0.2) !important;
+  font-weight: 500 !important;
+  box-shadow: none !important;
 }
 
 /* The chief admin's badge is the SAME chip as every other role badge — same
@@ -2052,7 +2141,7 @@ a.badge.bg-danger:hover {
   background: rgba(67, 52, 34, 0.02);
 }
 
-.footer-link {
+/* .footer-link {
   font-size: 0.875rem;
   color: var(--secondary-color);
   text-decoration: none;
@@ -2064,7 +2153,7 @@ a.badge.bg-danger:hover {
 .footer-link:hover {
   opacity: 1;
   text-decoration: underline;
-}
+} */
 
 .rep-btn {
   width: 18px;
@@ -2539,9 +2628,6 @@ a.rep-preview-name:hover {
 }
 
 /* New Post Highlighting */
-.post-card {
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
 
 .highlight-new-post {
   animation: highlight-fade 1s cubic-bezier(0.4, 0, 0.2, 1);
@@ -2640,21 +2726,28 @@ a.rep-preview-name:hover {
 .role-badge.bg-danger {
   --badge-bg: var(--role-admin);
   --badge-text: #fff;
+  --badge-bg-rgb: 190, 18, 60;
+  /* Rose 700 */
 }
 
 .role-badge.bg-info {
   --badge-bg: var(--role-mod);
   --badge-text: #fff;
+  --badge-bg-rgb: 14, 116, 144;
+  /* Cyan 700 */
 }
 
 .role-badge.bg-primary {
   --badge-bg: var(--role-player);
   --badge-text: #fff;
+  --badge-bg-rgb: 29, 78, 216;
+  /* Blue 700 */
 }
 
 .role-badge.bg-secondary {
   --badge-bg: var(--role-spectator);
   --badge-text: #fff;
+  --badge-bg-rgb: 75, 85, 99;
 }
 
 /* Base Character Badge Override */
@@ -2685,40 +2778,6 @@ a.rep-preview-name:hover {
   /* Amber 700 */
   --badge-bg-rgb: 180, 83, 9 !important;
   border-color: rgba(180, 83, 9, 0.4) !important;
-}
-
-/* "Calm Down" - Use Ghost/Subtle style for all themes */
-.role-badge {
-  background-color: rgba(var(--badge-bg-rgb, 148, 163, 184), 0.08) !important;
-  color: var(--badge-bg) !important;
-  border: 1px solid rgba(var(--badge-bg-rgb, 148, 163, 184), 0.2) !important;
-  font-weight: 500 !important;
-  box-shadow: none !important;
-}
-
-/* Theme-specific RGB mappings for the ghost style */
-:root {
-  --badge-bg-rgb: 75, 85, 99;
-  /* Default gray 600 */
-}
-
-.role-badge.bg-danger {
-  --badge-bg-rgb: 190, 18, 60;
-}
-
-/* Rose 700 */
-.role-badge.bg-info {
-  --badge-bg-rgb: 14, 116, 144;
-}
-
-/* Cyan 700 */
-.role-badge.bg-primary {
-  --badge-bg-rgb: 29, 78, 216;
-}
-
-/* Blue 700 */
-.role-badge.bg-secondary {
-  --badge-bg-rgb: 75, 85, 99;
 }
 
 /* Gray 600 */
@@ -2837,122 +2896,15 @@ a.rep-preview-name:hover {
   background-color: var(--card-bg) !important;
 }
 
-/* Topic List & Row Enhancements */
-.topic-row-hover:hover {
-  background-color: rgba(var(--primary-rgb), 0.05) !important;
-}
+/* Topic List & Row Enhancements — moved to src/styles/topic-row.css.
+   .topic-row-hover / .topic-title-link / .mini-pagination / .unread-dot / .last-post-time
+   are now governed by topic-row tokens without !important. */
 
-.topic-title-link {
-  color: var(--text-color);
-  transition: color 0.15s ease;
-}
-
-.topic-title-link:hover {
-  color: var(--primary-color) !important;
-}
-
-.mini-pagination .mini-page-link {
-  font-size: 0.875rem;
-  padding: 0 4px;
-  background: rgba(var(--primary-rgb), 0.1);
-  border-radius: 3px;
-  color: var(--primary-color) !important;
-  line-height: 1.2;
-  transition: all 0.2s ease;
-}
-
-.mini-pagination .mini-page-link:hover {
-  background: var(--primary-color) !important;
-  color: #fff !important;
-}
-
-[data-theme='dark'] .mini-pagination .mini-page-link:hover,
-[data-theme='neutral'] .mini-pagination .mini-page-link:hover {
-  color: var(--nav-bg) !important;
-}
-
-.unread-dot {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--bs-warning);
-  flex-shrink: 0;
-}
-
-.last-post-time {
-  opacity: 0.8;
-  transition: opacity 0.2s;
-}
-
-.last-post-time:hover {
-  opacity: 1;
-}
-
-.topic-indicator.topic-pinned {
-  color: var(--bs-warning) !important;
-}
-
-.topic-indicator.topic-locked {
-  color: var(--bs-danger) !important;
-}
-
-/* Forum Statistics Styling */
-.forum-stats-card {
-  border: 1px solid var(--border-color) !important;
-  border-radius: 0.75rem !important;
-  overflow: hidden;
-  background-color: var(--card-bg) !important;
-}
-
-.forum-header-text {
-  font-size: 0.875rem !important;
-  font-weight: 700 !important;
-  opacity: 0.8;
-}
-
-.stats-header {
-  background-color: var(--nav-bg) !important;
-  color: #f8fafc !important;
-  /* Always light on dark header background */
-  border-bottom: 1px solid rgba(var(--primary-rgb), 0.1) !important;
-  padding: 12px !important;
-  border-bottom-left-radius: 0 !important;
-  border-bottom-right-radius: 0 !important;
-}
-
-.stats-header .forum-header-text,
-.stats-header .lucide {
-  opacity: 0.8;
-  /* Matches table thead th opacity */
-}
-
-[data-theme='neutral'] .stats-header {
-  color: #f4f1ea !important;
-}
-
-.stats-grid {
-  background-color: var(--card-bg);
-  border-bottom-color: rgba(var(--primary-rgb), 0.05) !important;
-}
-
-.ms-auto-md {
-  margin-left: auto;
-}
-
-@media (max-width: 768px) {
-  .ms-auto-md {
-    margin-left: 0;
-  }
-}
-
-.stats-item {
-  transition: opacity 0.2s;
-}
-
-.stats-item:hover {
-  opacity: 1;
-}
+/* Forum Statistics Styling — moved to src/styles/forum-stats.css.
+   The legacy !important duplicates of .forum-stats-card, .stats-header,
+   .forum-header-text, .stats-grid, .ms-auto-md, .stats-item, .online-users-panel,
+   .online-indicator-blob, .online-user-link and .stats-footer have been removed
+   so semantic tokens in theme-variables.css govern the look without wars. */
 
 .extra-small {
   font-size: 0.8rem;
@@ -2962,46 +2914,6 @@ a.rep-preview-name:hover {
   padding: 0.125rem 0.25rem;
   font-size: 0.875rem;
   line-height: 1;
-}
-
-.online-users-panel {
-  background-color: var(--block-bg) !important;
-  border-bottom: 1px solid rgba(var(--primary-rgb), 0.03);
-}
-
-.online-indicator-blob {
-  width: 10px;
-  height: 10px;
-  background-color: #10b981;
-  border-radius: 50%;
-  position: relative;
-  opacity: 0.8;
-}
-
-.online-user-link {
-  transition: all 0.15s ease;
-  position: relative;
-}
-
-.online-user-link:hover {
-  opacity: 1;
-  text-decoration: underline !important;
-  transform: translateY(-1px);
-}
-
-.stats-footer {
-  background-color: rgba(var(--primary-rgb), 0.02);
-  border-top-color: rgba(var(--primary-rgb), 0.05) !important;
-}
-
-[data-theme='neutral'] .stats-footer .btn-link {
-  opacity: 0.8 !important;
-  color: #433422 !important;
-}
-
-[data-theme='neutral'] .stats-footer .btn-link:hover {
-  opacity: 1 !important;
-  color: #8c7152 !important;
 }
 
 .letter-spacing-1 {
@@ -3016,30 +2928,13 @@ a.rep-preview-name:hover {
   row-gap: 0.25rem;
 }
 
-/* Last Post Meta Link Hover Effect (Main Page and Category Views) */
-.last-post-link-meta {
-  border-radius: 6px;
-  transition: all 0.2s ease;
-  padding: 4px 6px !important;
-  margin: -4px -6px !important;
-  /* Counteract padding to avoid layout jump */
-  cursor: pointer;
-  width: fit-content;
-}
-
-.last-post-link-meta:hover {
-  background-color: rgba(var(--primary-rgb), 0.08) !important;
-  color: var(--primary-color) !important;
-  text-decoration: none !important;
-}
-
-[data-theme='dark'] .last-post-link-meta:hover {
-  background-color: rgba(var(--primary-rgb), 0.15) !important;
-}
-
-.last-post-link-meta:hover * {
-  color: inherit !important;
-}
+/* Last Post Meta Link Hover Effect (Main Page and Category Views)
+   — moved to src/styles/author-meta.css (loaded last in main.jsx).
+   The legacy duplicate here (padding/margin from --last-post-link-*
+   tokens + the three !important hover rules) fought the native module
+   on every page using LastPostInfo (MainPage, CategoryPage/TopicRow).
+   Single owner is now author-meta.css; this copy is commented out so
+   it cannot re-apply the bleed + !important hover on top of it. */
 
 /* Forum Topic Navigation Jumping Logic */
 .topic-jump-loading .topic-content-wrapper {
@@ -3068,16 +2963,11 @@ a.rep-preview-name:hover {
 .author-sidebar .text-muted,
 .post-header-strip .text-muted {
   opacity: 1 !important;
-}
-
-/* Light theme colors (Default) */
-.topic-description,
-.topic-meta-bar,
-.author-sidebar .text-muted,
-.post-header-strip .text-muted {
   color: #475569 !important;
   /* Slate 600 */
 }
+
+/* Light theme colors (Default) */
 
 .topic-meta-bar strong,
 .author-sidebar .text-muted strong {
@@ -3113,36 +3003,6 @@ a.rep-preview-name:hover {
 [data-theme='neutral'] .author-sidebar .text-muted strong {
   color: #382d1d !important;
   /* Main highlights */
-}
-
-[data-theme='dark'] .online-users-panel {
-  background-color: rgba(15, 23, 42, 0.3) !important;
-}
-
-[data-theme='neutral'] .online-users-panel {
-  background-color: rgba(67, 52, 34, 0.03) !important;
-}
-
-.online-author-admin {
-  color: var(--role-admin) !important;
-}
-
-.online-author-mod {
-  color: var(--role-mod) !important;
-}
-
-/* Theme overrides if needed */
-[data-theme='neutral'] .online-author-admin {
-  color: #b91c1c !important;
-  /* Darker red for light paper theme */
-}
-
-[data-theme='dark'] .stats-item .h6 {
-  color: #f8fafc;
-}
-
-[data-theme='dark'] .stats-item .text-dark {
-  color: #f8fafc !important;
 }
 
 /* Forum Banner */
@@ -3318,12 +3178,6 @@ a.rep-preview-name:hover {
 }
 
 /* Modal Content Grouping */
-.modal-section-themed {
-  background-color: rgba(var(--primary-rgb), 0.03);
-  border: 1px solid rgba(var(--primary-rgb), 0.08);
-  border-left: 3px solid var(--primary-color);
-  /* Add a tiny accent line to differentiate from inputs */
-}
 
 [data-theme='dark'] .modal-section-themed {
   background-color: rgba(255, 255, 255, 0.02) !important;
@@ -3829,6 +3683,20 @@ a.rep-preview-name:hover {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25) !important;
 }
 
+/* Overflow menu items are <a class="dropdown-item">. Outside post bodies
+   Bootstrap already leaves them un-underlined, but the inline post editor
+   lives inside .post-content, where .post-content a underlines every link
+   — including these menu items. The ancestor-scoped selector (0,3,0) beats
+   .post-content a:hover (0,2,1) without !important; same leak the modal
+   variant already guards against below. */
+.editor-overflow-dropdown-menu .dropdown-item {
+  text-decoration: none;
+}
+
+.post-content .editor-overflow-dropdown-menu .dropdown-item {
+  text-decoration: none;
+}
+
 .editor-overflow-modal-items {
   display: grid !important;
   grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
@@ -4133,303 +4001,305 @@ a.rep-preview-name:hover {
   filter: invert(1) grayscale(100%) brightness(200%);
 }
 
-.forum-group-card {
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08) !important;
-  border-radius: 0 0 12px 12px !important;
-  overflow: hidden;
-}
+/* Forum group card/header — legacy Bootstrap-era group chrome.
+   MainPage no longer renders .forum-group-* (it renders
+   .forum-category / .category-header in forum-index.css); no JSX
+   in src/ uses .forum-group-header. The only live user is
+   DraftsPage skeleton (<Card class="forum-group-card">) — a
+   Bootstrap Card, not forum group chrome, so the dead rules are
+   commented out here (single-owner rule: if a class moved out of
+   index.css it must not keep !important duplicates here). */
 
-[data-theme='dark'] .forum-group-card {
-  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.35) !important;
-}
+/* .forum-group-card { box-shadow: 0 2px 12px rgba(0,0,0,.08) !important;
+   border-radius: 0 0 12px 12px !important; overflow: hidden; }
+   [data-theme='dark'] .forum-group-card { box-shadow: 0 2px 16px
+   rgba(0,0,0,.35) !important; }
+   [data-theme='neutral'] .forum-group-card { box-shadow: 0 2px 12px
+   rgba(56,45,29,.12) !important; }
+   .forum-group-header { background-color: var(--nav-bg) !important;
+   color: #fff !important; border-bottom: 1px solid var(--border-color);
+   padding: .75rem 1rem !important; border-radius: 12px 12px 0 0 !important;
+   overflow: hidden; }
+   .forum-group-header h4 { color: #fff; font-size: 1rem; font-weight: 700;
+   text-transform: none; letter-spacing: normal; } */
 
-[data-theme='neutral'] .forum-group-card {
-  box-shadow: 0 2px 12px rgba(56, 45, 29, 0.12) !important;
-}
+/* Forum Table — Bootstrap Table era is over for forum lists.
+   MainPage / CategoryPage / ActiveTopics / NewReplies /
+   Subscriptions all render the semantic DOM now (forum-index.css +
+   topic-row.css + author-meta.css); no JSX uses .forum-table* any
+   more, so the dead block below stays commented out until Этап 7
+   deletes it together with Bootstrap. */
 
-.forum-group-header {
-  background-color: var(--nav-bg) !important;
-  color: #ffffff !important;
-  border-bottom: 1px solid var(--border-color);
-  padding: 0.75rem 1rem !important;
-  border-radius: 12px 12px 0 0 !important;
-  overflow: hidden;
-}
-
-.forum-group-header h4 {
-  color: #ffffff !important;
-  font-size: 1rem !important;
-  font-weight: 700 !important;
-  text-transform: none;
-  letter-spacing: normal;
-}
-
-.forum-table-sub thead th {
-  border-radius: 0 !important;
-  background-color: var(--block-bg) !important;
-  color: var(--secondary-color) !important;
-  font-size: 0.65rem !important;
-  /* Slightly smaller */
-  font-weight: 700 !important;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  padding: 0.35rem 1rem !important;
-  /* Reduced vertical padding and left padding to align better */
-  border-bottom: 1px solid var(--border-color) !important;
-  border-top: none !important;
-}
-
-/* Force uniform columns across different tables (Desktop only) */
-@media (min-width: 768px) {
-  .forum-table {
-    table-layout: fixed !important;
-    width: 100% !important;
-  }
-
-  .forum-table th:nth-child(2),
-  .forum-table td:nth-child(2),
-  .forum-table th:nth-child(3),
-  .forum-table td:nth-child(3) {
-    width: 100px !important;
-  }
-
-  .forum-table th:last-child,
-  .forum-table td:last-child {
-    width: 35% !important;
-  }
-
-  .author-sidebar {
-    width: 200px !important;
-    min-width: 200px !important;
-    flex: 0 0 200px !important;
-  }
-}
-
-/* Hide elements on extremely narrow screens (e.g. iPhone SE / 320px) */
-@media (max-width: 365px) {
-  .hide-on-extra-small-mobile {
-    display: none !important;
-  }
-}
-
-.forum-table thead th {
-  background-color: var(--nav-bg) !important;
-  color: #fff !important;
-  border-bottom: 1px solid var(--border-color) !important;
-  font-size: 0.9rem;
-  font-weight: 600;
-  padding: 0.75rem 1rem !important;
-}
-
-.forum-table td {
-  padding: 1rem 1rem !important;
-}
-
-.forum-table-sub thead th {
-  background-color: rgba(0, 0, 0, 0.03) !important;
-  color: var(--text-color) !important;
-  border-bottom: 1px solid var(--border-color) !important;
-  font-size: 0.75rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 0.6rem 1rem !important;
-  opacity: 0.75;
-}
-
-[data-theme='dark'] .forum-table-sub thead th {
-  background-color: rgba(255, 255, 255, 0.05) !important;
-  opacity: 0.5;
-}
-
-[data-theme='neutral'] .forum-table-sub thead th {
-  color: var(--text-color) !important;
-  opacity: 0.65;
-}
-
-/* Responsive Forum Tables */
-@media (max-width: 768px) {
-  .forum-table thead {
-    display: none !important;
-  }
-
-  .forum-table,
-  .forum-table tbody,
-  .forum-table tr,
-  .forum-table td {
-    display: block !important;
-    width: 100% !important;
-    box-sizing: border-box !important;
-  }
-
-  .forum-table td.d-none {
-    display: none !important;
-  }
-
-  .forum-table {
-    background-color: transparent !important;
-    table-layout: auto !important;
-  }
-
-  /* Dark, prominent group headers */
-  .forum-group-header {
-    background-color: var(--nav-bg) !important;
-    padding: 0.85rem 1.25rem !important;
-    border-bottom: none !important;
-    border-top-left-radius: 12px;
-    border-top-right-radius: 12px;
-  }
-
-  .forum-group-header h4 {
-    color: #fff !important;
-    font-size: 0.85rem !important;
-    text-transform: none;
-    font-weight: 700;
-    letter-spacing: normal;
-    margin: 0 !important;
-  }
-
-  /* Unified group block */
-  .forum-group-card {
-    background-color: var(--card-bg) !important;
-    border: 1px solid var(--border-color) !important;
-    border-top: none !important;
-    border-radius: 0 0 12px 12px !important;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.06) !important;
-    margin-bottom: 2.5rem !important;
-    overflow: hidden;
-    /* For header corners */
-  }
-
-  .forum-table tr {
-    margin-bottom: 0 !important;
-    border: none !important;
-    border-bottom: 1px solid var(--border-color) !important;
-    background-color: transparent !important;
-  }
-
-  /* Remove hover on mobile */
-  .forum-table tr:hover,
-  .forum-table tbody tr:hover {
-    background-color: transparent !important;
-  }
-
-  .forum-table tr:last-child {
-    border-bottom: none !important;
-  }
-
-  .forum-table td {
-    padding: 1.25rem 1.25rem !important;
-    /* More airy */
-    border: none !important;
-    text-align: left !important;
-  }
-
-  .forum-table td.forum-td-stat {
-    display: none !important;
-  }
-
-  .forum-table td:first-child {
-    padding-bottom: 0.25rem !important;
-  }
-
-  .forum-table .cat-link,
-  .forum-table .topic-title-link {
-    font-size: 1.1rem !important;
-    margin-bottom: 0.4rem !important;
-    color: var(--text-color) !important;
-  }
-
-  .forum-table .cat-desc,
-  .forum-table .topic-desc-text {
-    font-size: 14px !important;
-    /* Minimum 14px as requested */
-    line-height: 1.5 !important;
-    opacity: 1 !important;
-  }
-
-  .forum-mobile-stats {
-    color: var(--secondary-color) !important;
-    font-weight: 600;
-    margin-top: 0.85rem !important;
-    font-size: 14px !important;
-    /* Also 14px for consistency */
-    opacity: 1 !important;
-  }
-
-  /* Last Post Section - Full Width and Integrated */
-  .forum-table td:last-child {
-    padding: 1rem 1.25rem 1.25rem !important;
-    background-color: rgba(var(--primary-rgb), 0.02) !important;
-    border-top: 1px solid rgba(var(--primary-rgb), 0.03) !important;
-  }
-
-  .forum-table td:last-child:before {
-    content: attr(data-label);
-    display: block !important;
-    margin-bottom: 0.65rem !important;
-    font-size: 0.65rem !important;
-    font-weight: 700;
-    text-transform: uppercase;
-    color: var(--secondary-color);
-    letter-spacing: 0.05em;
-  }
-
-  .last-topic-link {
-    max-width: 100% !important;
-    white-space: normal !important;
-    font-size: 0.95rem !important;
-  }
-
-  /* Responsive Post Author Sidebar */
-  .author-sidebar {
-    border-right: none !important;
-    border-bottom: 1px solid var(--border-color) !important;
-    background-color: rgba(var(--primary-rgb), 0.01) !important;
-    border-radius: 1rem 1rem 0 0 !important;
-  }
-
-  .author-res-avatar {
-    width: 60px !important;
-    height: 60px !important;
-  }
-
-  .author-res-nickname {
-    font-size: 1rem !important;
-  }
-
-  .author-res-status {
-    font-size: 14px !important;
-  }
-
-  .author-res-stat {
-    font-size: 14px !important;
-    /* Minimum 14px as requested */
-    line-height: 1.2;
-    opacity: 1 !important;
-  }
-
-  .author-res-info-lite .role-badge {
-    background-color: transparent !important;
-    border: none !important;
-    padding: 0 !important;
-    color: var(--secondary-color) !important;
-    font-size: 14px !important;
-    font-weight: 500;
-  }
-
-  .post-content {
-    line-height: 1.5 !important;
-  }
-
-  .author-res-footer-link {
-    font-size: 14px !important;
-    text-decoration: none !important;
-    color: var(--secondary-color) !important;
-    font-weight: 500;
-  }
-}
-
+/* ============================================================
+   LEGACY forum-table block (Bootstrap Table era) - turned OFF.
+   No JSX in src/ renders .forum-table* / .forum-table-sub /
+   .topic-row-hover / .topic-title-link / .forum-td-stat:
+   MainPage, CategoryPage, ActiveTopicsPage, NewRepliesPage and
+   SubscriptionsPage now render the semantic DOM
+   (<article class="forum-item"> / <article class="topic-item">)
+   governed by forum-index.css + topic-row.css + author-meta.css.
+   Every selector below is an !important duplicate of a rule that
+   now lives in the native modules (see file headers). Keeping
+   them live made DevTools show the overlap (e.g. .last-topic-link
+   mobile 0.95rem from here vs forum-index.css). Commented out
+   until Stage 7 drops Bootstrap entirely; then delete for good.
+   KEEP LIVE outside this block: .hide-on-extra-small-mobile,
+   .bbcode-media-wrapper, .hotkeys-table, .dm-*, .members-table-*,
+   .profile-sidebar-wrapper - used by unmigrated pages.
+   ============================================================ */
+/*
+ * -- Force uniform columns across different tables (Desktop only) --
+ * @media (min-width: 768px) {
+ *   .forum-table {
+ *     table-layout: fixed !important;
+ *     width: 100% !important;
+ *   }
+ *
+ *   .forum-table th:nth-child(2),
+ *   .forum-table td:nth-child(2),
+ *   .forum-table th:nth-child(3),
+ *   .forum-table td:nth-child(3) {
+ *     width: 100px !important;
+ *   }
+ *
+ *   .forum-table th:last-child,
+ *   .forum-table td:last-child {
+ *     width: 35% !important;
+ *   }
+ *
+ *   .author-sidebar {
+ *     width: 200px !important;
+ *     min-width: 200px !important;
+ *     flex: 0 0 200px !important;
+ *   }
+ * }
+ *
+ * -- Hide elements on extremely narrow screens (e.g. iPhone SE / 320px) --
+ * @media (max-width: 365px) {
+ *   .hide-on-extra-small-mobile {
+ *     display: none !important;
+ *   }
+ * }
+ *
+ * .forum-table thead th {
+ *   background-color: var(--nav-bg) !important;
+ *   color: #fff !important;
+ *   border-bottom: 1px solid var(--border-color) !important;
+ *   font-size: 0.9rem;
+ *   font-weight: 600;
+ *   padding: 0.75rem 1rem !important;
+ * }
+ *
+ * .forum-table td {
+ *   padding: 1rem 1rem !important;
+ * }
+ *
+ * .forum-table-sub thead th {
+ *   background-color: rgba(0, 0, 0, 0.03) !important;
+ *   color: var(--text-color) !important;
+ *   border-bottom: 1px solid var(--border-color) !important;
+ *   font-size: 0.75rem;
+ *   font-weight: 700;
+ *   text-transform: uppercase;
+ *   letter-spacing: 0.05em;
+ *   padding: 0.6rem 1rem !important;
+ *   opacity: 0.75;
+ * }
+ *
+ * [data-theme='dark'] .forum-table-sub thead th {
+ *   background-color: rgba(255, 255, 255, 0.05) !important;
+ *   opacity: 0.5;
+ * }
+ *
+ * [data-theme='neutral'] .forum-table-sub thead th {
+ *   color: var(--text-color) !important;
+ *   opacity: 0.65;
+ * }
+ *
+ * -- Responsive Forum Tables --
+ * @media (max-width: 768px) {
+ *   .forum-table thead {
+ *     display: none !important;
+ *   }
+ *
+ *   .forum-table,
+ *   .forum-table tbody,
+ *   .forum-table tr,
+ *   .forum-table td {
+ *     display: block !important;
+ *     width: 100% !important;
+ *     box-sizing: border-box !important;
+ *   }
+ *
+ *   .forum-table td.d-none {
+ *     display: none !important;
+ *   }
+ *
+ *   .forum-table {
+ *     background-color: transparent !important;
+ *     table-layout: auto !important;
+ *   }
+ *
+ *   -- Dark, prominent group headers --
+ *   .forum-group-header {
+ *     background-color: var(--nav-bg) !important;
+ *     padding: 0.85rem 1.25rem !important;
+ *     border-bottom: none !important;
+ *     border-top-left-radius: 12px;
+ *     border-top-right-radius: 12px;
+ *   }
+ *
+ *   .forum-group-header h4 {
+ *     color: #fff !important;
+ *     font-size: 0.85rem !important;
+ *     text-transform: none;
+ *     font-weight: 700;
+ *     letter-spacing: normal;
+ *     margin: 0 !important;
+ *   }
+ *
+ *   -- Unified group block --
+ *   .forum-group-card {
+ *     background-color: var(--card-bg) !important;
+ *     border: 1px solid var(--border-color) !important;
+ *     border-top: none !important;
+ *     border-radius: 0 0 12px 12px !important;
+ *     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.06) !important;
+ *     margin-bottom: 2.5rem !important;
+ *     overflow: hidden;
+ *     -- For header corners --
+ *   }
+ *
+ *   .forum-table tr {
+ *     margin-bottom: 0 !important;
+ *     border: none !important;
+ *     border-bottom: 1px solid var(--border-color) !important;
+ *     background-color: transparent !important;
+ *   }
+ *
+ *   -- Remove hover on mobile --
+ *   .forum-table tr:hover,
+ *   .forum-table tbody tr:hover {
+ *     background-color: transparent !important;
+ *   }
+ *
+ *   .forum-table tr:last-child {
+ *     border-bottom: none !important;
+ *   }
+ *
+ *   .forum-table td {
+ *     padding: 1.25rem 1.25rem !important;
+ *     -- More airy --
+ *     border: none !important;
+ *     text-align: left !important;
+ *   }
+ *
+ *   .forum-table td.forum-td-stat {
+ *     display: none !important;
+ *   }
+ *
+ *   .forum-table td:first-child {
+ *     padding-bottom: 0.25rem !important;
+ *   }
+ *
+ *   .forum-table .cat-link,
+ *   .forum-table .topic-title-link {
+ *     font-size: 1.1rem !important;
+ *     margin-bottom: 0.4rem !important;
+ *     color: var(--text-color) !important;
+ *   }
+ *
+ *   .forum-table .cat-desc,
+ *   .forum-table .topic-desc-text {
+ *     font-size: 14px !important;
+ *     -- Minimum 14px as requested --
+ *     line-height: 1.5 !important;
+ *     opacity: 1 !important;
+ *   }
+ *
+ *   .forum-mobile-stats {
+ *     color: var(--secondary-color) !important;
+ *     font-weight: 600;
+ *     margin-top: 0.85rem !important;
+ *     font-size: 14px !important;
+ *     -- Also 14px for consistency --
+ *     opacity: 1 !important;
+ *   }
+ *
+ *   -- Last Post Section - Full Width and Integrated --
+ *   .forum-table td:last-child {
+ *     padding: 1rem 1.25rem 1.25rem !important;
+ *     background-color: rgba(var(--primary-rgb), 0.02) !important;
+ *     border-top: 1px solid rgba(var(--primary-rgb), 0.03) !important;
+ *   }
+ *
+ *   .forum-table td:last-child:before {
+ *     content: attr(data-label);
+ *     display: block !important;
+ *     margin-bottom: 0.65rem !important;
+ *     font-size: 0.65rem !important;
+ *     font-weight: 700;
+ *     text-transform: uppercase;
+ *     color: var(--secondary-color);
+ *     letter-spacing: 0.05em;
+ *   }
+ *
+ *   .last-topic-link {
+ *     max-width: 100% !important;
+ *     white-space: normal !important;
+ *     font-size: 0.95rem !important;
+ *   }
+ *
+ *   -- Responsive Post Author Sidebar --
+ *   .author-sidebar {
+ *     border-right: none !important;
+ *     border-bottom: 1px solid var(--border-color) !important;
+ *     background-color: rgba(var(--primary-rgb), 0.01) !important;
+ *     border-radius: 1rem 1rem 0 0 !important;
+ *   }
+ *
+ *   .author-res-avatar {
+ *     width: 60px !important;
+ *     height: 60px !important;
+ *   }
+ *
+ *   .author-res-nickname {
+ *     font-size: 1rem !important;
+ *   }
+ *
+ *   .author-res-status {
+ *     font-size: 14px !important;
+ *   }
+ *
+ *   .author-res-stat {
+ *     font-size: 14px !important;
+ *     -- Minimum 14px as requested --
+ *     line-height: 1.2;
+ *     opacity: 1 !important;
+ *   }
+ *
+ *   .author-res-info-lite .role-badge {
+ *     background-color: transparent !important;
+ *     border: none !important;
+ *     padding: 0 !important;
+ *     color: var(--secondary-color) !important;
+ *     font-size: 14px !important;
+ *     font-weight: 500;
+ *   }
+ *
+ *   .post-content {
+ *     line-height: 1.5 !important;
+ *   }
+ *
+ *   .author-res-footer-link {
+ *     font-size: 14px !important;
+ *     text-decoration: none !important;
+ *     color: var(--secondary-color) !important;
+ *     font-weight: 500;
+ *   }
+ * }
+ *
+ */
 /* BBCode Media Scaling Fix (for DMs and constrained layouts) */
 .bbcode-media-wrapper {
   width: 100% !important;
@@ -4603,6 +4473,7 @@ kbd {
   align-self: center;
   border-left: 1px solid var(--border-color);
   opacity: 0.2;
+  background-color: var(--border-color);
 }
 
 /* DM unread badge on the navbar — Bootstrap hides .badge:empty, ours must stay visible */

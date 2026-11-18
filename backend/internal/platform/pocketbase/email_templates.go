@@ -291,6 +291,24 @@ func defaultEmailTemplates() emailTemplates {
 // header line where an escape like &amp; would be noise. Callers therefore
 // pass RAW values — nicknames, titles, snippets — and never pre-escape.
 //
+// sanitizeMailSubject strips the one thing a header line cannot carry
+// (SEC-07, CRLF injection): carriage returns and line feeds. Values folded
+// into a subject come from user data (topic titles, nicknames), and a raw
+// CRLF in one would inject a second header line into the outgoing message
+// (RFC 5322 §3.6.7). Replacing with a single space is a display choice, not
+// a security one: with the writer-side validators (ValidateTopicTitle,
+// ValidateNickname) newly-seeded newlines are refused, so this is the
+// defence for legacy rows that were stored before the validators existed.
+//
+// `strings.ReplaceAll("\r\n", " ")` and then `"\r"`/`"\n"` individually
+// matches what a transport would invent: "\r\n" becomes one space, not two,
+// so a word split by a Windows newline does not gain double spaces.
+func sanitizeMailSubject(subject string) string {
+	subject = strings.ReplaceAll(subject, "\r\n", " ")
+	subject = strings.ReplaceAll(subject, "\r", " ")
+	return strings.ReplaceAll(subject, "\n", " ")
+}
+
 // title feeds {TITLE} (the wrapper's <title>); appName feeds {APP_NAME},
 // which the notification path must fill itself because PocketBase only
 // resolves it for the auth mails it sends on its own. values are the
@@ -298,14 +316,14 @@ func defaultEmailTemplates() emailTemplates {
 func renderEmailFromTemplate(tpl emailTemplate, appName, title string, values map[string]string) (subject, bodyHTML string) {
 	esc := template.HTMLEscapeString
 
-	subjectPairs := []string{phTitle, title, phAppName, appName}
+	subjectPairs := []string{phTitle, sanitizeMailSubject(title), phAppName, sanitizeMailSubject(appName)}
 	bodyPairs := []string{phTitle, esc(title), phAppName, esc(appName)}
 	for ph, val := range values {
-		subjectPairs = append(subjectPairs, ph, val)
+		subjectPairs = append(subjectPairs, ph, sanitizeMailSubject(val))
 		bodyPairs = append(bodyPairs, ph, esc(val))
 	}
 
-	subject = strings.NewReplacer(subjectPairs...).Replace(tpl.Subject)
+	subject = sanitizeMailSubject(strings.NewReplacer(subjectPairs...).Replace(tpl.Subject))
 	bodyHTML = strings.NewReplacer(bodyPairs...).Replace(tpl.Body)
 	return subject, bodyHTML
 }
