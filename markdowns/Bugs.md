@@ -177,3 +177,16 @@
 - `npm run lint:js` — 16 проблем (1 ошибка, 15 предупреждений) как до изменений, новых не добавлено.
 - `go vet ./internal/platform/pocketbase/` — чисто.
 - `go build ./...` — чисто.
+
+## 10. Слияние `feature/theming` в `main` (2026-11-17)
+
+**Что сделано:** `git merge feature/theming` выполнено в `main`. Слияние прошло автоматически стратегией `ort`, за исключением одного нюанса, зафиксированного в пункте 5 этого документа.
+
+**Нюанс мержа (цвет имени автора):** на `feature/theming` два блока `.author-meta__name` уже были слиты в один (коммит `b8f36780`), и в этом слитом блоке оставалось устаревшее значение `color: var(--author-date-color, var(--author-meta-color))`. На `main` после фикса E в том же блоке стояло `color: var(--author-name-color, var(--text-color))`. Автомерж оставил версию из `feature/theming` — иначе говоря, исправление E с `main` перетерлось бы слиянием.
+
+**Разрешение:** в файле `src/styles/author-meta.css` в единственном блоке `.author-meta__name` явно проставлено `color: var(--author-name-color, var(--text-color))` — имя автора красится цветом имени, а не даты. Дата (`.author-meta__date>span`, строка 45) осталась на `--author-date-color`, как и было.
+
+**Проверка после мержа:**
+- `npm run build` — зелёно.
+- `author-meta.css` строка 113 — `var(--author-name-color, var(--text-color))`.
+- Все фиксы A–E (`subscriptions.go`, `forum.js`, `subscriptions.js`, `SubscriptionsPage.jsx`, `DraftsPage.jsx`) сохранены, не перетерты мержам.
