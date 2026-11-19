@@ -1213,7 +1213,6 @@
 .post-author__avatar-skeleton {
   width: 150px;
   height: 150px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
 
 /* --- Футер поста: скелетон кнопок — отдельные квадратики с отступами
@@ -1288,8 +1287,9 @@
   }
 
   .post-footer__btn-skeleton {
-    width: 20px;
+    width: 30px;
     height: 20px;
+    margin: 5px;
   }
 
   .post-author__name {
