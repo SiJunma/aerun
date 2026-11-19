@@ -17,7 +17,10 @@ const ProfileSkeleton = ({ section = 'header' }) => {
       <Card className="shadow-sm border-0 bg-card">
         <Card.Header className="py-3">
           <h5 className="mb-0">
-            <Skeleton width="40%" height="1rem" />
+            {/* Шапка карточки тёмная (.card-header → --nav-bg), а базовая полоска
+                .skeleton — всего 8% непрозрачности: на тёмном фоне её не видно.
+                Здесь полоска светлая. */}
+            <Skeleton width="40%" height="1rem" style={{ background: 'rgba(255, 255, 255, 0.25)' }} />
           </h5>
         </Card.Header>
         <Card.Body className="p-3">
@@ -58,9 +61,9 @@ const ProfileSkeleton = ({ section = 'header' }) => {
               </div>
               <div className="mt-2 text-start text-lg-center profile-sidebar-role">
                 <span className="text-muted d-block mb-1 fw-bold text-uppercase" style={{ fontSize: '0.62rem', letterSpacing: '0.1em' }}>
-                  <Skeleton width="55%" height="0.62rem" />
+                  <Skeleton width="35%" height="0.62rem" />
                 </span>
-                <Skeleton width="100px" height="1.4rem" className="mx-lg-auto" />
+                <Skeleton width="80px" height="1.4rem" className="mx-lg-auto" />
               </div>
             </div>
           </div>
@@ -70,35 +73,32 @@ const ProfileSkeleton = ({ section = 'header' }) => {
   }
 
   // section === 'about'
+  // Меньше шума, чем было: без квадратов-иконок (на скелетоне они читаются
+  // как случайные точки) и без скрытых пробелов — высоту задают сами полоски.
   return (
     <Card className="shadow-sm border-0 bg-card">
       <Card.Header className="py-3">
         <h5 className="mb-0">
-          <Skeleton width="30%" height="1rem" />
+          <Skeleton width="30%" height="1rem" style={{ background: 'rgba(255, 255, 255, 0.25)' }} />
         </h5>
       </Card.Header>
       <Card.Body className="p-4">
         <div className="mb-4 pb-4 border-bottom">
           <h6 className="text-primary text-uppercase small fw-bold mb-3 d-flex align-items-center gap-2">
-            <Skeleton width={16} height={16} />
             <Skeleton width="20%" height="0.75rem" />
           </h6>
-          <div className="post-content fs-5" style={{ whiteSpace: 'pre-wrap', lineHeight: '1.6' }}>
-            <span style={{ visibility: 'hidden' }}>{' '.repeat(120)}</span>
+          <div className="post-content fs-5" style={{ lineHeight: '1.6' }}>
             <Skeleton width="100%" height="1.25rem" />
-            <Skeleton width="80%" height="1.25rem" />
-            <Skeleton width="60%" height="1.25rem" />
+            <Skeleton width="70%" height="1.25rem" />
           </div>
         </div>
         <div className="mb-4 pb-4 border-bottom">
           <h6 className="text-primary text-uppercase small fw-bold mb-3 d-flex align-items-center gap-2">
-            <Skeleton width={16} height={16} />
             <Skeleton width="20%" height="0.75rem" />
           </h6>
           <Row className="g-4">
             <Col md={6}>
               <div className="d-flex align-items-start gap-2">
-                <Skeleton width={18} height={18} className="mt-1 flex-shrink-0 text-primary opacity-75" />
                 <div>
                   <span className="text-muted d-block small text-uppercase fw-bold" style={{ fontSize: '0.7rem' }}>
                     <Skeleton width="30%" height="0.7rem" />
@@ -111,7 +111,6 @@ const ProfileSkeleton = ({ section = 'header' }) => {
             </Col>
             <Col md={6}>
               <div className="d-flex align-items-start gap-2">
-                <Skeleton width={18} height={18} className="mt-1 flex-shrink-0 text-danger opacity-75" />
                 <div>
                   <span className="text-muted d-block small text-uppercase fw-bold" style={{ fontSize: '0.7rem' }}>
                     <Skeleton width="30%" height="0.7rem" />
@@ -126,13 +125,10 @@ const ProfileSkeleton = ({ section = 'header' }) => {
         </div>
         <div className="pt-2">
           <h6 className="text-primary text-uppercase small fw-bold mb-3 d-flex align-items-center gap-2">
-            <Skeleton width={16} height={16} />
             <Skeleton width="20%" height="0.75rem" />
           </h6>
-          <div className="text-muted" style={{ whiteSpace: 'pre-wrap' }}>
-            <span style={{ visibility: 'hidden' }}>{' '.repeat(80)}</span>
+          <div className="text-muted">
             <Skeleton width="100%" height="1.25rem" />
-            <Skeleton width="70%" height="1.25rem" />
           </div>
         </div>
       </Card.Body>

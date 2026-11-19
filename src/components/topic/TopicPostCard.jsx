@@ -51,7 +51,7 @@ export const TopicPostCard = ({
   t,
   showToast,
   skeleton = false,
-  skeletonLines = 5,
+  skeletonLines = 3,
 }) => {
   if (skeleton) {
     // Скелетон-ветка живого компонента: та же оболочка и классы (.topic-post →
@@ -94,7 +94,10 @@ export const TopicPostCard = ({
           </aside>
           <div className="post-body">
             <header className="post-header">
-              <Skeleton width="35%" height="30px" />
+              {/* Таймштамп слева, номер поста справа — как в живом посте.
+                  Было 35% × 30px: полоска в два раза выше строки таймштампа. */}
+              <Skeleton width={180} height="0.9rem" />
+              <Skeleton width={40} height="0.9rem" />
             </header>
             <div className="post-content">
               <span style={{ visibility: 'hidden' }}>{' '.repeat(180)}</span>
@@ -102,11 +105,13 @@ export const TopicPostCard = ({
             </div>
             <footer className="post-footer">
               <div className="post-footer__links">
-                <Skeleton width="25%" height="1.5rem" />
+                {/* Контейнеры flex: 0 0 auto — ширина под контент, полоски в %
+                    схлопываются в ноль, поэтому ширина в px. */}
+                <Skeleton width={120} height="1.5rem" />
               </div>
               <div className="post-footer__spacer" />
               <div className="post-footer__actions">
-                <Skeleton width="22%" height="1.5rem" />
+                <Skeleton width={100} height="1.5rem" />
               </div>
             </footer>
           </div>

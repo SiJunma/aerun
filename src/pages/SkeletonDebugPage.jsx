@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { Table } from 'react-bootstrap';
 import { useAuth } from '../contexts/AuthProvider';
+import { useI18n } from '../contexts/I18nProvider';
 import TopicPostCard from '../components/topic/TopicPostCard';
 import TopicRow from '../components/common/TopicRow';
 import MembersRowSkeleton from '../components/common/MembersRowSkeleton';
@@ -11,15 +13,18 @@ import ProfileSkeleton from '../components/profile/ProfileSkeleton';
  *
  * Рендерит все скелетоны через живые компоненты в режиме `skeleton`, без
  * запросов к API (данные не подгружаются). Контролы на лету: количество
- * постов/строк, число строк текста в посте, тема, пресет viewport.
- * Роут не в навигации и не индексируется.
+ * постов/строк, число строк текста в посте, тема. Роут не в навигации и
+ * не индексируется.
+ *
+ * Пресетов viewport здесь НЕТ — специально: медиазапросы считаются от
+ * реального окна браузера, а не от ширины дива, поэтому фиксированная
+ * ширина + scale показывали десктопную раскладку под видом мобильной
+ * (а 1280px вообще не влезали в контейнер). Скелетоны идут во всю ширину
+ * страницы: мобильную версию смотрят ресайзом окна или device-режимом
+ * DevTools. Секции, у которых в живом приложении узкая колонка
+ * (шапка профиля — сайдбар, About — контентная колонка), ограничены
+ * той же шириной, что и в живом приложении.
  */
-const VIEWPORTS = [
-  { label: 'Мобилка 390px', width: 390 },
-  { label: 'Планшет 768px', width: 768 },
-  { label: 'Десктоп 1280px', width: 1280 },
-];
-
 const THEMES = [
   { value: 'dark', label: 'Тёмная' },
   { value: 'light', label: 'Светлая' },
@@ -57,13 +62,13 @@ const section = (title, source, children) => (
 );
 
 export const SkeletonDebugPage = () => {
-  const { profile } = useAuth();
+  const { profile, settings } = useAuth();
+  const { t } = useI18n();
   const isRoot = profile?.role === 'root';
 
   const [postsCount, setPostsCount] = useState(3);
   const [rowsCount, setRowsCount] = useState(5);
-  const [linesCount, setLinesCount] = useState(5);
-  const [viewport, setViewport] = useState(VIEWPORTS[2]);
+  const [linesCount, setLinesCount] = useState(3);
   const [viewTheme, setViewTheme] = useState(() =>
     document.body.dataset.theme || 'dark'
   );
@@ -72,19 +77,6 @@ export const SkeletonDebugPage = () => {
   useEffect(() => {
     document.body.dataset.theme = viewTheme;
   }, [viewTheme]);
-
-  const vp = VIEWPORTS.find((v) => v.width === viewport.width) || VIEWPORTS[2];
-  const previewStyle = {
-    width: vp.width + 'px',
-    height: 'auto',
-    margin: '0 auto',
-    border: '1px solid var(--border-color)',
-    borderRadius: '0.5rem',
-    overflow: 'hidden',
-    background: 'var(--bg-color)',
-  };
-
-
 
   if (!isRoot) {
     return null;
@@ -104,6 +96,7 @@ export const SkeletonDebugPage = () => {
       <p style={{ opacity: 0.7, marginBottom: '1.5rem' }}>
         Живые компоненты в режиме `skeleton`. Без запросов к API, без id/якорей,
         без живых ссылок и кнопок. Роут только для админа, не в навигации.
+        Мобильную версию — ресайзом окна или device-режимом DevTools.
       </p>
 
       {/* Controls */}
@@ -218,35 +211,6 @@ export const SkeletonDebugPage = () => {
             </button>
           ))}
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-          <label
-            style={{
-              fontSize: '0.85rem',
-              opacity: 0.8,
-              marginBottom: '0.25rem',
-            }}
-          >
-            Viewport
-          </label>
-          {VIEWPORTS.map((v) => (
-            <button
-              key={v.width}
-              onClick={() => setViewport(v)}
-              style={{
-                padding: '0.15rem 0.6rem',
-                fontSize: '0.8rem',
-                border: '1px solid var(--border-color)',
-                background:
-                  viewport.width === v.width ? 'var(--primary-color)' : 'transparent',
-                color: viewport.width === v.width ? '#fff' : 'inherit',
-                borderRadius: '0.25rem',
-                cursor: 'pointer',
-              }}
-            >
-              {v.label}
-            </button>
-          ))}
-        </div>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -254,13 +218,13 @@ export const SkeletonDebugPage = () => {
           'Пост темы — скелетон',
           'TopicPostCard.jsx (components/topic)',
           (
-            <div style={previewStyle}>
+            <>
               {Array.from({ length: postsCount }, (_, i) => (
                 <div key={i} style={{ marginBottom: '1rem' }}>
                   <TopicPostCard skeleton skeletonLines={linesCount} />
                 </div>
               ))}
-            </div>
+            </>
           )
         )}
 
@@ -268,13 +232,13 @@ export const SkeletonDebugPage = () => {
           'Строка топика — скелетон',
           'TopicRow.jsx (components/common)',
           (
-            <div style={previewStyle}>
+            <>
               {Array.from({ length: rowsCount }, (_, i) => (
                 <div key={i} style={{ marginBottom: '0.75rem' }}>
                   <TopicRow skeleton showCategoryInColumn />
                 </div>
               ))}
-            </div>
+            </>
           )
         )}
 
@@ -287,19 +251,53 @@ export const SkeletonDebugPage = () => {
         {section(
           'Шапка профиля — скелетон',
           'ProfileSkeleton.jsx (components/profile)',
-          <ProfileSkeleton section="header" />
+          (
+            // Живая шапка — узкая колонка-сайдбар (Col lg={3}), а не вся
+            // ширина страницы: иначе все полоски в % разъезжаются.
+            <div style={{ maxWidth: '340px' }}>
+              <ProfileSkeleton section="header" />
+            </div>
+          )
         )}
 
         {section(
           'Участники — строка скелетона',
           'MembersRowSkeleton.jsx (components/common)',
           (
-            <div style={previewStyle}>
-              {Array.from({ length: rowsCount }, (_, i) => (
-                <div key={i} style={{ marginBottom: '0.75rem' }}>
-                  <MembersRowSkeleton />
-                </div>
-              ))}
+            // Строки участников — это <tr>: без настоящей таблицы колонки
+            // не выстраиваются. Та же оболочка, что на MembersPage.
+            <div className="table-responsive rounded shadow-sm members-table-container">
+              <Table className="align-middle mb-0 border-0">
+                <thead className="small text-muted text-uppercase fw-bold members-table-head">
+                  <tr>
+                    <th className="py-3 ps-4" style={{ width: '30%', border: 'none' }}>
+                      {t('forum.member')}
+                    </th>
+                    <th className="py-3" style={{ width: '15%', border: 'none' }}>
+                      {t('forum.role')}
+                    </th>
+                    <th className="py-3" style={{ width: '15%', border: 'none' }}>
+                      {t('forum.joined')}
+                    </th>
+                    <th className="py-3" style={{ width: '20%', border: 'none' }}>
+                      {t('forum.last_seen')}
+                    </th>
+                    <th className="py-3 text-center" style={{ width: '10%', border: 'none' }}>
+                      {t('forum.posts')}
+                    </th>
+                    {settings?.enableReputation && (
+                      <th className="py-3 text-center pe-4" style={{ width: '10%', border: 'none' }}>
+                        {t('forum.rep')}
+                      </th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody className="border-0">
+                  {Array.from({ length: rowsCount }, (_, i) => (
+                    <MembersRowSkeleton key={i} showRep={settings?.enableReputation} />
+                  ))}
+                </tbody>
+              </Table>
             </div>
           )
         )}
@@ -307,7 +305,12 @@ export const SkeletonDebugPage = () => {
         {section(
           'Вкладка About профиля — скелетон',
           'ProfileSkeleton.jsx (components/profile, section="about")',
-          <ProfileSkeleton section="about" />
+          (
+            // Живой About — контентная колонка (Col lg={9}).
+            <div style={{ maxWidth: '860px' }}>
+              <ProfileSkeleton section="about" />
+            </div>
+          )
         )}
       </div>
     </div>

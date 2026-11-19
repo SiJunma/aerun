@@ -27,24 +27,25 @@ const TopicRow = ({
     // Скелетон-ветка живого компонента: та же оболочка (.topic-item →
     // .topic-main → .topic-head/.topic-meta/.topic-mobile-stats/.topic-replies/
     // .topic-last-post), контент — полосками. Хуки читают только контекст (без
-    // API-запросов), id и живых ссылок/кнопок нет.
+    // API-запросов), id и живых ссылок/кнопок нет. Пагинация на скелетоне не
+    // рендерится вообще. Ширины полосок — в px: h6.topic-title и .topic-author
+    // сжимаются под контент, и полоски в % схлопываются в ноль.
     return (
       <article className={`topic-item ${showCategoryInColumn ? 'has-category' : ''}`}>
         <div className="topic-main">
           <div className="topic-head">
             <h6 className="topic-title">
-              <Skeleton width="55%" height="1rem" />
+              <Skeleton width={320} height="1rem" />
             </h6>
-            <TopicMiniPagination skeleton />
           </div>
           <div className="topic-meta">
             <div className="topic-author">
-              <Skeleton width="40%" height="1rem" className="forum-skeleton-gap" />
-              <Skeleton width="20%" height="1rem" />
+              <Skeleton width={180} height="1rem" className="forum-skeleton-gap" />
+              <Skeleton width={90} height="1rem" />
             </div>
           </div>
           <div className="topic-mobile-stats">
-            <span><Skeleton width={12} height={12} /> <Skeleton width="30%" height="1rem" /></span>
+            <span><Skeleton width={12} height={12} /> <Skeleton width={120} height="1rem" /></span>
           </div>
         </div>
         {showCategoryInColumn && (
