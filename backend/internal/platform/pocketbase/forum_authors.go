@@ -363,6 +363,13 @@ func applyMask(payload map[string]any, field string, authorID string, masks map[
 		dto["avatar_url"] = mask.AvatarURL
 		dto["is_character"] = true
 		dto["character_id"] = id
+		// Status/signature come from the mask record itself — NOT from the
+		// flat author_* fields below, which fall back to the account's
+		// signature when the mask has none. The DTO must hold the mask's
+		// own (possibly empty) values, or the card would render the
+		// account's signature under the mask's name.
+		dto["status_line"] = mask.StatusLine
+		dto["signature"] = mask.Signature
 		if accountName != "" {
 			dto["owner_name"] = accountName
 		}
@@ -405,26 +412,6 @@ func applyMask(payload map[string]any, field string, authorID string, masks map[
 	// The card links the name to a profile. A mask has no profile page, so the
 	// account stays the link target while the LABEL is the mask's name.
 	payload["author_profile_id"] = authorID
-}
-
-// syncAuthorDTO copies the RESOLVED flat display fields into the nested
-// AuthorRef DTO, so both representations are written by one adapter and can
-// never disagree. It runs after the flat decoration pass; the identity fields
-// (kind/user_id/profile_id/character_id) were already set from the stored
-// record, so only the display fields are copied here. An empty flat value
-// leaves the DTO's stored display_name (guest) or null (deleted account)
-// untouched.
-func syncAuthorDTO(payload map[string]any, dtoKey, nameKey, avatarKey string) {
-	dto, ok := payload[dtoKey].(map[string]any)
-	if !ok || dto == nil {
-		return
-	}
-	if name, _ := payload[nameKey].(string); name != "" {
-		dto["display_name"] = name
-	}
-	if avatar, _ := payload[avatarKey].(string); avatar != "" {
-		dto["avatar_url"] = avatar
-	}
 }
 
 // decoratePostAuthor adds the author_* fields a post card renders.
@@ -470,6 +457,11 @@ func decoratePostAuthor(app core.App, payload map[string]any, displays map[strin
 	dto["avatar_url"] = display.AvatarURL
 	dto["reputation"] = display.Reputation
 	dto["posts_count"] = display.PostsCount
+	// Status/signature live in the DTO too (not only the flat author_* keys):
+	// the post card reads them from here, so the page renders its final
+	// height on first paint with no separate per-character fetch.
+	dto["status_line"] = display.StatusLine
+	dto["signature"] = display.Signature
 	dto["is_character"] = false
 	if display.IsDeleted {
 		dto["deleted"] = true

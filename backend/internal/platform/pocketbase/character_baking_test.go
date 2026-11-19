@@ -121,6 +121,15 @@ func TestDeletedAccountKeepsItsMaskInPosts(t *testing.T) {
 			if got, _ := author["is_character"].(bool); !got {
 				t.Error("author.is_character must be true")
 			}
+			// The DTO carries the baked status/signature too — that is what
+			// the post card reads, so the page needs no separate
+			// per-character fetch to render them.
+			if got, _ := author["status_line"].(string); got != "Wanderer of the North" {
+				t.Errorf("author.status_line = %q, want the mask's status line", got)
+			}
+			if got, _ := author["signature"].(string); got != "A signature that belongs to the mask" {
+				t.Errorf("author.signature = %q, want the mask's signature", got)
+			}
 		}
 		found = true
 	}

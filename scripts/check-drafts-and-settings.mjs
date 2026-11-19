@@ -34,9 +34,11 @@ const read = (relative) => readFileSync(fileURLToPath(new URL(relative, import.m
 
 const forumApi = read('../src/api/forum.js');
 const topicPage = read('../src/pages/TopicPage.jsx');
+const topicPostAuth = read('../src/hooks/topic/useTopicPostAuth.jsx');
 const authProvider = read('../src/contexts/AuthProvider.jsx');
 const draftsGo = read('../backend/internal/platform/pocketbase/drafts.go');
 const forumPostsGo = read('../backend/internal/platform/pocketbase/forum_posts.go');
+const forumAuthorsGo = read('../backend/internal/platform/pocketbase/forum_authors.go');
 
 // Comments name the old symbols constantly while explaining why they went, so a
 // gate that failed on its own documentation would be deleted rather than obeyed.
@@ -48,7 +50,9 @@ const stripComments = (src) =>
 const code = {
   forumApi: stripComments(forumApi),
   topicPage: stripComments(topicPage),
+  topicPostAuth: stripComments(topicPostAuth),
   authProvider: stripComments(authProvider),
+  forumAuthorsGo: stripComments(forumAuthorsGo),
 };
 
 const failures = [];
@@ -178,11 +182,35 @@ check(
   'decorateDraft must prefer the mask the SERVER stored on the draft row — that is the value ' +
     'publish will promote, and preferring the local picker silently disagrees with it'
 );
+// 2026-11-19: another member's mask is no longer resolved per character on
+// the client — the backend bakes its status/signature into the AuthorRef DTO
+// at read time (forum_authors.go, decoratePostAuthor/applyMask), so the post
+// card renders its final height on first paint. The old fetchCharacter
+// hydration re-fetched every used character on each topic mount and grew the
+// posts above the jump target ~1.3s after the scroll (F-07).
 check(
-  /await fetchCharacter\(charId\)/.test(code.topicPage),
-  "TopicPage must resolve another member's mask through fetchCharacter (the characters " +
-    'collection) — reading users.settings.characters is the ADR-5 fold, which is empty since the ' +
-    'migration, so every lookup resolved to null'
+  /post\.author\?\.status_line/.test(code.topicPostAuth) &&
+    /post\.author\?\.signature/.test(code.topicPostAuth),
+  "the post card must read another member's mask status/signature from the AuthorRef DTO — " +
+    'the backend bakes them at read time, and the old per-character fetch is gone'
+);
+check(
+  !/fetchCharacter/.test(code.topicPage),
+  'TopicPage must not re-fetch characters per topic load — status/signature arrive in the ' +
+    'posts payload DTO (the per-character hydration grew posts above the jump target, F-07)'
+);
+check(
+  /dto\["status_line"\] = mask\.StatusLine/.test(code.forumAuthorsGo) &&
+    /dto\["signature"\] = mask\.Signature/.test(code.forumAuthorsGo),
+  'forum_authors.go must write the mask status/signature into the AuthorRef DTO — the post ' +
+    'card reads them from there, and the flat author_* fields fall back to the account signature ' +
+    'when the mask has none'
+);
+check(
+  /const decorateDraft = \(draft[\s\S]*?author: \{[^}]*status_line[^}]*signature[^}]*\}/.test(code.topicPage),
+  'decorateDraft must carry status/signature in the draft author DTO — the draft card renders ' +
+    'through the same post card, which reads them from the DTO since the maskStats hydration ' +
+    'was removed (2026-11-19)'
 );
 check(
   !/pb\.collection\('users'\)\.getOne\(uid\);\s*\n\s*const characters = u\?\.settings\?\.characters/.test(code.topicPage),

@@ -61,7 +61,6 @@ import {
 import { toggleSubscription } from '../api/subscriptions';
 import { subscribeToTopicNotifications, markNotificationRead } from '../api/notifications';
 import { refreshUnreadCounts } from '../api/dms';
-import { fetchCharacter } from '../api/character';
 import { playNotificationSound } from '../utils/notificationSound';
 import { canDeleteTopic, topicDeleteErrorText } from '../utils/topic-delete';
 import { queueOptimisticPost, clearPendingOptimisticPost, resolveOptimisticPost } from '../utils/optimisticPostQueue';
@@ -222,6 +221,14 @@ export default function TopicPage() {
         avatar_url: authorAvatar,
         character_id: char ? char.id : null,
         role: roleId,
+        // The draft card renders through the same post card, which reads
+        // status/signature from the AuthorRef DTO (no maskStats hydration
+        // any more) — so the DTO carries them, resolved from the same local
+        // mask the flat fields above already use. No extra fetch: the mask
+        // is the author's own, and the characters list is already loaded
+        // for the composer picker.
+        status_line: char ? (char.status_line || '') : (profile?.status_line || ''),
+        signature: char ? (char.signature || '') : (profile?.settings?.signature || ''),
       },
     };
   };
@@ -410,7 +417,6 @@ export default function TopicPage() {
     }
   }, [user, characters, setLastSelectedMask]);
 
-  const [maskStats, setMaskStats] = useState({});
   const [unreadQuotes, setUnreadQuotes] = useState([]);
 
   // ── Reply draft autosave & unsent-reply rescue (legacy monolith parity) ──
@@ -590,7 +596,6 @@ export default function TopicPage() {
     profile,
     characters,
     authorStats,
-    maskStats,
     isUserOnline,
     hasPermission,
     PERMISSIONS,
@@ -1414,39 +1419,12 @@ export default function TopicPage() {
     return () => observer.disconnect();
   }, [unreadQuotes, posts, user?.uid]);
 
-  // 13. Mask stats hydration via fetchCharacter
-  useEffect(() => {
-    if (posts.length === 0) return;
-    const uniqueChars = new Map();
-    posts.forEach((p) => {
-      if (p.author?.user_id && p.author_character_id && maskStats[p.author_character_id] === undefined) {
-        uniqueChars.set(p.author_character_id, p.author?.user_id);
-      }
-    });
-
-    if (uniqueChars.size === 0) return;
-    const pending = Array.from(uniqueChars.keys());
-    let cancelled = false;
-
-    (async () => {
-      const entries = await Promise.all(pending.map(async (charId) => {
-        try {
-          const char = await fetchCharacter(charId);
-          return [charId, char || null];
-        } catch {
-          return [charId, null];
-        }
-      }));
-      if (cancelled || !isMountedRef.current) return;
-      setMaskStats((prev) => {
-        const next = { ...prev };
-        for (const [charId, char] of entries) next[charId] = char;
-        return next;
-      });
-    })();
-
-    return () => { cancelled = true; };
-  }, [posts, maskStats, isMountedRef]);
+  // 13. REMOVED (2026-11-19): mask stats hydration via fetchCharacter — the
+  // AuthorRef DTO now carries the resolved status/signature (backend baking
+  // in forum_authors.go), so the page renders its final height on first
+  // paint and no per-character fetch runs. The old effect re-fetched every
+  // used character on each topic mount and grew the posts above the jump
+  // target ~1.3s after the scroll (F-07).
 
   // 14. Author stats come from the posts payload itself — every decorated
   // post carries its author's posts_count/reputation (post.author), so no

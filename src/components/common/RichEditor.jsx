@@ -827,7 +827,7 @@ const handleUserSearch = async (queryText) => {
         ) : (
           <Dropdown className="d-inline-block" drop={smilesDropDirection}>
             <Dropdown.Toggle variant="light" size="sm" className="p-1 px-2 no-caret editor-dropdown-toggle" title="Smiles"><Smile size={16} /></Dropdown.Toggle>
-            <Dropdown.Menu className="smiles-picker-menu p-0 shadow border-0" renderOnMount style={{ width: smilesFullWidth ? `${editorWidth}px` : '320px', zIndex: 3500 }}>
+            <Dropdown.Menu className="smiles-picker-menu p-0 shadow border-0" style={{ width: smilesFullWidth ? `${editorWidth}px` : '320px', zIndex: 3500 }}>
               <SmilesPicker onSelect={(code) => insertText(code, '')} />
             </Dropdown.Menu>
           </Dropdown>

@@ -11,7 +11,6 @@ export const useTopicPostAuth = ({
   profile,
   characters,
   authorStats,
-  maskStats,
   isUserOnline,
   hasPermission,
   PERMISSIONS,
@@ -73,49 +72,17 @@ export const useTopicPostAuth = ({
 
   const getLiveAuthorStatus = useCallback((post) => {
     if (!post) return '';
-    if (post.author?.user_id === currentUser?.uid) {
-      if (post.is_character) {
-        const char = characters.find((c) => c.id === post.author?.character_id || c.name === post.author?.display_name);
-        return char ? (char.status_line || '') : (post.author?.status_line || '');
-      }
-      return profile ? (profile.status_line || '') : (post.author?.status_line || '');
-    }
-    if (post.is_character) {
-      if (post.author?.character_id) {
-        const stats = maskStats[post.author?.character_id];
-        if (stats && stats.status_line !== undefined) return stats.status_line || '';
-        if (stats === null) return post.author?.status_line || '';
-      }
-      return post.author?.status_line || '';
-    }
-    if (!post.author?.user_id) return post.author?.status_line || '';
-    const stats = authorStats[post.author?.user_id];
-    if (stats?.status_line !== undefined && stats.status_line !== '') {
-      return stats.status_line;
-    }
+    // The posts payload carries the resolved status in the AuthorRef DTO
+    // (the backend bakes it at read time from the same character/account
+    // record the old per-character fetch read) — so the card renders its
+    // final height on first paint and no separate mask request is needed.
     return post.author?.status_line || '';
-  }, [currentUser, profile, characters, maskStats, authorStats]);
+  }, []);
   const getLiveAuthorSignature = useCallback((post) => {
     if (!post) return '';
-    if (post.author?.user_id === currentUser?.uid) {
-      if (post.is_character) {
-        const char = characters.find((c) => c.id === post.author?.character_id || c.name === post.author?.display_name);
-        return char ? (char.signature || '') : (post.author?.signature || '');
-      }
-      return profile?.settings?.signature || post.author?.signature || '';
-    }
-    if (post.is_character) {
-      if (post.author?.character_id && maskStats[post.author?.character_id]?.signature !== undefined) {
-        return maskStats[post.author?.character_id].signature || '';
-      }
-      return post.author?.signature || '';
-    }
-    const stats = authorStats[post.author?.user_id];
-    if (stats?.settings?.signature !== undefined && stats.settings.signature !== '') {
-      return stats.settings.signature;
-    }
+    // Same as the status above: the DTO carries the resolved signature.
     return post.author?.signature || '';
-  }, [currentUser, profile, characters, maskStats, authorStats]);
+  }, []);
 
   const isAuthorOnline = useCallback((post) => {
     if (!post?.author?.user_id) return false;
