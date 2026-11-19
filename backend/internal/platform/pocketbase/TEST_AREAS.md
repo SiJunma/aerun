@@ -40,9 +40,12 @@ disables the result cache. Patterns overlap a little — that is harmless.
 - Day-to-day: run the area the change touches (plus the neighbouring area
   when the change crosses a boundary, e.g. DTO changes touch
   masks/characters AND topics/posts AND forum-index).
-- Before deploy: the full package once, with `-v`, in the background.
-  `go vet ./internal/platform/pocketbase/` and `go build ./...` are the fast
-  gates and run first.
+- Before deploy: the full package once, with `-v`, in the background:
+  `go test -timeout 25m -count=1 ./internal/platform/pocketbase/`.
+  The default Go test timeout is 10 minutes and the suite takes ~14.5, so a
+  plain `go test` panics with `test timed out after 10m0s` — that panic is
+  the timeout, not a failing test. `go vet ./internal/platform/pocketbase/`
+  and `go build ./...` are the fast gates and run first.
 
 ## Why not split the package
 

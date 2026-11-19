@@ -322,6 +322,40 @@ check(
   'buildAuthorDTO and decorateDraft must carry is_character in the author DTO — optimistic posts ' +
     'and draft cards read the mask flag from there (F-21)'
 );
+// ── F-22: the draft DTO and the publish reconciliation must be complete ──
+// decorateDraft builds the draft card's DTO locally, and convergedAuthorDTO
+// rebuilds the published post's DTO from the server answer — both must carry
+// the same fields the server DTO carries, or the card silently degrades:
+// a draft card without owner_name shows the mask badge with no "Player: …"
+// tooltip, and a reconciled post without is_character flips from the mask
+// badge to the account role the moment the publish answers.
+check(
+  /character_id: char \? char\.id : null,[\s\S]{0,600}owner_name: profile\?\.nickname/.test(code.topicPage),
+  'decorateDraft must carry owner_name in the draft author DTO when masked — the Character badge ' +
+    'tooltip reads it from there (F-22)'
+);
+check(
+  /is_character: serverAuthor\.is_character \?\? pubAuthorDTO\.is_character/.test(code.topicPage),
+  'convergedAuthorDTO must carry is_character — after publish the card reads the mask flag from ' +
+    'the DTO, and without it the mask badge flips to the account role (F-22)'
+);
+// ── F-23: the optimistic card must not remount on confirm ──
+// The row's React key must stay the temp id after the server answers and the
+// row's id becomes the real one — otherwise React unmounts the optimistic
+// card, the avatar <img> is recreated and re-downloaded (visible flicker
+// with the cache disabled). The draft reconcile must also take the server
+// time, so only the id and the timestamp change in place.
+check(
+  /_stableKey: optimisticId/.test(code.topicPage) &&
+    /key=\{post\._stableKey \|\| post\.id\}/.test(code.topicPage),
+  'optimistic posts must carry a stable React key (_stableKey) that survives the temp→real id ' +
+    'swap — otherwise the card remounts on publish and the avatar re-downloads (F-23)'
+);
+check(
+  /pubResult\?\.created_at !== undefined \? \{ created_at: pubResult\.created_at/.test(code.topicPage),
+  'the draft publish reconcile must take the server created_at — the timestamp updates in place ' +
+    'with the id (F-23)'
+);
 
 // ── The edit form's mask picker is not a no-op ───────────────────────────────
 // Same defect class on the edit path: `updatePost` named its argument

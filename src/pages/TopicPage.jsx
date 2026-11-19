@@ -236,6 +236,11 @@ export default function TopicPage() {
         // characters list is already loaded for the composer picker.
         status_line: char ? (char.status_line || '') : (profile?.status_line || ''),
         signature: char ? (char.signature || '') : (profile?.settings?.signature || ''),
+        // The Character badge tooltip ("Player: …") reads the account name
+        // from the DTO — same rule as buildAuthorDTO and the server's
+        // applyMask: owner_name lives in the DTO, only when masked (F-22).
+        // Without it the draft card shows the mask badge with no tooltip.
+        ...(char ? { owner_name: profile?.nickname || user?.displayName || '' } : {}),
       },
     };
   };
@@ -614,6 +619,7 @@ export default function TopicPage() {
 
   // 9. Reply and Draft Handlers (contract: check-forum-read-contract.mjs & check-drafts-and-settings.mjs)
   const buildPostData = (tempId, processedContent = '', rolls = null, authorDTO = {}) => {
+    const optimisticId = tempId || `temp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     return {
       topic_id: id,
       category_id: topic?.category_id,
@@ -623,7 +629,13 @@ export default function TopicPage() {
       character_id: selectedCharacterId || '',
       rolls: rolls && Object.keys(rolls).length > 0 ? rolls : null,
       karma: 0,
-      id: tempId || `temp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+      id: optimisticId,
+      // The React key for this row stays the temp id even after the server
+      // confirms the post and the row's id becomes the real one — otherwise
+      // React unmounts the optimistic card and mounts a fresh one, and the
+      // avatar <img> is recreated and re-downloaded (visible flicker with the
+      // cache disabled). Server rows have no _stableKey and key off their id.
+      _stableKey: optimisticId,
       _isOptimistic: true,
       author: { ...authorDTO },
       created_at: new Date().toISOString(),
@@ -853,6 +865,10 @@ export default function TopicPage() {
               display_name: serverAuthor.display_name || pubAuthorDTO.display_name || profile?.nickname || 'User',
               avatar_url: serverAuthor.avatar_url || pubAuthorDTO.avatar_url || profile?.avatar_url || '',
               character_id: serverAuthor.character_id ?? pubAuthorDTO.character_id ?? null,
+              // The card branches on author.is_character (F-21) — without
+              // it here the reconciled post loses the mask badge and falls
+              // back to the account role the moment the publish answers (F-22).
+              is_character: serverAuthor.is_character ?? pubAuthorDTO.is_character ?? false,
               role: serverAuthor.role || pubAuthorDTO.role || profile?.role || 'player',
               status_line: serverAuthor.status_line ?? pubAuthorDTO.status_line ?? '',
               signature: serverAuthor.signature ?? pubAuthorDTO.signature ?? '',
@@ -868,6 +884,9 @@ export default function TopicPage() {
                   // optimistic row showed the unrolled [dice=N] placeholder.
                   ...(pubResult?.content !== undefined ? { content: pubResult.content } : {}),
                   ...(pubResult?.rolls !== undefined ? { rolls: pubResult.rolls } : {}),
+                  // The server time replaces the optimistic client time, so
+                  // only the id and the timestamp change in place (F-23).
+                  ...(pubResult?.created_at !== undefined ? { created_at: pubResult.created_at, created_at_ms: pubResult.created_at_ms } : {}),
                   author: convergedAuthorDTO,
                 };
               }
@@ -1735,7 +1754,7 @@ export default function TopicPage() {
 
           return (
             <TopicPostCard
-              key={post.id}
+              key={post._stableKey || post.id}
               post={post}
               postNumber={postNum}
               topicId={id}
