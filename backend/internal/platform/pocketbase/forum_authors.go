@@ -328,24 +328,23 @@ func collectLastPostAuthorIDs(payloads []map[string]any, idField string) []strin
 	return out
 }
 
-// decoratePostAuthor adds the author_* fields a post card renders.
+// applyMask swaps the DISPLAY fields of a payload's nested AuthorRef DTO
+// for a mask's, when the DTO names a character the author actually owns.
 //
-// These are the legacy flat names the page components already read, so no
-// render site has to learn a second vocabulary for the same data.
-// applyMask swaps the DISPLAY fields for a mask's, when the payload names one
-// the author actually owns.
+// The mask id comes from the DTO itself (authorDTOFromRecord builds it from
+// the record) — there is no top-level `author_character_id` on the payload
+// any more (F-21), and no top-level `is_character` either: the DTO carries
+// both, and every reader takes them from there.
 //
 // A mask whose row is gone, or one owned by somebody else, is IGNORED: the
 // account identity already written stands. loadCharacterDisplays only resolves
 // rows that exist, and the owner check is against the same author_id the
 // payload was decorated with, so a payload can never borrow another member's
 // mask.
-func applyMask(payload map[string]any, field string, authorID string, masks map[string]characterDisplay) {
-	id, _ := payload[field].(string)
-	if id == "" {
-		if dto, ok := payload["author"].(map[string]any); ok && dto != nil {
-			id, _ = dto["character_id"].(string)
-		}
+func applyMask(payload map[string]any, authorID string, masks map[string]characterDisplay) {
+	id := ""
+	if dto, ok := payload["author"].(map[string]any); ok && dto != nil {
+		id, _ = dto["character_id"].(string)
 	}
 	if id == "" || authorID == "" {
 		return
@@ -377,11 +376,6 @@ func applyMask(payload map[string]any, field string, authorID string, masks map[
 			dto["owner_name"] = accountName
 		}
 	}
-
-	// The mask's display name is the card's LABEL; the account behind it
-	// stays the profile-link target (dto["user_id"] above), because a mask
-	// has no profile page of its own.
-	payload["is_character"] = true
 }
 
 // decoratePostAuthor resolves the author display fields into the nested
@@ -448,7 +442,7 @@ func decoratePostAuthor(app core.App, payload map[string]any, displays map[strin
 	// layer over an identity, and the identity is gone. The mask does not
 	// resurrect the account, and it does not make the account's other
 	// actions (profile link, direct messages, quoting) available again.
-	applyMask(payload, "author_character_id", id, masks)
+	applyMask(payload, id, masks)
 
 	if display.IsDeleted {
 		return
@@ -462,7 +456,7 @@ func decoratePostAuthors(app core.App, payloads []map[string]any) {
 		return
 	}
 	displays := loadAuthorDisplays(app, collectAuthorIDs(payloads, "author_id"))
-	masks := loadCharacterDisplays(app, collectCharacterIDs(payloads, "author_character_id"))
+	masks := loadCharacterDisplays(app, collectCharacterIDs(payloads, ""))
 	for _, payload := range payloads {
 		decoratePostAuthor(app, payload, displays, masks)
 	}
@@ -513,7 +507,7 @@ func decorateTopicAuthor(app core.App, payload map[string]any, displays map[stri
 	}
 
 	// The mask is baked, so it still renders (see decoratePostAuthor).
-	applyMask(payload, "author_character_id", id, masks)
+	applyMask(payload, id, masks)
 
 	if display.IsDeleted {
 		decorateLastPostAuthor(app, payload, displays, masks)
@@ -538,7 +532,7 @@ func decorateTopicAuthors(app core.App, payloads []map[string]any) {
 	ids = append(ids, collectLastPostAuthorIDs(payloads, "last_post_author_id")...)
 	displays := loadAuthorDisplays(app, ids)
 
-	maskIDs := collectCharacterIDs(payloads, "author_character_id")
+	maskIDs := collectCharacterIDs(payloads, "")
 	maskIDs = append(maskIDs, collectLastPostCharacterIDs(payloads, "last_post_author_character_id")...)
 	masks := loadCharacterDisplays(app, maskIDs)
 

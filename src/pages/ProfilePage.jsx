@@ -1637,7 +1637,7 @@ const ProfilePage = () => {
                                         the only place it could appear. Two rows
                                         written as two different characters were
                                         otherwise indistinguishable. */}
-                                    {post.is_character && (
+                                    {post.author?.is_character && (
                                       <ForumCharacterBadge
                                         characterName={post.author?.display_name}
                                         ownerName={post.author?.owner_name}

@@ -114,8 +114,14 @@ func TestDeletedAccountKeepsItsMaskInPosts(t *testing.T) {
 				t.Errorf("author.role = %q, want Deleted", got)
 			}
 		}
-		if got, _ := p["author_character_id"].(string); got != fixRoughMaskID {
-			t.Errorf("author_character_id = %q, want %q", got, fixRoughMaskID)
+		// The mask id lives in the nested DTO now — no top-level
+		// author_character_id on the post payload any more (F-21).
+		if author, ok := p["author"].(map[string]any); ok {
+			if got, _ := author["character_id"].(string); got != fixRoughMaskID {
+				t.Errorf("author.character_id = %q, want %q", got, fixRoughMaskID)
+			}
+		} else {
+			t.Error("the masked post has no nested author DTO")
 		}
 		found = true
 	}

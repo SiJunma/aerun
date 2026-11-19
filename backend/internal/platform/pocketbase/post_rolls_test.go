@@ -382,10 +382,11 @@ func TestMaskedPostCarriesTheAccountNickname(t *testing.T) {
 	}
 	post := page.Items[0]
 
-	if post["is_character"] != true {
+	authorDTO, _ := post["author"].(map[string]any)
+	// The mask flag lives in the nested DTO now (F-21).
+	if authorDTO["is_character"] != true {
 		t.Fatalf("the post is not masked, payload %#v", post)
 	}
-	authorDTO, _ := post["author"].(map[string]any)
 	if authorDTO["display_name"] != "Пич" {
 		t.Errorf("author.display_name = %v, want the mask name", authorDTO["display_name"])
 	}

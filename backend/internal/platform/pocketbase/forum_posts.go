@@ -84,13 +84,12 @@ func postPayload(record *core.Record) map[string]any {
 		payload["rolls"] = rolls
 	}
 
-	// `author_character_id` travels RAW and unresolved on purpose. The read
-	// model resolves the display through decoratePostAuthor, which is also where
-	// ownership is checked — a payload must never hand the browser a mask name
-	// the server has not confirmed belongs to this author.
-	if characterID := record.GetString("author_character_id"); characterID != "" {
-		payload["author_character_id"] = characterID
-	}
+	// The mask id travels inside the nested AuthorRef DTO (built from the
+	// record by authorDTOFromRecord) — there is no top-level
+	// `author_character_id` on the payload any more (F-21). decoratePostAuthor
+	// resolves the display from the DTO, which is also where ownership is
+	// checked — a payload must never hand the browser a mask name the server
+	// has not confirmed belongs to this author.
 
 	// No `deleted` key: a deleted post is gone from the database, so the payload
 	// has nothing to report. The client cannot be handed a flag for a state the

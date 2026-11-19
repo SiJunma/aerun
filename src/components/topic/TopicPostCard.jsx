@@ -207,7 +207,7 @@ export const TopicPostCard = ({
               <ForumAuthorName
                 userId={authorId}
                 characterId={post.author?.character_id}
-                isCharacter={!!post.is_character}
+                isCharacter={!!post.author?.is_character}
                 author={post.author}
                 fallbackName={post.author?.display_name}
                 onClick={onQuoteAuthor}
@@ -228,7 +228,7 @@ export const TopicPostCard = ({
               <ForumAuthorAvatar
                 userId={authorId}
                 characterId={post.author?.character_id}
-                isCharacter={!!post.is_character}
+                isCharacter={!!post.author?.is_character}
                 author={post.author}
                 initialAvatar={post.author?.avatar_url}
                 size={150}
@@ -342,28 +342,28 @@ export const TopicPostCard = ({
             ) : null}
           </header>
 
-          <div className="post-content">
-            {isEditing && editingChildren ? (
-              editingChildren
-            ) : (
-              <>
-                <BBCode rolls={post.rolls} authorId={authorId} authorRole={post.author?.role}>
-                  {post.content}
-                </BBCode>
+          {isEditing && editingChildren ? (
+            <div className="post-editor">{editingChildren}</div>
+          ) : (
+            <div className="post-content">
+              <BBCode rolls={post.rolls} authorId={authorId} authorRole={post.author?.role}>
+                {post.content}
+              </BBCode>
 
-                {liveSignature && (
-                  <div className="post-signature">
-                    <BBCode>{liveSignature}</BBCode>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
+              {liveSignature && (
+                <div className="post-signature">
+                  <BBCode>{liveSignature}</BBCode>
+                </div>
+              )}
+            </div>
+          )}
 
 
           {/* Reputation section at bottom - matches reference HTML.
-              A draft has no karma at all — it is not published yet. */}
-          {!isDraft && (post.author?.user_id || (post.rolls && Object.keys(post.rolls).length > 0)) && (
+              A draft has no karma at all — it is not published yet.
+              While editing the card shows only the editor — no karma row
+              (same as the footer below). */}
+          {!isDraft && !isEditing && (post.author?.user_id || (post.rolls && Object.keys(post.rolls).length > 0)) && (
             <div className="post-meta-row">
               {/* Dice throws sit LEFT; the karma controls stay RIGHT.
                   Guest posts render the throws too — they simply have no

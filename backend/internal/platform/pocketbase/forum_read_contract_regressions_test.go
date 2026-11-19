@@ -83,17 +83,21 @@ func TestMaskIsAppliedToTheStoredPost(t *testing.T) {
 		t.Fatalf("create response carries no first_post: %#v", payload)
 	}
 
-	// The mask REPLACES the display identity...
+	// The mask REPLACES the display identity — name, mask flag and mask id
+	// all live in the nested author DTO now (F-21: no top-level
+	// is_character / author_character_id on the post payload any more).
 	if authorDTO, ok := firstPost["author"].(map[string]any); !ok {
 		t.Errorf("first_post has no nested author DTO")
-	} else if got, _ := authorDTO["display_name"].(string); got != "Rough" {
-		t.Errorf("first_post.author.display_name = %q, want %q — the mask did not apply", got, "Rough")
-	}
-	if isChar, _ := firstPost["is_character"].(bool); !isChar {
-		t.Errorf("first_post.is_character = %v, want true", isChar)
-	}
-	if got, _ := firstPost["author_character_id"].(string); got != fixRoughMaskID {
-		t.Errorf("first_post.author_character_id = %q, want %q", got, fixRoughMaskID)
+	} else {
+		if got, _ := authorDTO["display_name"].(string); got != "Rough" {
+			t.Errorf("first_post.author.display_name = %q, want %q — the mask did not apply", got, "Rough")
+		}
+		if got, _ := authorDTO["is_character"].(bool); !got {
+			t.Errorf("first_post.author.is_character = %v, want true", got)
+		}
+		if got, _ := authorDTO["character_id"].(string); got != fixRoughMaskID {
+			t.Errorf("first_post.author.character_id = %q, want %q", got, fixRoughMaskID)
+		}
 	}
 
 	// ...but NOT ownership. A mask must never let somebody take credit, or

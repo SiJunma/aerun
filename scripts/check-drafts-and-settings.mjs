@@ -40,7 +40,12 @@ const topicPosts = read('../src/hooks/topic/useTopicPosts.js');
 const authProvider = read('../src/contexts/AuthProvider.jsx');
 const draftsGo = read('../backend/internal/platform/pocketbase/drafts.go');
 const forumPostsGo = read('../backend/internal/platform/pocketbase/forum_posts.go');
+const forumTopicsGo = read('../backend/internal/platform/pocketbase/forum_topics.go');
 const forumAuthorsGo = read('../backend/internal/platform/pocketbase/forum_authors.go');
+const topicHeader = read('../src/components/topic/TopicHeader.jsx');
+const topicPostCard = read('../src/components/topic/TopicPostCard.jsx');
+const profilePage = read('../src/pages/ProfilePage.jsx');
+const topicModalState = read('../src/hooks/topic/useTopicModalState.js');
 
 // Comments name the old symbols constantly while explaining why they went, so a
 // gate that failed on its own documentation would be deleted rather than obeyed.
@@ -57,6 +62,10 @@ const code = {
   topicPosts: stripComments(topicPosts),
   authProvider: stripComments(authProvider),
   forumAuthorsGo: stripComments(forumAuthorsGo),
+  topicHeader: stripComments(topicHeader),
+  topicPostCard: stripComments(topicPostCard),
+  profilePage: stripComments(profilePage),
+  topicModalState: stripComments(topicModalState),
 };
 
 const failures = [];
@@ -220,9 +229,12 @@ check(
 // flat keys (author_name, author_avatar, author_role_id, author_status_line,
 // author_signature, author_reputation, author_posts_count, author_deleted,
 // author_profile_id, owner_name, last_post_author*) are gone from every
-// writer. Post-level IDs (author_id, author_character_id) and the
-// is_character flag stay — they are references, not display. The decorator
-// input keys (last_post_author_name / last_post_guest_nickname /
+// writer. Post-level author_character_id / is_character are gone too (F-21):
+// the DTO carries character_id / is_character, and every reader takes them
+// from there — except the DRAFT payload (a draft has no DTO) and the edit
+// request body (the server takes character_id through the
+// author_character_id metadata key). Only author_id stays as a post-level ID.
+// The decorator input keys (last_post_author_name / last_post_guest_nickname /
 // last_post_guest_display_name) stay too: the decorator reads them to BUILD
 // the DTO for guest last-posters.
 check(
@@ -266,6 +278,49 @@ check(
   !/pb\.collection\('users'\)\.getOne\(uid\);\s*\n\s*const characters = u\?\.settings\?\.characters/.test(code.topicPage),
   'TopicPage must not rebuild the mask list out of users.settings.characters — that fold was ' +
     'retracted, and reading it per mask aborted the previous in-flight request every render pass'
+);
+
+// ── F-21: no top-level author_character_id / is_character on posts/topics ──
+// The nested AuthorRef DTO carries both (character_id, is_character) — the
+// top-level copies are gone from post/topic/stats responses. Two exceptions
+// stay: the DRAFT payload (a draft has no DTO — decorateDraft resolves the
+// mask from draft.author_character_id) and the edit request body (the server
+// takes character_id through the author_character_id metadata key).
+check(
+  !/payload\["author_character_id"\]/.test(forumPostsGo) &&
+    !/payload\["author_character_id"\]/.test(forumTopicsGo) &&
+    !/payload\["author_character_id"\]/.test(code.forumAuthorsGo),
+  'post/topic/stats payloads must not carry a top-level author_character_id — the mask id lives ' +
+    'in the nested AuthorRef DTO (F-21)'
+);
+check(
+  !/payload\["is_character"\]/.test(code.forumAuthorsGo) &&
+    !/payload\["is_character"\]/.test(forumTopicsGo),
+  'post/topic/stats payloads must not carry a top-level is_character — the mask flag lives in ' +
+    'the nested AuthorRef DTO (F-21)'
+);
+check(
+  !/\b(post|topic)\.is_character\b/.test(code.topicPage) &&
+    !/\b(post|topic)\.author_character_id\b/.test(code.topicPage) &&
+    !/\b(post|topic)\.is_character\b/.test(code.topicPostCard) &&
+    !/\b(post|topic)\.author_character_id\b/.test(code.topicPostCard) &&
+    !/\b(post|topic)\.is_character\b/.test(code.topicHeader) &&
+    !/\b(post|topic)\.author_character_id\b/.test(code.topicHeader) &&
+    !/\b(post|topic)\.is_character\b/.test(code.profilePage) &&
+    !/\b(post|topic)\.author_character_id\b/.test(code.profilePage) &&
+    !/\b(post|topic)\.is_character\b/.test(code.topicPostAuth) &&
+    !/\b(post|topic)\.author_character_id\b/.test(code.topicPostAuth) &&
+    !/\b(post|topic)\.is_character\b/.test(code.topicModalState) &&
+    !/\b(post|topic)\.author_character_id\b/.test(code.topicModalState),
+  'post/topic cards, header, profile and edit flow must read the mask id/flag from the nested ' +
+    'AuthorRef DTO — the top-level copies are gone (F-21). Drafts (draft./myDraft./publishedDraft.) ' +
+    'and the edit request body are the exceptions, not this pattern.'
+);
+check(
+  /character_id: charId \|\| null,[\s\S]{0,300}is_character: !!selChar,/.test(code.topicPage) &&
+    /character_id: char \? char\.id : null,[\s\S]{0,300}is_character: !!char,/.test(code.topicPage),
+  'buildAuthorDTO and decorateDraft must carry is_character in the author DTO — optimistic posts ' +
+    'and draft cards read the mask flag from there (F-21)'
 );
 
 // ── The edit form's mask picker is not a no-op ───────────────────────────────
@@ -326,7 +381,7 @@ console.log('OK  drafts: the card never falls back to a Guest author');
 console.log('OK  drafts: the picked mask is stored on the draft row and survives publish');
 console.log('OK  drafts: publish answers with a decorated post, so the mask does not vanish');
 console.log("OK  masks: another member's mask is resolved through the characters collection");
-console.log('OK  authors: one AuthorRef DTO — no flat author_* fields (F-18)');
+console.log('OK  authors: one AuthorRef DTO — no flat author_* fields (F-18), no top-level author_character_id/is_character on posts/topics (F-21)');
 console.log('OK  masks: the edit form picker is transmitted, not silently dropped');
 console.log('OK  masks: only the author may re-file a post under a different mask');
 console.log('OK  settings: a save cannot delete keys the account form does not know');

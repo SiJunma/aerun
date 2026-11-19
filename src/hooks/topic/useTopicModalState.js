@@ -71,7 +71,7 @@ export const useTopicModalState = ({
       ...prev,
       editingPostId: post.id,
       editContent: post.content || '',
-      editCharacterId: post.author_character_id || '',
+      editCharacterId: post.author?.character_id || '',
       ...(isFirst && {
         editTopicTitle: topic?.title || '',
         editTopicDescription: topic?.description || '',

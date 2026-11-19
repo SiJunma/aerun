@@ -183,8 +183,6 @@ const TopicFormPage = () => {
         character_id: selectedCharacterId || '',
         pin_first_post: pinFirstPost,
         author_id: user?.uid || '',
-        is_character: !!selectedChar,
-        author_character_id: selectedCharacterId || null,
         first_post_pinned: pinFirstPost,
         is_pinned: false,
         guest_nickname: guestNickname || ''
@@ -193,8 +191,6 @@ const TopicFormPage = () => {
       const firstPostData = {
         content,
         author_id: user?.uid || '',
-        is_character: topicData.is_character,
-        author_character_id: topicData.author_character_id,
         character_title: selectedChar?.title || '',
         guest_nickname: guestNickname || ''
       };

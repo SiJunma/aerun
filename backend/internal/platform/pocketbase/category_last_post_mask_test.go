@@ -18,8 +18,8 @@ package pocketbase
 //     check, so a payload can never borrow somebody else's mask.
 
 import (
+	"encoding/json"
 	"net/http"
-	"strings"
 	"testing"
 
 	"github.com/pocketbase/pocketbase/core"
@@ -289,15 +289,35 @@ func TestCategoriesEndpointNamesTheMask(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", status, body)
 	}
-	payload := string(body)
-	if !strings.Contains(payload, "Kyle Haze") {
-		t.Fatalf("the categories payload must name the mask of the last post: %s", payload)
+	// Read the nested last-post DTO by parsing the payload, not by a raw
+	// substring: a substring couples the test to JSON key order, and a miss
+	// says nothing about which field is wrong. The parsed failure prints
+	// the actual DTO, so a failure here is diagnostic (the substring form
+	// failed on the agent's run with no clue which field was off).
+	var decoded struct {
+		Items []map[string]any `json:"items"`
 	}
-	// The mask name and the mask flag sit in the same nested last-post DTO
-	// (map keys marshal alphabetically, so display_name is immediately
-	// followed by is_character) — the flat last_post_is_character key is
-	// gone (F-18).
-	if !strings.Contains(payload, `"display_name":"Kyle Haze","is_character":true`) {
-		t.Fatalf("the categories payload must flag the last post as a mask post: %s", payload)
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("categories payload is not JSON: %v (%s)", err, body)
+	}
+	var general map[string]any
+	for _, item := range decoded.Items {
+		if item["id"] == catID {
+			general = item
+			break
+		}
+	}
+	if general == nil {
+		t.Fatalf("the general category is missing from the payload: %s", body)
+	}
+	ref, _ := general["last_post_author_ref"].(map[string]any)
+	if ref == nil {
+		t.Fatalf("last_post_author_ref is missing on the general category: %s", body)
+	}
+	if got, _ := ref["display_name"].(string); got != "Kyle Haze" {
+		t.Fatalf("last_post_author_ref.display_name = %q, want Kyle Haze (full ref: %#v)", got, ref)
+	}
+	if got, _ := ref["is_character"].(bool); !got {
+		t.Fatalf("last_post_author_ref.is_character = %v, want true (full ref: %#v)", got, ref)
 	}
 }

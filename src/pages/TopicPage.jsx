@@ -187,6 +187,10 @@ export default function TopicPage() {
         ? selChar.avatar_url
         : (profile?.avatar_url || ''),
       character_id: charId || null,
+      // The DTO is the single source of truth for the card, including the
+      // mask flag — the optimistic post carries no top-level
+      // author_character_id / is_character any more (F-21).
+      is_character: !!selChar,
       role: profile?.role || 'spectator',
       status_line: selChar ? (selChar.status_line || '') : (profile?.status_line || ''),
       signature: selChar ? (selChar.signature || '') : (profile?.settings?.signature || ''),
@@ -219,6 +223,11 @@ export default function TopicPage() {
         display_name: authorName,
         avatar_url: authorAvatar,
         character_id: char ? char.id : null,
+        // The draft card reads the mask flag from the DTO, like every other
+        // card — the draft's own top-level author_character_id stays (it is
+        // the draft's data, not a response duplicate: the raw draft payload
+        // carries no DTO at all), but the card never reads it (F-21).
+        is_character: !!char,
         role: roleId,
         // The draft card renders through the same post card, which reads
         // status/signature from the AuthorRef DTO (no maskStats hydration
@@ -605,7 +614,6 @@ export default function TopicPage() {
 
   // 9. Reply and Draft Handlers (contract: check-forum-read-contract.mjs & check-drafts-and-settings.mjs)
   const buildPostData = (tempId, processedContent = '', rolls = null, authorDTO = {}) => {
-    const selectedChar = characters.find((c) => c.id === selectedCharacterId);
     return {
       topic_id: id,
       category_id: topic?.category_id,
@@ -613,8 +621,6 @@ export default function TopicPage() {
       author_id: user?.uid || null,
       guest_nickname: !user ? guestNickname.trim() : undefined,
       character_id: selectedCharacterId || '',
-      is_character: !!selectedChar,
-      author_character_id: selectedCharacterId || null,
       rolls: rolls && Object.keys(rolls).length > 0 ? rolls : null,
       karma: 0,
       id: tempId || `temp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
@@ -775,8 +781,6 @@ export default function TopicPage() {
     const optimisticPost = {
       topic_id: id,
       author_id: user?.uid || null,
-      is_character: !!publishedDraft?.is_character,
-      author_character_id: publishedDraft?.author_character_id || null,
       content: publishedDraft.content || '',
       rolls: null,
       karma: 0,
@@ -864,8 +868,6 @@ export default function TopicPage() {
                   // optimistic row showed the unrolled [dice=N] placeholder.
                   ...(pubResult?.content !== undefined ? { content: pubResult.content } : {}),
                   ...(pubResult?.rolls !== undefined ? { rolls: pubResult.rolls } : {}),
-                  ...(pubResult?.is_character !== undefined ? { is_character: pubResult.is_character } : {}),
-                  ...(pubResult?.author_character_id !== undefined ? { author_character_id: pubResult.author_character_id } : {}),
                   author: convergedAuthorDTO,
                 };
               }

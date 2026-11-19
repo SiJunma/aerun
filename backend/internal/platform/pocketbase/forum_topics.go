@@ -93,12 +93,11 @@ func topicPayload(record *core.Record) map[string]any {
 	if ref := lastPostRefFromRecord(record); ref.Kind == authorKindGuest && ref.DisplayName != "" {
 		payload["last_post_author_name"] = ref.DisplayName
 	}
-	// Both mask references are emitted RAW; decorateTopicAuthor resolves and
-	// ownership-checks them. They are omitted when empty so a topic written
-	// without a mask is indistinguishable from one that never had the option.
-	if characterID := record.GetString("author_character_id"); characterID != "" {
-		payload["author_character_id"] = characterID
-	}
+	// The last-post mask reference is emitted RAW; decorateTopicAuthor
+	// resolves and ownership-checks it. It is omitted when empty so a topic
+	// written without a mask is indistinguishable from one that never had
+	// the option. (The opener's own mask id lives only in the nested author
+	// DTO — no top-level `author_character_id` any more, F-21.)
 	if characterID := record.GetString("last_post_author_character_id"); characterID != "" {
 		payload["last_post_author_character_id"] = characterID
 	}
@@ -648,7 +647,7 @@ func listTopicsHandler(e *core.RequestEvent) error {
 //
 // Field contract (pinned by TestTopicStats*): topic_id, title, category_id,
 // author_id, posts_count, last_post_id, last_post_at, locked, pinned,
-// first_post_pinned, created, request_id (+ author DTO, is_character if present).
+// first_post_pinned, created, request_id (+ author DTO).
 // Carries essential metadata so topic open does not require the heavy ~1.2 KB full
 // topic read, while shedding heavy author/last_post decoration.
 func getTopicStatsHandler(e *core.RequestEvent) error {
@@ -708,9 +707,6 @@ func getTopicStatsHandler(e *core.RequestEvent) error {
 	// re-filed the opener on the server, but the live header kept naming the
 	// author of the post that had LEFT until the page was remounted.
 	payload["author"] = authorDTOFromRecord(topic)
-	if charID := topic.GetString("author_character_id"); charID != "" {
-		payload["author_character_id"] = charID
-	}
 
 	authorID := topic.GetString("author_id")
 	if authorID != "" {
@@ -733,7 +729,6 @@ func getTopicStatsHandler(e *core.RequestEvent) error {
 			if mask, ok := masks[charID]; ok && mask.OwnerID == authorID {
 				// The mask is baked, so a deleted opener still renders under
 				// it (see decoratePostAuthor — same rule, same reason).
-				payload["is_character"] = true
 				if dto, ok := payload["author"].(map[string]any); ok && dto != nil {
 					dto["display_name"] = mask.Name
 					dto["avatar_url"] = mask.AvatarURL

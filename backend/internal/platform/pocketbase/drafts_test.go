@@ -252,12 +252,15 @@ func TestDraftKeepsItsMaskThroughPublish(t *testing.T) {
 	}
 	if authorDTO, ok := published["author"].(map[string]any); !ok {
 		t.Errorf("published post has no nested author DTO")
-	} else if got, _ := authorDTO["display_name"].(string); got != "Rough" {
-		t.Errorf("published author.display_name = %q, want %q — the answer was not decorated, so the "+
-			"fresh post renders under the account", got, "Rough")
-	}
-	if isChar, _ := published["is_character"].(bool); !isChar {
-		t.Errorf("published is_character = %v, want true", isChar)
+	} else {
+		if got, _ := authorDTO["display_name"].(string); got != "Rough" {
+			t.Errorf("published author.display_name = %q, want %q — the answer was not decorated, so the "+
+				"fresh post renders under the account", got, "Rough")
+		}
+		// The mask flag lives in the nested DTO now (F-21).
+		if got, _ := authorDTO["is_character"].(bool); !got {
+			t.Errorf("published author.is_character = %v, want true", got)
+		}
 	}
 	if authorDTO, ok := published["author"].(map[string]any); !ok {
 		t.Errorf("published post has no nested author DTO")

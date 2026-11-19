@@ -46,13 +46,13 @@ export const useTopicPostAuth = ({
   const getLiveAuthorDisplayName = useCallback((post) => {
     if (!post) return '';
     if (post.author?.user_id === currentUser?.uid) {
-      if (post.is_character) {
+      if (post.author?.is_character) {
         const char = characters.find((c) => c.id === post.author?.character_id || c.name === post.author?.display_name);
         return char?.name || post.author?.display_name;
       }
       return profile?.nickname || post.author?.display_name;
     }
-    if (post.is_character) return post.author?.display_name;
+    if (post.author?.is_character) return post.author?.display_name;
     return authorStats[post.author?.user_id]?.nickname || post.author?.display_name;
   }, [currentUser, profile, characters, authorStats]);
 
@@ -89,7 +89,7 @@ export const useTopicPostAuth = ({
   }, [currentUser, isUserOnline]);
 
   const getRoleBadge = useCallback((post, extraClass = '') => {
-    if (post.is_character) {
+    if (post.author?.is_character) {
       return (
         <div className={`${extraClass} post-author__role-wrapper`}>
           <ForumCharacterBadge ownerName={getLivePlayerOwnerName(post)} />

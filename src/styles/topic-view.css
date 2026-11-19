@@ -445,6 +445,22 @@
   margin-bottom: 1rem;
 }
 
+/* Edit mode: the editor REPLACES .post-content (a sibling, not nested
+   inside it). The post body must be exactly the post body — controls
+   (mask picker, overflow menu) are <a> elements and do not belong inside
+   the text container. Same horizontal rhythm as the content it replaces;
+   nothing follows it (meta row and footer are hidden while editing), so no
+   bottom margin — but it needs air under the header. */
+.post-editor {
+  flex-grow: 1;
+  padding-right: 1.5rem;
+  padding-left: 1.5rem;
+  padding-top: .5rem;
+  padding-bottom: .5rem;
+  margin-top: 1rem;
+  margin-bottom: 0;
+}
+
 .post-header {
   display: flex;
   justify-content: space-between;
@@ -1288,7 +1304,8 @@
 
 
   .post-meta-row,
-  .post-content {
+  .post-content,
+  .post-editor {
     padding-left: 0.5rem;
     padding-right: 0.5rem;
   }
@@ -1352,7 +1369,8 @@
     padding-left: .5rem;
   }
 
-  .post-content {
+  .post-content,
+  .post-editor {
     padding-bottom: 0;
   }
 
