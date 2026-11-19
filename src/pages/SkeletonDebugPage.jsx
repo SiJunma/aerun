@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthProvider';
 import TopicPostCard from '../components/topic/TopicPostCard';
 import TopicRow from '../components/common/TopicRow';
+import MembersRowSkeleton from '../components/common/MembersRowSkeleton';
 import CategoryHeaderSkeleton from '../components/common/CategoryHeaderSkeleton';
 import ProfileSkeleton from '../components/profile/ProfileSkeleton';
 
@@ -73,15 +74,17 @@ export const SkeletonDebugPage = () => {
   }, [viewTheme]);
 
   const vp = VIEWPORTS.find((v) => v.width === viewport.width) || VIEWPORTS[2];
-  const screenW =
-    typeof window !== 'undefined' ? window.innerWidth : 1280;
-  const scale = Math.min(1, (screenW - 40) / vp.width);
   const previewStyle = {
     width: vp.width + 'px',
+    height: 'auto',
     margin: '0 auto',
-    transform: `scale(${scale})`,
-    transformOrigin: 'top center',
+    border: '1px solid var(--border-color)',
+    borderRadius: '0.5rem',
+    overflow: 'hidden',
+    background: 'var(--bg-color)',
   };
+
+
 
   if (!isRoot) {
     return null;
@@ -289,16 +292,22 @@ export const SkeletonDebugPage = () => {
 
         {section(
           'Участники — строка скелетона',
-          'TopicRow.jsx (components/common)',
+          'MembersRowSkeleton.jsx (components/common)',
           (
             <div style={previewStyle}>
               {Array.from({ length: rowsCount }, (_, i) => (
                 <div key={i} style={{ marginBottom: '0.75rem' }}>
-                  <TopicRow skeleton showCategoryInColumn />
+                  <MembersRowSkeleton />
                 </div>
               ))}
             </div>
           )
+        )}
+
+        {section(
+          'Вкладка About профиля — скелетон',
+          'ProfileSkeleton.jsx (components/profile, section="about")',
+          <ProfileSkeleton section="about" />
         )}
       </div>
     </div>

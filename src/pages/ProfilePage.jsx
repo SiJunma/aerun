@@ -958,6 +958,9 @@ const ProfilePage = () => {
 
         {hasTabs && (
           <Col lg={9}>
+            {!viewedProfile ? (
+              <ProfileSkeleton section="about" />
+            ) : (
               <Tabs
                 activeKey={activeTab}
                 onSelect={(k) => setActiveTab(k)}
@@ -2104,6 +2107,7 @@ const ProfilePage = () => {
                 </Tab>
               )}
             </Tabs>
+            )}
           </Col>
         )}
       </Row>

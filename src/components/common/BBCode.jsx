@@ -762,6 +762,11 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId, authorRole }) =>
           imgStyle.maxWidth = params.width;
           imgStyle.width = '100%';
         }
+        // Резервируем место под картинку до загрузки, чтобы разметка не ехала
+        // и скролл к goLast не уходил в сторону. aspect-ratio 16/9 — типовый
+        // формат вложенных скриншотов; при реальной загрузке картинка
+        // растянется по max-width:100% (img-fluid), а высота подстроится.
+        if (!imgStyle.aspectRatio) imgStyle.aspectRatio = '16 / 9';
 
         return <img
           key={index}
