@@ -294,8 +294,10 @@ func TestProfilePostsAreReadable(t *testing.T) {
 			if page.Total < 1 {
 				t.Errorf("%s: total = %d, want >= 1 — the pager reads it", who.name, page.Total)
 			}
-			if _, ok := page.Items[0]["author_name"]; !ok {
+			if authorDTO, ok := page.Items[0]["author"].(map[string]any); !ok {
 				t.Errorf("%s: the post is undecorated, payload %#v", who.name, page.Items[0])
+			} else if _, ok := authorDTO["display_name"]; !ok {
+				t.Errorf("%s: the post author DTO has no display_name, payload %#v", who.name, page.Items[0])
 			}
 			// THE HEADLINE. ProfilePage renders `post.topic_title` and falls back
 			// to the literal "..." when it is absent, so a missing key makes the
@@ -383,13 +385,14 @@ func TestMaskedPostCarriesTheAccountNickname(t *testing.T) {
 	if post["is_character"] != true {
 		t.Fatalf("the post is not masked, payload %#v", post)
 	}
-	if post["author_name"] != "Пич" {
-		t.Errorf("author_name = %v, want the mask name", post["author_name"])
+	authorDTO, _ := post["author"].(map[string]any)
+	if authorDTO["display_name"] != "Пич" {
+		t.Errorf("author.display_name = %v, want the mask name", authorDTO["display_name"])
 	}
-	// THE fix: the account nickname rides along under its own key, which is what
-	// ForumCharacterBadge's "Player: …" tooltip reads.
-	if got := post["owner_name"]; got != "PlayerOne" {
-		t.Errorf("owner_name = %v, want the account nickname \"PlayerOne\" — without it the badge "+
+	// THE fix: the account nickname rides along in the DTO under its own key,
+	// which is what ForumCharacterBadge's "Player: …" tooltip reads.
+	if got := authorDTO["owner_name"]; got != "PlayerOne" {
+		t.Errorf("author.owner_name = %v, want the account nickname \"PlayerOne\" — without it the badge "+
 			"tooltip has nothing to show a guest", got)
 	}
 }

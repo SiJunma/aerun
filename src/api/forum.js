@@ -155,7 +155,6 @@ export const fetchTopicStats = async (topicId) => {
     category_id: res.category_id,
     title: res.title,
     author_character_id: res.author_character_id || null,
-    author_name: res.author_name || null,
     is_character: !!res.is_character,
     posts_count: res.posts_count ?? 0,
     is_pinned: !!(res.pinned || res.is_pinned),

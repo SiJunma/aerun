@@ -72,18 +72,11 @@ func TestCategoryIndexNamesTheMaskOfTheLastPost(t *testing.T) {
 			"decorator can only ever name the account", got)
 	}
 
-	// (2) …and it must be resolved into the display name.
-	if got, _ := projection["last_post_author"].(string); got != "Kyle Haze" {
-		t.Fatalf("the main page must name the mask, got %q — the category page "+
-			"renders the same topic correctly, so the two disagree", got)
-	}
-	if isChar, _ := projection["last_post_is_character"].(bool); !isChar {
-		t.Fatal("last_post_is_character must be set when the last post carried a mask")
-	}
-
-	// The nested last-post AuthorRef must agree with the flat fields: one
-	// adapter writes both, so the client never sees a divergent last-post
-	// author between the category index and a topic list.
+	// (2) …and it must be resolved into the display name of the nested
+	// last-post AuthorRef — the single source of truth for the last-post
+	// author (F-18: the flat last_post_author_* keys are gone), so the
+	// client never sees a divergent last-post author between the category
+	// index and a topic list.
 	ref, _ := projection["last_post_author_ref"].(map[string]any)
 	if ref == nil {
 		t.Fatal("last_post_author_ref must be set on the category projection")
@@ -99,6 +92,9 @@ func TestCategoryIndexNamesTheMaskOfTheLastPost(t *testing.T) {
 	}
 	if got, _ := ref["character_id"].(string); got != "charlastpost001" {
 		t.Fatalf("last_post_author_ref.character_id = %v, want charlastpost001", got)
+	}
+	if got, _ := ref["is_character"].(bool); !got {
+		t.Fatal("last_post_author_ref.is_character must be true when the last post carried a mask")
 	}
 }
 
@@ -175,11 +171,15 @@ func TestCategoryIndexFallsBackToTheAccount(t *testing.T) {
 	}
 	projection := projections[catID]
 
-	if got, _ := projection["last_post_author"].(string); got != "PlayerOne" {
+	ref, _ := projection["last_post_author_ref"].(map[string]any)
+	if ref == nil {
+		t.Fatal("last_post_author_ref must be set on the category projection")
+	}
+	if got, _ := ref["display_name"].(string); got != "PlayerOne" {
 		t.Fatalf("a post written as the account must name the account, got %q", got)
 	}
-	if isChar, _ := projection["last_post_is_character"].(bool); isChar {
-		t.Fatal("last_post_is_character must be false when no mask was involved")
+	if isChar, _ := ref["is_character"].(bool); isChar {
+		t.Fatal("last_post_author_ref.is_character must be false when no mask was involved")
 	}
 }
 
@@ -203,11 +203,15 @@ func TestCategoryIndexRefusesAForeignMask(t *testing.T) {
 	}
 	projection := projections[catID]
 
-	if got, _ := projection["last_post_author"].(string); got != "RootOne" {
+	ref, _ := projection["last_post_author_ref"].(map[string]any)
+	if ref == nil {
+		t.Fatal("last_post_author_ref must be set on the category projection")
+	}
+	if got, _ := ref["display_name"].(string); got != "RootOne" {
 		t.Fatalf("a mask owned by somebody else must be ignored, got %q", got)
 	}
-	if isChar, _ := projection["last_post_is_character"].(bool); isChar {
-		t.Fatal("a foreign mask must not set last_post_is_character")
+	if isChar, _ := ref["is_character"].(bool); isChar {
+		t.Fatal("a foreign mask must not set last_post_author_ref.is_character")
 	}
 }
 
@@ -219,8 +223,14 @@ func TestApplyLastPostMaskRule(t *testing.T) {
 	}
 	fresh := func() map[string]any {
 		return map[string]any{
-			"last_post_author":              "Arin",
-			"last_post_author_avatar":       "/account.png",
+			"last_post_author_ref": map[string]any{
+				"kind":         authorKindAccount,
+				"user_id":      "owner1",
+				"display_name": "Arin",
+				"avatar_url":   "/account.png",
+				"character_id": "charmask1",
+				"is_character": false,
+			},
 			"last_post_author_character_id": "charmask1",
 			"last_post_author_id":           "owner1",
 		}
@@ -229,21 +239,23 @@ func TestApplyLastPostMaskRule(t *testing.T) {
 	t.Run("owned mask renames the speaker", func(t *testing.T) {
 		payload := fresh()
 		applyLastPostMask(payload, "owner1", masks)
-		if got, _ := payload["last_post_author"].(string); got != "Kyle Haze" {
+		ref, _ := payload["last_post_author_ref"].(map[string]any)
+		if got, _ := ref["display_name"].(string); got != "Kyle Haze" {
 			t.Fatalf("got %q, want the mask name", got)
 		}
-		if isChar, _ := payload["last_post_is_character"].(bool); !isChar {
-			t.Fatal("last_post_is_character must be set")
+		if isChar, _ := ref["is_character"].(bool); !isChar {
+			t.Fatal("last_post_author_ref.is_character must be set")
 		}
 	})
 
 	t.Run("foreign mask is ignored", func(t *testing.T) {
 		payload := fresh()
 		applyLastPostMask(payload, "somebody-else", masks)
-		if got, _ := payload["last_post_author"].(string); got != "Arin" {
+		ref, _ := payload["last_post_author_ref"].(map[string]any)
+		if got, _ := ref["display_name"].(string); got != "Arin" {
 			t.Fatalf("got %q, want the account name preserved", got)
 		}
-		if isChar, _ := payload["last_post_is_character"].(bool); isChar {
+		if isChar, _ := ref["is_character"].(bool); isChar {
 			t.Fatal("a foreign mask must not set the flag")
 		}
 	})
@@ -251,7 +263,8 @@ func TestApplyLastPostMaskRule(t *testing.T) {
 	t.Run("a deleted mask falls back to the account", func(t *testing.T) {
 		payload := fresh()
 		applyLastPostMask(payload, "owner1", map[string]characterDisplay{})
-		if got, _ := payload["last_post_author"].(string); got != "Arin" {
+		ref, _ := payload["last_post_author_ref"].(map[string]any)
+		if got, _ := ref["display_name"].(string); got != "Arin" {
 			t.Fatalf("got %q, want the account name preserved", got)
 		}
 	})
@@ -280,7 +293,11 @@ func TestCategoriesEndpointNamesTheMask(t *testing.T) {
 	if !strings.Contains(payload, "Kyle Haze") {
 		t.Fatalf("the categories payload must name the mask of the last post: %s", payload)
 	}
-	if !strings.Contains(payload, `"last_post_is_character":true`) {
+	// The mask name and the mask flag sit in the same nested last-post DTO
+	// (map keys marshal alphabetically, so display_name is immediately
+	// followed by is_character) — the flat last_post_is_character key is
+	// gone (F-18).
+	if !strings.Contains(payload, `"display_name":"Kyle Haze","is_character":true`) {
 		t.Fatalf("the categories payload must flag the last post as a mask post: %s", payload)
 	}
 }

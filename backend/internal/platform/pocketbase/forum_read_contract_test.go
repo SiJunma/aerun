@@ -68,11 +68,15 @@ func TestTopicReadModelCarriesWhatTheClientReads(t *testing.T) {
 	if id, _ := firstPost["id"].(string); id == "" {
 		t.Errorf("first_post.id is empty: %#v", firstPost)
 	}
-	if author, _ := firstPost["author_name"].(string); author == "" {
-		t.Errorf("first_post.author_name is empty — the opening post would render as \"—\": %#v", firstPost)
+	if authorDTO, ok := firstPost["author"].(map[string]any); !ok {
+		t.Errorf("first_post has no nested author DTO: %#v", firstPost)
+	} else if author, _ := authorDTO["display_name"].(string); author == "" {
+		t.Errorf("first_post.author.display_name is empty — the opening post would render as \"—\": %#v", firstPost)
 	}
-	if author, _ := topicMap["author_name"].(string); author == "" {
-		t.Errorf("topic.author_name is empty — the topic row would render as \"—\": %#v", topicMap)
+	if authorDTO, ok := topicMap["author"].(map[string]any); !ok {
+		t.Errorf("topic has no nested author DTO: %#v", topicMap)
+	} else if author, _ := authorDTO["display_name"].(string); author == "" {
+		t.Errorf("topic.author.display_name is empty — the topic row would render as \"—\": %#v", topicMap)
 	}
 	// The category listing, and the paging metadata the pager divides by.
 	status, payload = doJSON(t, server.URL, http.MethodGet,
@@ -90,8 +94,10 @@ func TestTopicReadModelCarriesWhatTheClientReads(t *testing.T) {
 		t.Errorf("`total` = %v, want 1 (the category pager divides by it)", payload["total"])
 	}
 	first, _ := items[0].(map[string]any)
-	if author, _ := first["author_name"].(string); author == "" {
-		t.Errorf("listed topic.author_name is empty: %#v", first)
+	if authorDTO, ok := first["author"].(map[string]any); !ok {
+		t.Errorf("listed topic has no nested author DTO: %#v", first)
+	} else if author, _ := authorDTO["display_name"].(string); author == "" {
+		t.Errorf("listed topic.author.display_name is empty: %#v", first)
 	}
 
 	// The category index: counters and the last-post summary. Derived on read,
@@ -122,8 +128,10 @@ func TestTopicReadModelCarriesWhatTheClientReads(t *testing.T) {
 		t.Errorf("last_post_topic_id = %v, want %q (the index links to it)",
 			general["last_post_topic_id"], topicID)
 	}
-	if author, _ := general["last_post_author"].(string); author == "" {
-		t.Errorf("last_post_author is empty: %#v", general)
+	if ref, ok := general["last_post_author_ref"].(map[string]any); !ok {
+		t.Errorf("last_post_author_ref is missing: %#v", general)
+	} else if author, _ := ref["display_name"].(string); author == "" {
+		t.Errorf("last_post_author_ref.display_name is empty: %#v", general)
 	}
 
 	// The post list, under the key the client reads.
@@ -139,8 +147,10 @@ func TestTopicReadModelCarriesWhatTheClientReads(t *testing.T) {
 			len(posts), payload)
 	}
 	post, _ := posts[0].(map[string]any)
-	if author, _ := post["author_name"].(string); author == "" {
-		t.Errorf("post.author_name is empty — the post sidebar would render as \"—\": %#v", post)
+	if authorDTO, ok := post["author"].(map[string]any); !ok {
+		t.Errorf("post has no nested author DTO: %#v", post)
+	} else if author, _ := authorDTO["display_name"].(string); author == "" {
+		t.Errorf("post.author.display_name is empty — the post sidebar would render as \"—\": %#v", post)
 	}
 
 	// A reply must hand back an id the page can navigate to. It used to look for

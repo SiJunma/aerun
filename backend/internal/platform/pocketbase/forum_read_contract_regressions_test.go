@@ -84,8 +84,10 @@ func TestMaskIsAppliedToTheStoredPost(t *testing.T) {
 	}
 
 	// The mask REPLACES the display identity...
-	if got, _ := firstPost["author_name"].(string); got != "Rough" {
-		t.Errorf("first_post.author_name = %q, want %q — the mask did not apply", got, "Rough")
+	if authorDTO, ok := firstPost["author"].(map[string]any); !ok {
+		t.Errorf("first_post has no nested author DTO")
+	} else if got, _ := authorDTO["display_name"].(string); got != "Rough" {
+		t.Errorf("first_post.author.display_name = %q, want %q — the mask did not apply", got, "Rough")
 	}
 	if isChar, _ := firstPost["is_character"].(bool); !isChar {
 		t.Errorf("first_post.is_character = %v, want true", isChar)
@@ -98,11 +100,13 @@ func TestMaskIsAppliedToTheStoredPost(t *testing.T) {
 	// blame, for something the account did not write.
 	if authorDTO, ok := firstPost["author"].(map[string]any); !ok {
 		t.Errorf("first_post has no nested author DTO")
-	} else if got, _ := authorDTO["user_id"].(string); got != fixPlayerID {
-		t.Errorf("first_post.author.user_id = %q, want %q — a mask must not change ownership", got, fixPlayerID)
-	}
-	if role, _ := firstPost["author_role_id"].(string); role == "" {
-		t.Error("author_role_id was emptied by the mask; role and reputation belong to the account")
+	} else {
+		if got, _ := authorDTO["user_id"].(string); got != fixPlayerID {
+			t.Errorf("first_post.author.user_id = %q, want %q — a mask must not change ownership", got, fixPlayerID)
+		}
+		if role, _ := authorDTO["role"].(string); role == "" {
+			t.Error("author.role was emptied by the mask; role and reputation belong to the account")
+		}
 	}
 
 	// The ROW must carry the reference, not just the response: the list
@@ -171,8 +175,10 @@ func TestStoredMaskIsUsedWhenTheRequestNamesNone(t *testing.T) {
 		t.Fatalf("reply: got %d, want 201 (%v)", status, payload)
 	}
 	post, _ := payload["post"].(map[string]any)
-	if got, _ := post["author_name"].(string); got != "Rough" {
-		t.Errorf("reply author_name = %q, want %q — the stored mask was ignored", got, "Rough")
+	if authorDTO, ok := post["author"].(map[string]any); !ok {
+		t.Errorf("reply has no nested author DTO")
+	} else if got, _ := authorDTO["display_name"].(string); got != "Rough" {
+		t.Errorf("reply author.display_name = %q, want %q — the stored mask was ignored", got, "Rough")
 	}
 }
 
@@ -256,8 +262,10 @@ func TestEditedPostKeepsItsMaskUnlessTheAuthorChangedIt(t *testing.T) {
 		t.Fatalf("switching masks: got %d, want 200 (%v)", status, payload)
 	}
 	edited, _ := payload["post"].(map[string]any)
-	if got, _ := edited["author_name"].(string); got != "Second" {
-		t.Errorf("edited author_name = %q, want %q — the answer was not decorated", got, "Second")
+	if authorDTO, ok := edited["author"].(map[string]any); !ok {
+		t.Errorf("edited post has no nested author DTO")
+	} else if got, _ := authorDTO["display_name"].(string); got != "Second" {
+		t.Errorf("edited author.display_name = %q, want %q — the answer was not decorated", got, "Second")
 	}
 	if got := mustFindPostRecord(t, app, postID).GetString("author_character_id"); got != "charsecondmask1" {
 		t.Errorf("author_character_id after switching = %q, want %q", got, "charsecondmask1")
@@ -566,7 +574,7 @@ func TestCategoryCountersReachTheClient(t *testing.T) {
 		}
 		for _, key := range []string{
 			"last_post_topic_id", "last_post_topic_title",
-			"last_post_at", "last_post_author", "last_post_author_avatar",
+			"last_post_at", "last_post_author_ref",
 		} {
 			if _, ok := entry[key]; !ok {
 				t.Errorf("categories[] is missing %q — MainPage renders it", key)

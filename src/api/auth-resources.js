@@ -761,7 +761,7 @@ export const toMembersRow = (u) => ({
   // column was permanently empty for every member on a public page — the
   // server sent the value and the client threw it away one line above where it
   // is read. It is a public profile field (it is already denormalised onto
-  // every post as `author_status_line`), so serving it here exposes nothing new.
+  // every post in the author DTO as `author.status_line`), so serving it here exposes nothing new.
   status_line: u.status_line,
   post_count: u.post_count ?? u.posts_count ?? 0,
   topics_count: u.topics_count ?? 0,

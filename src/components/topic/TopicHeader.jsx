@@ -73,7 +73,7 @@ export const TopicHeader = ({
                 userId={topic.author?.user_id}
                 characterId={topic.author_character_id}
                 isCharacter={!!topic.is_character}
-                fallbackName={topic.author_name || topic.guest_nickname}
+                fallbackName={topic.author?.display_name || topic.guest_nickname}
                 className="topic-author-name"
               />
             </span>

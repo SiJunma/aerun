@@ -240,7 +240,7 @@ func TestDraftKeepsItsMaskThroughPublish(t *testing.T) {
 	}
 
 	// 2. The publish answer must be DECORATED. A raw payload carries no
-	// author_name/is_character, and the client renders the new card from it.
+	// author DTO, and the client renders the new card from it.
 	status, payload = doJSON(t, server.URL, http.MethodPost, "/api/aerun/drafts/"+draftID+"/publish",
 		tokens["player"], "draft-mask-publish", "")
 	if status != http.StatusOK {
@@ -250,8 +250,10 @@ func TestDraftKeepsItsMaskThroughPublish(t *testing.T) {
 	if published == nil {
 		t.Fatalf("publish carries no post: %v", payload)
 	}
-	if got, _ := published["author_name"].(string); got != "Rough" {
-		t.Errorf("published author_name = %q, want %q — the answer was not decorated, so the "+
+	if authorDTO, ok := published["author"].(map[string]any); !ok {
+		t.Errorf("published post has no nested author DTO")
+	} else if got, _ := authorDTO["display_name"].(string); got != "Rough" {
+		t.Errorf("published author.display_name = %q, want %q — the answer was not decorated, so the "+
 			"fresh post renders under the account", got, "Rough")
 	}
 	if isChar, _ := published["is_character"].(bool); !isChar {

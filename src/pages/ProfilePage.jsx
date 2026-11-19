@@ -1630,8 +1630,8 @@ const ProfilePage = () => {
 
                                         `characterName` is what makes the badge name
                                         the character rather than read "Char." for
-                                        every row: the server already swaps
-                                        `author_name` to the character's own name on
+                                        every row: the server already puts the
+                                        mask's own name into the author DTO on
                                         a masked post (applyMask), and this list has
                                         no author header to show it, so the badge was
                                         the only place it could appear. Two rows
@@ -1639,15 +1639,15 @@ const ProfilePage = () => {
                                         otherwise indistinguishable. */}
                                     {post.is_character && (
                                       <ForumCharacterBadge
-                                        characterName={post.author_name}
-                                        ownerName={post.owner_name}
+                                        characterName={post.author?.display_name}
+                                        ownerName={post.author?.owner_name}
                                         size="sm"
                                         className="ms-2"
                                       />
                                     )}
                                   </div>
                                   <div className="post-preview text-muted small text-break line-clamp-4">
-                                    <BBCode rolls={post.rolls} authorId={post.author?.user_id} authorRole={post.author_role_id}>{post.content}</BBCode>
+                                    <BBCode rolls={post.rolls} authorId={post.author?.user_id} authorRole={post.author?.role}>{post.content}</BBCode>
                                   </div>
                                 </div>
                               );

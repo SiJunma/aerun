@@ -190,6 +190,10 @@ export default function TopicPage() {
       role: profile?.role || 'spectator',
       status_line: selChar ? (selChar.status_line || '') : (profile?.status_line || ''),
       signature: selChar ? (selChar.signature || '') : (profile?.settings?.signature || ''),
+      // Under a mask the tooltip needs the account name behind the character
+      // (same rule as the server's applyMask: owner_name lives in the DTO,
+      // only when masked).
+      ...(selChar ? { owner_name: profile?.nickname || user?.displayName || '' } : {}),
     };
   }, [characters, user, profile]);
 
@@ -207,11 +211,6 @@ export default function TopicPage() {
       ...draft,
       is_draft: true,
       author_id: authorUid,
-      author_name: authorName,
-      author_avatar: authorAvatar,
-      author_role_id: roleId,
-      author_status_line: char ? (char.status_line || '') : (profile?.status_line || ''),
-      author_signature: char ? (char.signature || '') : (profile?.settings?.signature || ''),
       is_character: !!char,
       author_character_id: char ? char.id : null,
       author: {
@@ -224,9 +223,8 @@ export default function TopicPage() {
         // The draft card renders through the same post card, which reads
         // status/signature from the AuthorRef DTO (no maskStats hydration
         // any more) — so the DTO carries them, resolved from the same local
-        // mask the flat fields above already use. No extra fetch: the mask
-        // is the author's own, and the characters list is already loaded
-        // for the composer picker.
+        // mask. No extra fetch: the mask is the author's own, and the
+        // characters list is already loaded for the composer picker.
         status_line: char ? (char.status_line || '') : (profile?.status_line || ''),
         signature: char ? (char.signature || '') : (profile?.settings?.signature || ''),
       },
@@ -615,20 +613,14 @@ export default function TopicPage() {
       author_id: user?.uid || null,
       guest_nickname: !user ? guestNickname.trim() : undefined,
       character_id: selectedCharacterId || '',
-      author_name: selectedChar ? selectedChar.name : (profile?.nickname || guestNickname.trim() || user?.displayName || 'Guest'),
-      author_avatar: selectedChar ? selectedChar.avatar_url : (profile?.avatar_url || ''),
-      author_status_line: selectedChar ? (selectedChar.status_line || '') : (profile?.status_line || ''),
-      author_role_id: profile?.role || 'spectator',
       is_character: !!selectedChar,
       author_character_id: selectedCharacterId || null,
-      author_signature: selectedChar ? (selectedChar.signature || '') : (profile?.settings?.signature || ''),
       rolls: rolls && Object.keys(rolls).length > 0 ? rolls : null,
       karma: 0,
       id: tempId || `temp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
       _isOptimistic: true,
       author: { ...authorDTO },
       created_at: new Date().toISOString(),
-      owner_name: profile?.nickname || guestNickname.trim() || user?.displayName || 'Guest',
     };
   };
 
@@ -775,30 +767,16 @@ export default function TopicPage() {
     }
 
     const curCategoryId = topicRef.current?.category_id || topic?.category_id;
-    const curTitle = topicRef.current?.title || topic?.title;
     if (curCategoryId) {
-      updateLocalTopicLastPost?.(id, curCategoryId, curTitle, {
-        id: tempId,
-        author_id: user?.uid || null,
-        author_name: publishedDraft?.author_name || profile?.nickname || 'User',
-        author_avatar: publishedDraft?.author_avatar || profile?.avatar_url || '',
-        author_role_id: profile?.role || 'player',
-        is_character: !!publishedDraft?.is_character,
-        author_character_id: publishedDraft?.author_character_id || null,
-        created_at: new Date().toISOString(),
-      }, newTotalPosts, 1);
+      updateLocalTopicLastPost?.(id);
     }
 
     const pubAuthorDTO = buildAuthorDTO(publishedDraft?.author_character_id);
     const optimisticPost = {
       topic_id: id,
       author_id: user?.uid || null,
-      author_name: publishedDraft?.author_name || profile?.nickname || user?.displayName || 'User',
-      author_avatar: publishedDraft?.author_avatar || profile?.avatar_url || '',
       is_character: !!publishedDraft?.is_character,
       author_character_id: publishedDraft?.author_character_id || null,
-      author_status_line: publishedDraft?.author_status_line || '',
-      author_signature: publishedDraft?.author_signature || '',
       content: publishedDraft.content || '',
       rolls: null,
       karma: 0,
@@ -846,16 +824,7 @@ export default function TopicPage() {
       // The server's decorated post is the authority on WHO spoke — the
       // published row is what the read endpoints will serve from now on.
       if (curCategoryId && newPostId) {
-        updateLocalTopicLastPost?.(id, curCategoryId, curTitle, {
-          id: newPostId,
-          author_id: pubResult?.author?.user_id || user?.uid || null,
-          author_name: pubResult?.author_name || publishedDraft?.author_name || profile?.nickname || 'User',
-          author_avatar: pubResult?.author_avatar || publishedDraft?.author_avatar || profile?.avatar_url || '',
-          author_role_id: pubResult?.author_role_id || profile?.role || 'player',
-          is_character: pubResult?.is_character ?? !!publishedDraft?.is_character,
-          author_character_id: pubResult?.author_character_id || publishedDraft?.author_character_id || null,
-          created_at: new Date().toISOString(),
-        }, newTotalPosts, 1);
+        updateLocalTopicLastPost?.(id);
       }
 
       // Legacy parity: applyMutationResult ≈ forum-state refresh.
@@ -870,14 +839,20 @@ export default function TopicPage() {
             }
             // Build the converged author DTO from the server's response so
             // the reconciled card shows correct data without a page reload.
+            // The server DTO is the authority; the optimistic DTO built
+            // locally (pubAuthorDTO) is the fallback — no flat fields any
+            // more (F-18).
             const serverAuthor = pubResult?.author || {};
             const convergedAuthorDTO = {
-              kind: serverAuthor.kind || 'member',
-              user_id: serverAuthor.user_id || user?.uid || null,
-              display_name: serverAuthor.display_name || pubResult?.author_name || publishedDraft?.author_name || profile?.nickname || 'User',
-              avatar_url: serverAuthor.avatar_url || pubResult?.author_avatar || publishedDraft?.author_avatar || profile?.avatar_url || '',
-              character_id: serverAuthor.character_id || pubResult?.author_character_id || null,
-              role: serverAuthor.role || profile?.role || 'player',
+              kind: serverAuthor.kind || pubAuthorDTO.kind || 'member',
+              user_id: serverAuthor.user_id || pubAuthorDTO.user_id || user?.uid || null,
+              display_name: serverAuthor.display_name || pubAuthorDTO.display_name || profile?.nickname || 'User',
+              avatar_url: serverAuthor.avatar_url || pubAuthorDTO.avatar_url || profile?.avatar_url || '',
+              character_id: serverAuthor.character_id ?? pubAuthorDTO.character_id ?? null,
+              role: serverAuthor.role || pubAuthorDTO.role || profile?.role || 'player',
+              status_line: serverAuthor.status_line ?? pubAuthorDTO.status_line ?? '',
+              signature: serverAuthor.signature ?? pubAuthorDTO.signature ?? '',
+              ...(serverAuthor.owner_name || pubAuthorDTO.owner_name ? { owner_name: serverAuthor.owner_name || pubAuthorDTO.owner_name } : {}),
             };
             return prev.map((p) => {
               if (p.id === tempId) {
@@ -889,10 +864,6 @@ export default function TopicPage() {
                   // optimistic row showed the unrolled [dice=N] placeholder.
                   ...(pubResult?.content !== undefined ? { content: pubResult.content } : {}),
                   ...(pubResult?.rolls !== undefined ? { rolls: pubResult.rolls } : {}),
-                  ...(pubResult?.author_name ? { author_name: pubResult.author_name } : {}),
-                  ...(pubResult?.author_avatar !== undefined ? { author_avatar: pubResult.author_avatar } : {}),
-                  ...(pubResult?.author_status_line !== undefined ? { author_status_line: pubResult.author_status_line } : {}),
-                  ...(pubResult?.author_signature !== undefined ? { author_signature: pubResult.author_signature } : {}),
                   ...(pubResult?.is_character !== undefined ? { is_character: pubResult.is_character } : {}),
                   ...(pubResult?.author_character_id !== undefined ? { author_character_id: pubResult.author_character_id } : {}),
                   author: convergedAuthorDTO,
@@ -1028,18 +999,8 @@ export default function TopicPage() {
     }
 
     const curCategoryId = topicRef.current?.category_id || topic?.category_id;
-    const curTitle = topicRef.current?.title || topic?.title;
     if (curCategoryId) {
-      updateLocalTopicLastPost?.(id, curCategoryId, curTitle, {
-        id: tempId,
-        author_id: user?.uid || null,
-        author_name: optimisticPost.author_name || profile?.nickname || guestNickname || 'User',
-        author_avatar: optimisticPost.author_avatar || profile?.avatar_url || '',
-        author_role_id: profile?.role || 'player',
-        is_character: !!optimisticPost.is_character,
-        author_character_id: optimisticPost.author_character_id || null,
-        created_at: new Date().toISOString(),
-      }, newTotalPosts, 1);
+      updateLocalTopicLastPost?.(id);
     }
 
     if (targetPage !== currentPage) {
@@ -1106,16 +1067,7 @@ export default function TopicPage() {
             // confirmed post after a same-page send.
             setAlreadyJumped(false);
             if (curCategoryId) {
-              updateLocalTopicLastPost?.(id, curCategoryId, curTitle, {
-                id: newPostId,
-                author_id: user?.uid || null,
-                author_name: optimisticPost.author_name || profile?.nickname || savedGuestNickname || 'User',
-                author_avatar: optimisticPost.author_avatar || profile?.avatar_url || '',
-                author_role_id: profile?.role || 'player',
-                is_character: !!optimisticPost.is_character,
-                author_character_id: optimisticPost.author_character_id || null,
-                created_at: new Date().toISOString(),
-              }, newTotalPosts, 1);
+              updateLocalTopicLastPost?.(id);
             }
           }
         },
@@ -1287,7 +1239,7 @@ export default function TopicPage() {
           }
 
           if (category?.id && nextLastPost && isDeletedPostLast) {
-            updateLocalTopicLastPost?.(id, category.id, topic?.title || '', nextLastPost, nextPostCount, -1);
+            updateLocalTopicLastPost?.(id);
           } else {
             updateLocalTopicPostsCount?.(id, category?.id, -1);
           }

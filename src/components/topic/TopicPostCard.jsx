@@ -347,7 +347,7 @@ export const TopicPostCard = ({
               editingChildren
             ) : (
               <>
-                <BBCode rolls={post.rolls} authorId={authorId} authorRole={post.author_role_id}>
+                <BBCode rolls={post.rolls} authorId={authorId} authorRole={post.author?.role}>
                   {post.content}
                 </BBCode>
 

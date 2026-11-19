@@ -2,7 +2,7 @@
 //
 // A removed account and an anonymous guest are identities with no account of
 // their own: forum_authors.go leaves a deleted author's payload UNDECORATED (no
-// author_name), and the DM listing resolves a removed peer to an empty
+// display_name in the author DTO), and the DM listing resolves a removed peer to an empty
 // participantNames entry. Every surface that draws such an identity — posts,
 // last-post thumbnails, the DM inbox and chat — must resolve its avatar through
 // the single identity.js helper, so an admin-uploaded custom image and the

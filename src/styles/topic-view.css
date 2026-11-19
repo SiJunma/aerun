@@ -329,6 +329,13 @@
 .post-author__avatar {
   display: flex;
   justify-content: center;
+  /* width: 100% — без неё контейнер shrink-to-fit (родитель .post-author
+     центрирует детей), и width: 100% у .author-avatar__wrap внутри
+     повисает без определённой базы: aspect-ratio не из чего считать высоту,
+     аватарка схлопывается до загрузки картинки, а посты растут уже после
+     прыжка (F-07). С width: 100% цепочка определённая: 200px колонка →
+     100% → max-width 150px → высота из aspect-ratio/height. */
+  width: 100%;
   margin-bottom: 0.5rem;
 }
 
@@ -336,7 +343,11 @@
   width: 100%;
   max-width: var(--topic-post-avatar-size, 150px);
   aspect-ratio: 1;
-  height: auto;
+  /* height: auto здесь отменяло определённую высоту из базового
+     .author-avatar__wrap (author-meta.css) — а aspect-ratio без
+     определённой ширины высоту не даёт. Явная высота = место под аватарку
+     зарезервировано до загрузки картинки, независимо от кеша и lazy. */
+  height: var(--topic-post-avatar-size, 150px);
   min-height: 0;
   flex: 0 0 auto;
 }
@@ -957,8 +968,12 @@
     padding-left: .25rem;
   }
 
-  .post-author .author-avatar__wrap {
-    max-width: 70px;
+  /* Мобильный размер аватарки — одна переменная на всё: враппер, скелетон
+     и контейнер берут --topic-post-avatar-size (150px на десктопе, 70px
+     здесь). Будущая админ-настройка максимального размера аватарок
+     подставится в эту переменную из настроек форума. */
+  .post-author {
+    --topic-post-avatar-size: 70px;
   }
 
   .post-author__role-wrapper {
@@ -1213,12 +1228,15 @@
   object-fit: cover;
 }
 
-/* --- Сайдбар: скелетон аватара — тот же размер, что у живого аватара:
-   150px на десктопе, 70px на мобиле (см. медиазапрос ниже). Размер только
-   из CSS: инлайн width/height не слушаются медиазапросов. --- */
+/* --- Сайдбар: скелетон аватара — тот же размер, что у живого аватара.
+   Размер — из переменной --topic-post-avatar-size (150px на десктопе,
+   70px на мобиле через переопределение ниже): будущая админ-настройка
+   максимального размера аватарок подставится в переменную, а не в каждое
+   правило. Размер только из CSS: инлайн width/height не слушаются
+   медиазапросов. --- */
 .post-author__avatar-skeleton {
-  width: 150px;
-  height: 150px;
+  width: var(--topic-post-avatar-size, 150px);
+  height: var(--topic-post-avatar-size, 150px);
 }
 
 /* --- Футер поста: скелетон кнопок — отдельные квадратики с отступами
@@ -1282,14 +1300,9 @@
   .post-author__avatar {
     grid-area: avatar;
     margin-bottom: 0;
-    width: 70px;
+    width: var(--topic-post-avatar-size, 150px);
     display: flex;
     justify-content: flex-start;
-  }
-
-  .post-author__avatar-skeleton {
-    width: 70px;
-    height: 70px;
   }
 
   .post-footer__btn-skeleton {

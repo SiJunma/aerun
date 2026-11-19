@@ -147,13 +147,7 @@ export const useTopicPosts = ({
       }
 
       if (lastPost && topicRef?.current) {
-        updateLocalTopicLastPost?.(
-          topicId,
-          topicRef.current.category_id,
-          topicRef.current.title,
-          lastPost,
-          topicRef.current.posts_count
-        );
+        updateLocalTopicLastPost?.(topicId);
       }
 
       if (targetPostId) {
@@ -274,13 +268,13 @@ export const useTopicPosts = ({
               const postCount = p.author?.user_id === currentUser?.uid
                 ? Math.max(serverPostCount, cachedPostCount)
                 : serverPostCount || cachedPostCount;
-              const sig = p.author_signature || p.signature || p.settings?.signature || '';
+              const sig = p.author?.signature || '';
               next[p.author?.user_id] = {
                 ...(next[p.author?.user_id] || {}),
                 post_count: postCount,
                 reputation: p.author?.reputation ?? next[p.author?.user_id]?.reputation ?? 0,
-                status_line: p.author_status_line !== undefined ? p.author_status_line : (next[p.author?.user_id]?.status_line ?? ''),
-                role: p.author_role_id || next[p.author?.user_id]?.role || 'player',
+                status_line: p.author?.status_line ?? next[p.author?.user_id]?.status_line ?? '',
+                role: p.author?.role || next[p.author?.user_id]?.role || 'player',
                 settings: sig
                   ? { ...(next[p.author?.user_id]?.settings || {}), signature: sig }
                   : (next[p.author?.user_id]?.settings || { signature: '' })

@@ -59,15 +59,13 @@ export const useTopicPostAuth = ({
   /** Возвращает ник реального владельца аккаунта (а не имя маски) для тултипа бейджа персонажа. */
   const getLivePlayerOwnerName = useCallback((post) => {
     if (!post) return '';
-    // 1. Прямое поле от бэкенда при маскировании (сервер уже пишет owner_name в AuthorRef DTO)
+    // 1. Прямое поле от бэкенда при маскировании (сервер пишет owner_name в AuthorRef DTO)
     if (post.author?.owner_name) return post.author.owner_name;
-    if (post.owner_name) return post.owner_name;
     // 2. Автор — учётная запись без маски: nickname / display_name аккаунта
     if (post.author?.user_id && post.author?.display_name && !post.author?.is_character) {
       return post.author.display_name;
     }
-    // 3. Fallback на плоские legacy-поля
-    return post.author_name || post.author?.nickname || '';
+    return '';
   }, []);
 
   const getLiveAuthorStatus = useCallback((post) => {

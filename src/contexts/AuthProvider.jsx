@@ -1287,12 +1287,15 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   // The optimistic post-count bump was a Firestore-era local patch for the
-  // category counters. Counts now come back from the server on every poll, so
-  // the optimistic update is not just redundant — it would briefly show a
-  // number the backend has not agreed to yet. The ref stamp stays: it is what
-  // tells applyForumState to trust the incoming snapshot.
-  const updateLocalTopicLastPost = useCallback((topicId, _categoryId, _topicTitle, lastPost, _postsCount) => {
-    if (!topicId || !lastPost) return;
+  // F-18: the last-post argument used to carry a flat author_* object; the
+  // function ignores it — it only stamps the ref that tells applyForumState
+  // to trust the incoming snapshot. Counts and last-post cells now come back
+  // from the server on every poll, so the optimistic update is not just
+  // redundant — it would briefly show a number the backend has not agreed
+  // to yet. The ref stamp stays: it is what tells applyForumState to trust
+  // the incoming snapshot.
+  const updateLocalTopicLastPost = useCallback((topicId) => {
+    if (!topicId) return;
     lastOptimisticForumUpdateRef.current = Date.now();
   }, []);
 

@@ -34,7 +34,9 @@ const read = (relative) => readFileSync(fileURLToPath(new URL(relative, import.m
 
 const forumApi = read('../src/api/forum.js');
 const topicPage = read('../src/pages/TopicPage.jsx');
+const topicFormPage = read('../src/pages/TopicFormPage.jsx');
 const topicPostAuth = read('../src/hooks/topic/useTopicPostAuth.jsx');
+const topicPosts = read('../src/hooks/topic/useTopicPosts.js');
 const authProvider = read('../src/contexts/AuthProvider.jsx');
 const draftsGo = read('../backend/internal/platform/pocketbase/drafts.go');
 const forumPostsGo = read('../backend/internal/platform/pocketbase/forum_posts.go');
@@ -50,7 +52,9 @@ const stripComments = (src) =>
 const code = {
   forumApi: stripComments(forumApi),
   topicPage: stripComments(topicPage),
+  topicFormPage: stripComments(topicFormPage),
   topicPostAuth: stripComments(topicPostAuth),
+  topicPosts: stripComments(topicPosts),
   authProvider: stripComments(authProvider),
   forumAuthorsGo: stripComments(forumAuthorsGo),
 };
@@ -144,8 +148,8 @@ check(
 );
 check(
   /func publishDraftHandler[\s\S]*decoratePostAuthors\(/.test(draftsGo),
-  'publishDraftHandler must return a DECORATED post — a raw payload carries no author_name or ' +
-    'is_character, and TopicPage renders the fresh card from that answer, so an undecorated ' +
+  'publishDraftHandler must return a DECORATED post — a raw payload carries no author DTO, ' +
+    'and TopicPage renders the fresh card from that answer, so an undecorated ' +
     'response repaints the just-published post without its mask'
 );
 check(
@@ -203,14 +207,60 @@ check(
   /dto\["status_line"\] = mask\.StatusLine/.test(code.forumAuthorsGo) &&
     /dto\["signature"\] = mask\.Signature/.test(code.forumAuthorsGo),
   'forum_authors.go must write the mask status/signature into the AuthorRef DTO — the post ' +
-    'card reads them from there, and the flat author_* fields fall back to the account signature ' +
-    'when the mask has none'
+    'card reads them from there, and the account signature must never leak under the mask name'
 );
 check(
-  /const decorateDraft = \(draft[\s\S]*?author: \{[^}]*status_line[^}]*signature[^}]*\}/.test(code.topicPage),
-  'decorateDraft must carry status/signature in the draft author DTO — the draft card renders ' +
+  /const decorateDraft = \(draft[\s\S]*?author: \{[^}]*role[^}]*status_line[^}]*signature[^}]*\}/.test(code.topicPage),
+  'decorateDraft must carry role/status/signature in the draft author DTO — the draft card renders ' +
     'through the same post card, which reads them from the DTO since the maskStats hydration ' +
     'was removed (2026-11-19)'
+);
+// ── F-18: one AuthorRef DTO, no flat author_* fields ────────────────────────
+// The nested DTO is the single source of truth for author display; the legacy
+// flat keys (author_name, author_avatar, author_role_id, author_status_line,
+// author_signature, author_reputation, author_posts_count, author_deleted,
+// author_profile_id, owner_name, last_post_author*) are gone from every
+// writer. Post-level IDs (author_id, author_character_id) and the
+// is_character flag stay — they are references, not display. The decorator
+// input keys (last_post_author_name / last_post_guest_nickname /
+// last_post_guest_display_name) stay too: the decorator reads them to BUILD
+// the DTO for guest last-posters.
+check(
+  /dto\["role"\] = display\.Role/.test(code.forumAuthorsGo),
+  'forum_authors.go must write the role into the AuthorRef DTO — the badge and BBCode read it ' +
+    'from there now that the flat author_role_id is gone (F-18)'
+);
+check(
+  !/payload\["(author_name|author_avatar|author_role_id|author_status_line|author_signature|author_reputation|author_posts_count|author_deleted|author_profile_id|owner_name|last_post_author"|last_post_author_avatar|last_post_is_character|last_post_author_deleted)"\]/.test(code.forumAuthorsGo),
+  'forum_authors.go must not write flat author display fields into payloads — every reader ' +
+    'takes the nested AuthorRef DTO (F-18)'
+);
+check(
+  !/\bauthor_(name|avatar|role_id|status_line|signature|reputation|posts_count|profile_id|deleted)\b/.test(code.topicPage),
+  'TopicPage must not read or write flat author display fields — decorateDraft, buildPostData ' +
+    'and the publish reconciliation all build the nested author DTO (F-18)'
+);
+check(
+  !/\bauthor_(name|avatar|role_id|status_line|signature)\b/.test(code.topicFormPage),
+  'TopicFormPage must not send flat author display fields in the create-topic request — the ' +
+    'server derives the author from the session and the picked mask (F-18)'
+);
+check(
+  !/post\.author_name|\bpost\.owner_name/.test(code.topicPostAuth),
+  'useTopicPostAuth must not fall back to flat author fields — the owner name lives in the ' +
+    'author DTO (F-18)'
+);
+check(
+  /status_line: p\.author\?\.status_line/.test(code.topicPosts) &&
+    /role: p\.author\?\.role/.test(code.topicPosts),
+  'useTopicPosts must rebuild authorStats from the AuthorRef DTO — the flat fields it used ' +
+    'to read are gone (F-18)'
+);
+check(
+  /const updateLocalTopicLastPost = useCallback\(\(topicId\) =>/.test(code.authProvider),
+  'updateLocalTopicLastPost must take only the topic id — the flat lastPost object it used to ' +
+    'receive was ignored (stamp-only since the live-update rework), and every caller passes ' +
+    'just the id now (F-18)'
 );
 check(
   !/pb\.collection\('users'\)\.getOne\(uid\);\s*\n\s*const characters = u\?\.settings\?\.characters/.test(code.topicPage),
@@ -276,6 +326,7 @@ console.log('OK  drafts: the card never falls back to a Guest author');
 console.log('OK  drafts: the picked mask is stored on the draft row and survives publish');
 console.log('OK  drafts: publish answers with a decorated post, so the mask does not vanish');
 console.log("OK  masks: another member's mask is resolved through the characters collection");
+console.log('OK  authors: one AuthorRef DTO — no flat author_* fields (F-18)');
 console.log('OK  masks: the edit form picker is transmitted, not silently dropped');
 console.log('OK  masks: only the author may re-file a post under a different mask');
 console.log('OK  settings: a save cannot delete keys the account form does not know');

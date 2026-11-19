@@ -4,8 +4,8 @@ import { translations } from '../i18n/dictionary.js';
 // identity.js — the single source for a MISSING identity's placeholder display.
 //
 // When an account is removed, its content outlives it: forum_authors.go leaves a
-// deleted author's post/topic payload UNDECORATED (no author_name, no
-// author_avatar), and the DM inbox resolves a removed peer to an empty
+// deleted author's post/topic payload UNDECORATED (no display_name/avatar_url
+// in the author DTO), and the DM inbox resolves a removed peer to an empty
 // participantNames entry. Every surface that renders such an identity — posts,
 // last-post thumbnails, the DM inbox — must draw it the SAME way, so that a
 // removed account reads as one consistent "deleted" placeholder rather than as

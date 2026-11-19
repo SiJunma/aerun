@@ -456,8 +456,8 @@ func publishDraftHandler(e *core.RequestEvent) error {
 		publishTopicSignal(txApp, topic)
 
 		// The published post rides back DECORATED, exactly like a createPost
-		// answer. The raw payload carries no author_name/is_character — the read
-		// model resolves those — so an undecorated response made the client
+		// answer. The raw payload carries no author DTO — the read
+		// model resolves it — so an undecorated response made the client
 		// re-render the fresh post with the account name and the mask appeared to
 		// vanish the moment the draft was published.
 		postOut := postPayload(post)

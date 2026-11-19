@@ -836,7 +836,7 @@ func editPostHandler(e *core.RequestEvent) error {
 
 		// Decorated for the same reason publishDraftHandler's is: TopicPage renders
 		// the edited card from this answer, and a raw payload has no
-		// author_name/is_character, so a mask change would appear to do nothing
+		// author DTO, so a mask change would appear to do nothing
 		// until a reload.
 		postOut := postPayload(post)
 		decoratePostAuthors(txApp, []map[string]any{postOut})

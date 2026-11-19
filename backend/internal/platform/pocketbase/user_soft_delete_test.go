@@ -503,19 +503,16 @@ func TestDeletedAuthorDecoratesAsDeleted(t *testing.T) {
 				if got, _ := author["deleted"].(bool); !got {
 					t.Error("the author DTO must carry deleted=true")
 				}
-			}
-			if got, _ := p["author_name"].(string); got != "PlayerOne" {
-				t.Errorf("author_name = %q, want the baked PlayerOne", got)
-			}
-			if got, _ := p["author_role_id"].(string); got != "Deleted" {
-				t.Errorf("author_role_id = %q, want Deleted", got)
-			}
-			if got, _ := p["author_deleted"].(bool); !got {
-				t.Error("author_deleted must be true on a deleted author's post")
-			}
-			// The avatar key travels baked from the account row.
-			if _, has := p["author_avatar"].(string); !has {
-				t.Error("author_avatar must still be projected")
+				if got, _ := author["display_name"].(string); got != "PlayerOne" {
+					t.Errorf("author.display_name = %q, want the baked PlayerOne", got)
+				}
+				if got, _ := author["role"].(string); got != "Deleted" {
+					t.Errorf("author.role = %q, want Deleted", got)
+				}
+				// The avatar URL travels baked from the account row.
+				if _, has := author["avatar_url"].(string); !has {
+					t.Error("author.avatar_url must still be projected")
+				}
 			}
 		}
 	}

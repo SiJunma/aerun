@@ -648,7 +648,7 @@ func listTopicsHandler(e *core.RequestEvent) error {
 //
 // Field contract (pinned by TestTopicStats*): topic_id, title, category_id,
 // author_id, posts_count, last_post_id, last_post_at, locked, pinned,
-// first_post_pinned, created, request_id (+ author_name, is_character if present).
+// first_post_pinned, created, request_id (+ author DTO, is_character if present).
 // Carries essential metadata so topic open does not require the heavy ~1.2 KB full
 // topic read, while shedding heavy author/last_post decoration.
 func getTopicStatsHandler(e *core.RequestEvent) error {
@@ -716,7 +716,6 @@ func getTopicStatsHandler(e *core.RequestEvent) error {
 	if authorID != "" {
 		displays := loadAuthorDisplays(e.App, []string{authorID})
 		if d, ok := displays[authorID]; ok {
-			payload["author_name"] = d.Nickname
 			if dto, ok := payload["author"].(map[string]any); ok && dto != nil {
 				dto["display_name"] = d.Nickname
 				dto["avatar_url"] = d.AvatarURL
@@ -724,7 +723,9 @@ func getTopicStatsHandler(e *core.RequestEvent) error {
 			if d.IsDeleted {
 				// A deleted opener keeps the baked account name: no mask may
 				// rename it (see decoratePostAuthor — same rule, same reason).
-				payload["author_deleted"] = true
+				if dto, ok := payload["author"].(map[string]any); ok && dto != nil {
+					dto["deleted"] = true
+				}
 			}
 		}
 		if charID := topic.GetString("author_character_id"); charID != "" {
@@ -732,7 +733,6 @@ func getTopicStatsHandler(e *core.RequestEvent) error {
 			if mask, ok := masks[charID]; ok && mask.OwnerID == authorID {
 				// The mask is baked, so a deleted opener still renders under
 				// it (see decoratePostAuthor — same rule, same reason).
-				payload["author_name"] = mask.Name
 				payload["is_character"] = true
 				if dto, ok := payload["author"].(map[string]any); ok && dto != nil {
 					dto["display_name"] = mask.Name
@@ -743,12 +743,8 @@ func getTopicStatsHandler(e *core.RequestEvent) error {
 		}
 	} else {
 		// Guest topic: the chosen display name travels in guest_display_name
-		// (AuthorRef columns, migration 1770000000). Carry it so the topic
-		// page header can render the guest's name without the heavy full
-		// topic read.
-		if name := topic.GetString("guest_display_name"); name != "" {
-			payload["author_name"] = name
-		}
+		// (AuthorRef columns, migration 1770000000) and already lives in the
+		// nested DTO (authorDTOFromRecord) — no flat key needed.
 	}
 
 	return e.JSON(http.StatusOK, payload)

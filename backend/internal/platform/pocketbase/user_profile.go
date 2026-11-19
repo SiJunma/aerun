@@ -50,7 +50,7 @@ func getUserProfileHandler(e *core.RequestEvent) error {
 	// THE PUBLIC PART OF `settings` is a whitelist of exactly three keys.
 	//
 	// `signature` belongs here because it is already PUBLIC: forum_authors.go
-	// stamps it onto every post as `author_signature` for every reader, so
+	// stamps it onto every post in the author DTO (`author.signature`) for every reader, so
 	// hiding it from a profile page would make the forum contradict itself. It
 	// lives inside `settings` only for legacy reasons (see migration
 	// 1766900000), which is no reason to ship the rest of the object with it.
