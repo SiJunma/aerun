@@ -169,7 +169,7 @@ export const useTopicMutations = ({
     } finally {
       setSubmittingRep(false);
     }
-  }, [currentUser?.uid, topicId, recordActivity, showToast]);
+  }, [currentUser?.uid, topicId, recordActivity, showToast, t]);
 
   // Edit reputation comment
   const editRepComment = useCallback(async (voteId, newComment) => {
@@ -181,7 +181,7 @@ export const useTopicMutations = ({
       showToast?.(err.message || 'Failed to update reputation comment', 'danger');
       throw err;
     }
-  }, [showToast]);
+  }, [showToast, t]);
 
   return {
     submittingPost,

@@ -448,6 +448,13 @@ func publishDraftHandler(e *core.RequestEvent) error {
 			return 0, nil, err
 		}
 
+		// The nudge for the topic itself, in the same transaction as the
+		// publication — the same call createPostHandler makes. Without it a
+		// draft published into a topic never wakes the main page or the
+		// readers in the topic: their only source of news is the poll that
+		// runs while the stream is dead, and a healthy stream never polls.
+		publishTopicSignal(txApp, topic)
+
 		// The published post rides back DECORATED, exactly like a createPost
 		// answer. The raw payload carries no author_name/is_character — the read
 		// model resolves those — so an undecorated response made the client

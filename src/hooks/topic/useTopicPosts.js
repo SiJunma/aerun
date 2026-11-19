@@ -17,7 +17,7 @@ export const useTopicPosts = ({
   navigate,
   showToast,
   currentUser,
-  currentProfile,
+  setProfile,
   readMap,
   initialVisitMap,
   updateLocalTopicLastPost,
@@ -245,6 +245,26 @@ export const useTopicPosts = ({
           setPinnedFirstPost(pinnedPost);
         }
 
+        // Reconcile the signed-in member's own post count from the server,
+        // the same way authorStats is reconciled below. profile.post_count
+        // is otherwise maintained ONLY by optimistic +/-1 in TopicPage, so a
+        // rapid create+delete can leave it one short of the server until a
+        // reload (B-05). Math.max, not the raw server value: a post created
+        // locally but not yet in this server list must not make the counter
+        // flicker down by one.
+        if (typeof setProfile === 'function' && currentUser?.uid) {
+          let ownServerPostCount = null;
+          data.forEach(p => {
+            if (p.author?.user_id === currentUser.uid) {
+              const c = p.author?.posts_count ?? 0;
+              ownServerPostCount = ownServerPostCount === null ? c : Math.max(ownServerPostCount, c);
+            }
+          });
+          if (ownServerPostCount !== null) {
+            setProfile(prev => (prev ? { ...prev, post_count: Math.max(ownServerPostCount, prev.post_count || 0) } : prev));
+          }
+        }
+
         setAuthorStats(prev => {
           const next = { ...prev };
           data.forEach(p => {
@@ -300,11 +320,12 @@ export const useTopicPosts = ({
     navigate,
     showToast,
     currentUser?.uid,
-    currentProfile?.created_at,
+    setProfile,
     readMap,
     initialVisitMap,
     updateLocalTopicLastPost,
-    topicRef
+    topicRef,
+    t
   ]);
 
   return {

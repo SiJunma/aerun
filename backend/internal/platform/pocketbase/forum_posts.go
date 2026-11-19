@@ -827,6 +827,13 @@ func editPostHandler(e *core.RequestEvent) error {
 			}
 		}
 
+		// The nudge for the topic itself, in the same transaction as the edit.
+		// An edit moves no counter and no last-post id, so without this no
+		// reader learns about it — not even the stats poll, whose freshness
+		// key never moves on an edit — and the edited text stays invisible
+		// until a reload.
+		publishTopicSignal(txApp, topic)
+
 		// Decorated for the same reason publishDraftHandler's is: TopicPage renders
 		// the edited card from this answer, and a raw payload has no
 		// author_name/is_character, so a mask change would appear to do nothing

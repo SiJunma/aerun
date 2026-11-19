@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components, react-hooks/set-state-in-effect */
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { translations } from '../i18n/dictionary.js';
 import {
   SUPPORTED_LANGUAGE_CODES,
@@ -46,7 +46,12 @@ export const I18nProvider = ({ children }) => {
     }
   };
 
-  const t = (path, params = {}, fallback = null) => {
+  // `t` is stable per language: it only reads the static dictionary and the
+  // current `lang`. Without the memo the provider hands out a new `t` on
+  // every render — and this provider re-renders whenever the auth value
+  // changes (profile, unread counts, forum stats), which would churn every
+  // downstream callback that lists `t` in its deps.
+  const t = useCallback((path, params = {}, fallback = null) => {
     let fallbackText = null;
     let actualParams = params;
 
@@ -95,7 +100,7 @@ export const I18nProvider = ({ children }) => {
     // Never return a nested translation object as a React child — that would
     // throw "Objects are not valid as a React child". Fall back to the path.
     return fallbackText || path;
-  };
+  }, [lang]);
 
   const value = {
     lang,

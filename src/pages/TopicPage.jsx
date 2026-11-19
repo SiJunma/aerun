@@ -1586,9 +1586,17 @@ export default function TopicPage() {
       return;
     }
 
+    const currentPostsCount = Number(topic?.posts_count || 0);
+    // A SHRINKING count is a deletion, and the last_post_id guard below must
+    // not swallow it: deleting a post that is not the last one leaves
+    // last_post_id unchanged and already rendered, so the old guard returned
+    // without ever re-reading the list — the deleted post stayed on screen
+    // until a reload. Only skip the refetch when the count did NOT shrink.
+    const isCountShrank = currentPostsCount < prevPostsCount;
     // If the server's newest last_post_id is ALREADY rendered on this page (e.g. reconciled
-    // from our own submit onSuccess), there is nothing new to re-fetch from the server.
-    if (topic.last_post_id && postsRef.current.some((p) => p.id === topic.last_post_id)) {
+    // from our own submit onSuccess), there is nothing new to re-fetch from the server —
+    // unless the count shrank, which means a post was deleted.
+    if (!isCountShrank && topic.last_post_id && postsRef.current.some((p) => p.id === topic.last_post_id)) {
       return;
     }
 
@@ -1596,7 +1604,6 @@ export default function TopicPage() {
     // but NEVER scroll the viewport — the reader stays exactly where they
     // were. Browser scroll anchoring keeps the composer/caret stable when
     // content is inserted above it.
-    const currentPostsCount = Number(topic?.posts_count || 0);
     const isForeignPostArrived = currentPostsCount > prevPostsCount;
     if (isForeignPostArrived) {
       const isSoundEnabled = profile?.settings?.sound?.enabled !== false;

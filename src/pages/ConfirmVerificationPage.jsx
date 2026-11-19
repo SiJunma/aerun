@@ -17,7 +17,7 @@ const ConfirmVerificationPage = () => {
 
   useEffect(() => {
     setPageTitle(t('forum.email_verification'));
-  }, [setPageTitle, lang]);
+  }, [setPageTitle, lang, t]);
 
   useEffect(() => {
     if (!token) return;
@@ -41,7 +41,7 @@ const ConfirmVerificationPage = () => {
     return () => {
       alive = false;
     };
-  }, [token]);
+  }, [token, t]);
 
   return (
     <Container className="d-flex align-items-center justify-content-center min-vh-100 py-5">

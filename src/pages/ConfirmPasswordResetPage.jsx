@@ -19,7 +19,7 @@ const ConfirmPasswordResetPage = () => {
 
   useEffect(() => {
     setPageTitle(t('forum.reset_password'));
-  }, [setPageTitle, lang]);
+  }, [setPageTitle, lang, t]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();

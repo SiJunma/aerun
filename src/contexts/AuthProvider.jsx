@@ -80,20 +80,19 @@ export const AuthProvider = ({ children }) => {
   // forum read that the member phase then has to duplicate or cancel.
   const [restored, setRestored] = useState(false);
 
-  // Debounce guard for refreshUnreadCounts & refreshUnreadTopics: rapid successive reads
-  // (markTopicRead after a reply, then markAllRead, then notification mark-read)
-  // collapse into a single network request instead of firing one per call.
-  const refreshUnreadCountsTimerRef = useRef(null);
-  const debouncedRefreshUnreadCounts = useCallback((uid) => {
+  // Refresh the unread counters right away, with NO debounce of our own.
+  // The 250ms debounce that used to stand here pushed the mark-read refresh
+  // outside shared-poll's own 250ms coalesce window, so one action paid for
+  // two GET /me/unread-counts: the signal-driven one and this one, 250ms+
+  // apart. Both resources coalesce on their own — refreshUnreadCounts goes
+  // through the shared dm-unread resource's requestRefresh, refreshUnreadTopics
+  // through each unread-topics poll's refresh — so rapid successive reads
+  // (markTopicRead after a reply, then markAllRead, then notification
+  // mark-read) still collapse into a single network request each.
+  const refreshUnreadCountersNow = useCallback((uid) => {
     if (!uid) return;
-    if (refreshUnreadCountsTimerRef.current) {
-      clearTimeout(refreshUnreadCountsTimerRef.current);
-    }
-    refreshUnreadCountsTimerRef.current = setTimeout(() => {
-      refreshUnreadCountsTimerRef.current = null;
-      refreshUnreadCounts(uid);
-      refreshUnreadTopics();
-    }, 250);
+    refreshUnreadCounts(uid);
+    refreshUnreadTopics();
   }, []);
 
   // canPostGlobally mirrors the backend's AccessContext.CanPostGlobally():
@@ -442,7 +441,7 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     if (!restored || !user?.uid) return;
     migrateLegacyReadMap(user.uid);
-  }, [restored, user?.uid, migrateLegacyReadMap]);
+  }, [restored, user?.uid]);
 
   // Legacy guest-storage migration: once the session has settled, copy any
   // values left under the old unscoped keys (guest_id, guest_theme, language,
@@ -453,7 +452,7 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     if (!restored) return;
     migrateLegacyGuestStorage();
-  }, [restored, migrateLegacyGuestStorage]);
+  }, [restored]);
 
   // Presence and DM subscriptions. A signed-in visitor beats as a member; an
   // anonymous one beats as a guest so the stats panel can count them.
@@ -1238,12 +1237,23 @@ export const AuthProvider = ({ children }) => {
           }
         },
         () => {
+          // The stream is dead, so polling takes over — but its first tick is
+          // 60s out, and a member who just lost realtime should not wait a
+          // minute for freshness. Re-read once, now; the interval covers the
+          // ticks after that. refreshForumState is in-flight-guarded, so a
+          // second dead report for the same drop costs a queued re-read, not
+          // a storm.
+          refreshForumState(true, false);
           startFallbackPolling();
         },
         (connected) => {
           if (connected) {
             stopFallbackPolling();
           } else {
+            // Same catch-up as onDead: the SDK reported the drop, so the
+            // member is already on polling terms — do not make them wait for
+            // the first 60s tick.
+            refreshForumState(true, false);
             startFallbackPolling();
           }
         }
@@ -1362,10 +1372,10 @@ export const AuthProvider = ({ children }) => {
 
     // The server state already moved, but the navbar badge, the tab title and
     // the /new-replies tab render the last POLLED values (15s / 20s ticks).
-    // debouncedRefreshUnreadCounts collapses unread-counts and unread-topics
-    // refreshes into a single 250ms debounced window.
-    debouncedRefreshUnreadCounts(user.uid);
-  }, [user?.uid, debouncedRefreshUnreadCounts]);
+    // Re-read them now; the shared resources coalesce, so this costs one
+    // request even when a signal-driven refresh is already pending.
+    refreshUnreadCountersNow(user.uid);
+  }, [user?.uid, refreshUnreadCountersNow]);
 
   // markAllRead sends the ids to the server, which owns the read state now.
   //
@@ -1413,11 +1423,11 @@ export const AuthProvider = ({ children }) => {
       apiRecordAllTopicVisits(user.uid, ids);
       // Same staleness as the single read above: the badge counts the whole
       // board server-side, so re-read it instead of waiting for the next tick.
-      debouncedRefreshUnreadCounts(user.uid);
+      refreshUnreadCountersNow(user.uid);
     } finally {
       setIsMarkingAllRead(false);
     }
-  }, [user?.uid, isMarkingAllRead, debouncedRefreshUnreadCounts]);
+  }, [user?.uid, isMarkingAllRead, refreshUnreadCountersNow]);
 
   // Permission checks.
   //
