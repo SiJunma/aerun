@@ -75,20 +75,26 @@ export const TopicPostCard = ({
                 <Skeleton width="60%" height="0.875rem" />
               </div>
               <div className="post-author__avatar">
-                <Skeleton width={150} height={150} variant="avatar" />
+                {/* Размер аватара — только из CSS (.post-author__avatar-skeleton:
+                    150px на десктопе, 70px на мобиле, как живой аватар).
+                    Инлайн 150×150 не слушается медиазапросов и на мобиле
+                    раздувал колонку аватара в огромную плашку. */}
+                <Skeleton variant="avatar" className="post-author__avatar-skeleton" />
               </div>
               <dl className="post-author__meta">
                 <div className="post-author__meta-row">
-                  <Skeleton width="45%" height="1rem" />
-                  <Skeleton width="22%" height="1rem" />
+                  {/* Ширины в px: на мобиле dl живёт в auto-колонке грида
+                      автора, и полоски в % там схлопываются в ноль. */}
+                  <Skeleton width={64} height="1rem" />
+                  <Skeleton width={36} height="1rem" />
                 </div>
                 <div className="post-author__meta-row">
-                  <Skeleton width="45%" height="1rem" />
-                  <Skeleton width="22%" height="1rem" />
+                  <Skeleton width={64} height="1rem" />
+                  <Skeleton width={36} height="1rem" />
                 </div>
               </dl>
               <div className="post-author__role">
-                <Skeleton width="30%" height="1rem" />
+                <Skeleton width={84} height="1rem" />
               </div>
             </div>
           </aside>
@@ -105,13 +111,18 @@ export const TopicPostCard = ({
             </div>
             <footer className="post-footer">
               <div className="post-footer__links">
-                {/* Контейнеры flex: 0 0 auto — ширина под контент, полоски в %
-                    схлопываются в ноль, поэтому ширина в px. */}
-                <Skeleton width={120} height="1.5rem" />
+                {/* Кнопки — отдельными квадратиками, а не одной сплошной
+                    полоской: в живом футере это отдельные кнопки (на мобиле
+                    только иконки 16px), а отступы между ними даёт gap
+                    контейнера. Размер — из CSS (.post-footer__btn-skeleton). */}
+                <Skeleton className="post-footer__btn-skeleton" />
+                <Skeleton className="post-footer__btn-skeleton" />
               </div>
               <div className="post-footer__spacer" />
               <div className="post-footer__actions">
-                <Skeleton width={100} height="1.5rem" />
+                <Skeleton className="post-footer__btn-skeleton" />
+                <Skeleton className="post-footer__btn-skeleton" />
+                <Skeleton className="post-footer__btn-skeleton" />
               </div>
             </footer>
           </div>
@@ -466,15 +477,15 @@ export const TopicPostCard = ({
                   </Link>
                 )}
                 {canDm && onOpenDm && (
-                  <a
+                  <Link
                     className="footer-link footer-link--icon"
-                    href={`/messages/${authorId}`}
+                    to={`/messages/${authorId}`}
                     data-discover="true"
                     onClick={() => onOpenDm(authorId)}
                   >
                     <MessageCircle size={16} />
                     <span className="footer-link__label">{t('forum.pm_label')}</span>
-                  </a>
+                  </Link>
                 )}
               </div>
               <div className="post-footer__spacer" />

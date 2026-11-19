@@ -1207,6 +1207,23 @@
   object-fit: cover;
 }
 
+/* --- Сайдбар: скелетон аватара — тот же размер, что у живого аватара:
+   150px на десктопе, 70px на мобиле (см. медиазапрос ниже). Размер только
+   из CSS: инлайн width/height не слушаются медиазапросов. --- */
+.post-author__avatar-skeleton {
+  width: 150px;
+  height: 150px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+/* --- Футер поста: скелетон кнопок — отдельные квадратики с отступами
+   (отступы даёт gap контейнеров), а не одна сплошная полоска. На десктопе
+   кнопки текстовые, поэтому полоски шире; на мобиле — только иконки 16px. --- */
+.post-footer__btn-skeleton {
+  width: 48px;
+  height: 1rem;
+}
+
 /* --- Реп-строка: левый слот дайсов --- */
 .post-dice-slot {
   display: flex;
@@ -1263,6 +1280,16 @@
     width: 70px;
     display: flex;
     justify-content: flex-start;
+  }
+
+  .post-author__avatar-skeleton {
+    width: 70px;
+    height: 70px;
+  }
+
+  .post-footer__btn-skeleton {
+    width: 20px;
+    height: 20px;
   }
 
   .post-author__name {
