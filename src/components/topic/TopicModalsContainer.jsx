@@ -146,28 +146,28 @@ export const TopicModalsContainer = ({
       >
         {selectedVote && (
           <div className="vote-info-modal">
-            <div className="d-flex justify-content-between align-items-start mb-3">
+            <div className="topic-flex-between-start topic-mb-3">
               <div>
-                <div className="fw-bold">{t('forum.your_vote')}</div>
-                <span className={`topic-badge topic-badge--${selectedVote.value > 0 ? 'success' : 'danger'} fs-5 mt-1`}>
+                <div className="topic-text-bold">{t('forum.your_vote')}</div>
+                <span className={`topic-badge topic-badge--${selectedVote.value > 0 ? 'success' : 'danger'} topic-text-sm topic-mt-1`}>
                   {selectedVote.value > 0 ? `+${selectedVote.value}` : selectedVote.value}
                 </span>
               </div>
-              <div className="text-end">
-                <div className="small text-muted">{t('forum.vote_date')}</div>
-                <div className="fw-bold">
+              <div className="topic-text-center">
+                <div className="topic-text-sm topic-text-muted">{t('forum.vote_date')}</div>
+                <div className="topic-text-bold">
                   <Timestamp date={selectedVote.created_at} />
                 </div>
               </div>
             </div>
 
             <div>
-              <div className="d-flex justify-content-between align-items-center mb-2">
-                <div className="small text-muted">{t('forum.vote_comment')}</div>
+              <div className="topic-flex-between topic-mb-2">
+                <div className="topic-text-sm topic-text-muted">{t('forum.vote_comment')}</div>
                 {(selectedVote.voter_id === currentUserId || !selectedVote.voter_id) && !isEditingRepComment && (
                   <button
                     type="button"
-                    className="topic-btn topic-btn--link p-0 text-decoration-none small"
+                    className="topic-btn topic-btn--link topic-text-sm"
                     onClick={() => {
                       setEditingRepComment(selectedVote.comment || '');
                       setIsEditingRepComment(true);
@@ -179,15 +179,15 @@ export const TopicModalsContainer = ({
               </div>
 
               {isEditingRepComment ? (
-                <div className="modal-inner-card p-3 border-start border-4 border-accent">
+                <div className="modal-inner-card">
                   <textarea
-                    className="topic-textarea modal-section-themed mb-2"
+                    className="topic-textarea modal-section-themed topic-mb-2"
                     rows={2}
                     value={editingRepComment}
                     onChange={(e) => setEditingRepComment(e.target.value)}
                     placeholder={t('forum.vote_comment_placeholder')}
                   />
-                  <div className="d-flex justify-content-end gap-2">
+                  <div className="topic-flex-end topic-gap-2">
                     <button
                       type="button"
                       className="topic-btn topic-btn--secondary topic-btn-sm"
@@ -207,13 +207,13 @@ export const TopicModalsContainer = ({
                   </div>
                 </div>
               ) : (
-                <div className="modal-inner-card p-3 border-start border-4 border-accent min-h-60px">
-                  {selectedVote.comment || <span className="opacity-50 italic">{t('forum.vote_no_comment')}</span>}
+                <div className="modal-inner-card min-h-60px">
+                  {selectedVote.comment || <span className="topic-opacity-50 topic-italic">{t('forum.vote_no_comment')}</span>}
                 </div>
               )}
             </div>
 
-            <div className="small text-muted opacity-75 italic text-center mt-2">
+            <div className="topic-text-sm topic-text-muted topic-opacity-75 topic-italic topic-text-center topic-mt-2">
               {t('forum.vote_contributed')}
             </div>
           </div>

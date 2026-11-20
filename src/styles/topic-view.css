@@ -755,24 +755,6 @@
   font-weight: var(--topic-reply-label-weight);
 }
 
-.topic-reply__input {
-  width: 100%;
-  padding: 0.375rem 0.75rem;
-  font-size: 1rem;
-  line-height: 1.5;
-  color: var(--text-color);
-  background-color: var(--input-bg);
-  border: 1px solid var(--input-border);
-  border-radius: 0.375rem;
-  transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
-}
-
-.topic-reply__input:focus {
-  outline: none;
-  border-color: var(--primary-color);
-  box-shadow: 0 0 0 0.25rem rgba(var(--primary-rgb), 0.25);
-}
-
 .topic-reply__mask-wrap {
   flex: 1;
   min-width: 0;
@@ -899,18 +881,74 @@
   font-size: var(--topic-reply-label-size);
 }
 
-.topic-post-editor__mask-row {
+/* PostInlineEditor — field rows (label + input/select) */
+.topic-post-editor__field-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 0.5rem;
   margin-bottom: var(--topic-post-editor-mask-row-margin-bottom);
+  flex-wrap: wrap;
 }
 
-.topic-post-editor__mask-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
+.topic-post-editor__field-row > label {
+  flex: 0 0 auto;
   white-space: nowrap;
-  max-width: var(--topic-post-editor-mask-text-max-width);
+}
+
+.topic-post-editor__field-row > input,
+.topic-post-editor__field-row > select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Input — mirrors .topic-reply__input */
+.topic-post-editor__input {
+  width: 100%;
+  padding: 0.375rem 0.75rem;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--text-color);
+  background-color: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 0.375rem;
+  transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+.topic-post-editor__input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 0.25rem rgba(var(--primary-rgb), 0.25);
+}
+
+/* Mask select — mirrors .topic-reply__mask-select */
+.topic-post-editor__mask-select {
+  width: 100%;
+  max-width: var(--topic-reply-mask-toggle-max-width);
+  padding: 0.375rem 2rem 0.375rem 0.75rem;
+  font-size: var(--topic-reply-label-size);
+  line-height: 1.5;
+  color: var(--text-color);
+  background-color: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 0.375rem;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23343a40' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M2 5l6 6 6-6'/%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 0.5rem center;
+  background-size: 16px 12px;
+}
+
+/* Mask wrap — prevents collapsing */
+.topic-post-editor__mask-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Checkbox */
+.topic-post-editor__checkbox {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--primary-color);
 }
 
 .topic-post-editor__actions {
@@ -994,6 +1032,17 @@
   font-size: 0.8125rem;
 }
 
+/* Hotkeys button — hidden on mobile (keyboard shortcuts not applicable) */
+.topic-btn--hotkeys {
+  display: inline-flex;
+}
+
+@media (max-width: 767.98px) {
+  .topic-btn--hotkeys {
+    display: none;
+  }
+}
+
 .topic-badge {
   display: inline-flex;
   align-items: center;
@@ -1040,6 +1089,94 @@
 
 .min-h-60px {
   min-height: 60px;
+}
+
+/* Semantic utility classes for modals (replacing Bootstrap utilities) */
+.topic-flex-between {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.topic-flex-between-start {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.topic-flex-end {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.topic-text-bold {
+  font-weight: 700;
+}
+
+.topic-text-sm {
+  font-size: 0.875rem;
+}
+
+.topic-text-muted {
+  color: var(--secondary-color);
+}
+
+.topic-text-center {
+  text-align: center;
+}
+
+.topic-gap-2 {
+  gap: 0.5rem;
+}
+
+.topic-gap-1 {
+  gap: 0.25rem;
+}
+
+.topic-mb-1 {
+  margin-bottom: 0.25rem;
+}
+
+.topic-mb-2 {
+  margin-bottom: 0.5rem;
+}
+
+.topic-mb-3 {
+  margin-bottom: 1rem;
+}
+
+.topic-mt-1 {
+  margin-top: 0.25rem;
+}
+
+.topic-mt-2 {
+  margin-top: 0.5rem;
+}
+
+.topic-opacity-50 {
+  opacity: 0.5;
+}
+
+.topic-opacity-75 {
+  opacity: 0.75;
+}
+
+.topic-italic {
+  font-style: italic;
+}
+
+/* Modal inner card — replaces Bootstrap p-3/border-start/border-4/border-accent */
+.modal-inner-card {
+  padding: 1rem;
+  border-left: 4px solid var(--primary-color);
+}
+
+.modal-section-themed {
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 0.375rem;
+  padding: 1rem;
 }
 
 @media (min-width: 768px) {

@@ -15,7 +15,7 @@ import { resolveAvatarUrl } from '../../api/avatars';
 const RichEditor = forwardRef(({
   value, onChange, placeholder, rows = 6, minHeight, maxHeight, id = 'rich-editor',
   maxLength, autoFocus, showDice = false, isEdit = false, hideDiceType = false,
-  showHide = true, smilesDropDirection = "up", smilesFullWidth = true, onSubmit,
+  showHide = true, _smilesDropDirection = "up", _smilesFullWidth = true, onSubmit,
   hideHotkeysButton = false, hideFooter = false, autoResize = false
 }, ref) => {
   const { t } = useI18n();
@@ -820,17 +820,16 @@ const handleUserSearch = async (queryText) => {
           </div>
         );
       case 'smiles':
-        return isOverflow ? (
-          <Dropdown.Item onClick={() => setShowSmilesModal(true)} className="d-flex align-items-center gap-2 py-2 px-3">
-             <Smile size={16} /> {t('editor.smiles')}
-          </Dropdown.Item>
-        ) : (
-          <Dropdown className="d-inline-block" drop={smilesDropDirection}>
-            <Dropdown.Toggle variant="light" size="sm" className="p-1 px-2 no-caret editor-dropdown-toggle" title="Smiles"><Smile size={16} /></Dropdown.Toggle>
-            <Dropdown.Menu className="smiles-picker-menu p-0 shadow border-0" style={{ width: smilesFullWidth ? `${editorWidth}px` : '320px', zIndex: 3500 }}>
-              <SmilesPicker onSelect={(code) => insertText(code, '')} />
-            </Dropdown.Menu>
-          </Dropdown>
+        return (
+          <Button
+            variant="light"
+            size="sm"
+            className="p-1 px-2 no-caret editor-dropdown-toggle"
+            title={t('editor.smiles')}
+            onClick={() => setShowSmilesModal(true)}
+          >
+            <Smile size={16} />
+          </Button>
         );
       case 'links':
         return isOverflow ? (

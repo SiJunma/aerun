@@ -40,9 +40,9 @@ export const PostInlineEditor = ({
   return (
     <div className="topic-post-editor pb-3">
       {isFirstPost && !isDraft && (
-        <div className="topic-post-editor__field mb-3">
-          <div className="topic-post-editor__field-row mb-2">
-            <label className="topic-post-editor__label fw-semibold small">
+        <div className="topic-post-editor__field">
+          <div className="topic-post-editor__field-row">
+            <label className="topic-post-editor__label">
               {t('forum.topic_title_label')}
             </label>
             <input
@@ -54,8 +54,8 @@ export const PostInlineEditor = ({
               required
             />
           </div>
-          <div className="topic-post-editor__field-row mb-2">
-            <label className="topic-post-editor__label fw-semibold small">
+          <div className="topic-post-editor__field-row">
+            <label className="topic-post-editor__label">
               {t('forum.topic_description_label')}
             </label>
             <input
@@ -68,7 +68,7 @@ export const PostInlineEditor = ({
             />
           </div>
           {setEditPinFirstPost && (
-            <div className="topic-post-editor__pin mt-2">
+            <div className="topic-post-editor__pin">
               <input
                 type="checkbox"
                 id="editPinFirstPost"
@@ -76,7 +76,7 @@ export const PostInlineEditor = ({
                 checked={editPinFirstPost}
                 onChange={(e) => setEditPinFirstPost(e.target.checked)}
               />
-              <label htmlFor="editPinFirstPost" className="ms-2">
+              <label htmlFor="editPinFirstPost">
                 {t('forum.pin_first_post')}
               </label>
             </div>
@@ -84,18 +84,18 @@ export const PostInlineEditor = ({
         </div>
       )}
 
-      <div className="topic-post-editor__field mb-2">
-        <div className="d-flex align-items-center justify-content-between mb-2">
+      <div className="topic-post-editor__field">
+        <div className="topic-post-editor__field-row">
           {/* Mask re-filing is the AUTHOR's decision: the server ignores the
               character_id of a non-author edit, so the picker is hidden for
               moderated edits of other members' posts. */}
           {canUseMasks && canChangeMask && (
-            <div className="topic-post-editor__mask-wrap w-auto">
-              <label className="topic-post-editor__label d-flex align-items-center gap-2" htmlFor="edit-mask-select">
-                <User size={14} />
+            <div className="topic-post-editor__mask-wrap">
+              <label className="topic-post-editor__label" htmlFor="edit-mask-select">
+                <User size={14} className="me-1" />
                 <select
                   id="edit-mask-select"
-                  className="topic-post-editor__mask-select text-truncate"
+                  className="topic-post-editor__mask-select"
                   value={editCharacterId}
                   onChange={(e) => setEditCharacterId?.(e.target.value)}
                 >
@@ -114,7 +114,7 @@ export const PostInlineEditor = ({
 
           <button
             type="button"
-            className="topic-btn topic-btn--accent ms-auto d-none d-md-flex align-items-center"
+            className="topic-btn topic-btn--accent topic-btn--hotkeys"
             onClick={() => editorRef.current?.openHotkeysModal()}
             title={t('forum.hotkeys')}
           >
@@ -138,7 +138,7 @@ export const PostInlineEditor = ({
         />
       </div>
 
-      <div className="topic-post-editor__actions d-flex gap-2">
+      <div className="topic-post-editor__actions">
         <button
           type="button"
           className={`topic-btn topic-btn--${isDraft ? 'secondary' : 'primary'} topic-btn-sm`}

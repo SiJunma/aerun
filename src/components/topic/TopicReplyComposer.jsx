@@ -89,7 +89,7 @@ export const TopicReplyComposer = React.forwardRef(({
     );
   }
 
-  const canUseMasks = user && hasPermission(PERMISSIONS.USE_MASKS, { category });
+  const canUseMasks = user && hasPermission(PERMISSIONS.USE_MASKS, { category }) && (settings?.enableCharacters !== false);
 
   return (
     <div className="mt-5" ref={ref} id="reply-composer-form">
@@ -141,17 +141,15 @@ export const TopicReplyComposer = React.forwardRef(({
                   </select>
                 </div>
               )}
-              {user && (
-                <button
-                  type="button"
-                  className="topic-btn topic-btn--accent d-none d-md-flex align-items-center gap-2"
-                  onClick={() => replyEditorRef.current?.openHotkeysModal()}
-                  title={t('forum.hotkeys')}
-                >
-                  <Keyboard size={18} />
-                  <span className="d-none d-md-inline small">{t('forum.help')}</span>
-                </button>
-              )}
+              <button
+                type="button"
+                className="topic-btn topic-btn--accent topic-btn--hotkeys"
+                onClick={() => replyEditorRef.current?.openHotkeysModal()}
+                title={t('forum.hotkeys')}
+              >
+                <Keyboard size={18} />
+                <span>{t('forum.help')}</span>
+              </button>
             </div>
 
             <div className="topic-reply__field">
