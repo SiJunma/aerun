@@ -17,7 +17,7 @@ export const useTopicPosts = ({
   navigate,
   showToast,
   currentUser,
-  currentProfile,
+  setProfile,
   readMap,
   initialVisitMap,
   updateLocalTopicLastPost,
@@ -47,7 +47,7 @@ export const useTopicPosts = ({
     };
   }, []);
 
-  const loadPosts = useCallback(async (overridePage) => {
+  const loadPosts = useCallback(async (overridePage, silent = false) => {
     setPostsLoadError(null);
     const hasPageParam = searchParams.has('page');
     const isGoLast = searchParams.get('goLast') === '1';
@@ -97,6 +97,11 @@ export const useTopicPosts = ({
 
     const currentFetchId = ++activeFetchIdRef.current;
     isFetchingPostsRef.current = pageToFetch;
+    // Каждая новая загрузка страницы — Loading-состояние: скелетон вместо
+    // постов старой страницы, пока не пришёл ответ (F-01, F-04).
+    // Тихая перезагрузка (приход чужого поста на той же странице) не мигает
+    // скелетоном: страница остаётся на экране (stale-while-revalidate).
+    if (!silent && isMountedRef.current) setIsPageLoading(true);
 
     const performFetch = async () => {
       try {
@@ -142,13 +147,7 @@ export const useTopicPosts = ({
       }
 
       if (lastPost && topicRef?.current) {
-        updateLocalTopicLastPost?.(
-          topicId,
-          topicRef.current.category_id,
-          topicRef.current.title,
-          lastPost,
-          topicRef.current.posts_count
-        );
+        updateLocalTopicLastPost?.(topicId);
       }
 
       if (targetPostId) {
@@ -240,6 +239,26 @@ export const useTopicPosts = ({
           setPinnedFirstPost(pinnedPost);
         }
 
+        // Reconcile the signed-in member's own post count from the server,
+        // the same way authorStats is reconciled below. profile.post_count
+        // is otherwise maintained ONLY by optimistic +/-1 in TopicPage, so a
+        // rapid create+delete can leave it one short of the server until a
+        // reload (B-05). Math.max, not the raw server value: a post created
+        // locally but not yet in this server list must not make the counter
+        // flicker down by one.
+        if (typeof setProfile === 'function' && currentUser?.uid) {
+          let ownServerPostCount = null;
+          data.forEach(p => {
+            if (p.author?.user_id === currentUser.uid) {
+              const c = p.author?.posts_count ?? 0;
+              ownServerPostCount = ownServerPostCount === null ? c : Math.max(ownServerPostCount, c);
+            }
+          });
+          if (ownServerPostCount !== null) {
+            setProfile(prev => (prev ? { ...prev, post_count: Math.max(ownServerPostCount, prev.post_count || 0) } : prev));
+          }
+        }
+
         setAuthorStats(prev => {
           const next = { ...prev };
           data.forEach(p => {
@@ -249,13 +268,13 @@ export const useTopicPosts = ({
               const postCount = p.author?.user_id === currentUser?.uid
                 ? Math.max(serverPostCount, cachedPostCount)
                 : serverPostCount || cachedPostCount;
-              const sig = p.author_signature || p.signature || p.settings?.signature || '';
+              const sig = p.author?.signature || '';
               next[p.author?.user_id] = {
                 ...(next[p.author?.user_id] || {}),
                 post_count: postCount,
                 reputation: p.author?.reputation ?? next[p.author?.user_id]?.reputation ?? 0,
-                status_line: p.author_status_line !== undefined ? p.author_status_line : (next[p.author?.user_id]?.status_line ?? ''),
-                role: p.author_role_id || next[p.author?.user_id]?.role || 'player',
+                status_line: p.author?.status_line ?? next[p.author?.user_id]?.status_line ?? '',
+                role: p.author?.role || next[p.author?.user_id]?.role || 'player',
                 settings: sig
                   ? { ...(next[p.author?.user_id]?.settings || {}), signature: sig }
                   : (next[p.author?.user_id]?.settings || { signature: '' })
@@ -295,11 +314,12 @@ export const useTopicPosts = ({
     navigate,
     showToast,
     currentUser?.uid,
-    currentProfile?.created_at,
+    setProfile,
     readMap,
     initialVisitMap,
     updateLocalTopicLastPost,
-    topicRef
+    topicRef,
+    t
   ]);
 
   return {

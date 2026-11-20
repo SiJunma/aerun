@@ -80,34 +80,9 @@ func TestDeletedAccountKeepsItsMaskInPosts(t *testing.T) {
 		if !ok {
 			continue
 		}
-		if got, _ := p["author_name"].(string); got != "Rough" {
-			t.Errorf("author_name = %q, want the mask name %q — a deleted account must not erase the mask", got, "Rough")
-		}
-		if isChar, _ := p["is_character"].(bool); !isChar {
-			t.Error("is_character must stay true — the post was published under the mask")
-		}
-		if got, _ := p["author_character_id"].(string); got != fixRoughMaskID {
-			t.Errorf("author_character_id = %q, want %q", got, fixRoughMaskID)
-		}
-		// The other three fields of the mask travel with the name: the status
-		// line, the avatar and the signature.
-		if got, _ := p["author_status_line"].(string); got != "Wanderer of the North" {
-			t.Errorf("author_status_line = %q, want the mask's status line", got)
-		}
-		if got, _ := p["author_avatar"].(string); got != "/api/files/mask-avatar.png" {
-			t.Errorf("author_avatar = %q, want the mask's avatar", got)
-		}
-		if got, _ := p["author_signature"].(string); got != "A signature that belongs to the mask" {
-			t.Errorf("author_signature = %q, want the mask's signature", got)
-		}
-		// The ACCOUNT is still gone: the mask is a display layer, not a
-		// resurrection.
-		if got, _ := p["author_deleted"].(bool); !got {
-			t.Error("author_deleted must be true — the account is still deleted")
-		}
-		if got, _ := p["author_role_id"].(string); got != "Deleted" {
-			t.Errorf("author_role_id = %q, want Deleted", got)
-		}
+		// The mask's display fields travel in the nested author DTO (F-18:
+		// the flat author_* keys are gone) — the post card reads them from
+		// there, so the page needs no separate per-character fetch.
 		if author, ok := p["author"].(map[string]any); ok {
 			if got, _ := author["user_id"].(string); got != fixPlayerID {
 				t.Errorf("author.user_id = %q, want the deleted account %q", got, fixPlayerID)
@@ -121,6 +96,32 @@ func TestDeletedAccountKeepsItsMaskInPosts(t *testing.T) {
 			if got, _ := author["is_character"].(bool); !got {
 				t.Error("author.is_character must be true")
 			}
+			// The DTO carries the baked status/signature too — that is what
+			// the post card reads, so the page needs no separate
+			// per-character fetch to render them.
+			if got, _ := author["status_line"].(string); got != "Wanderer of the North" {
+				t.Errorf("author.status_line = %q, want the mask's status line", got)
+			}
+			if got, _ := author["avatar_url"].(string); got != "/api/files/mask-avatar.png" {
+				t.Errorf("author.avatar_url = %q, want the mask's avatar", got)
+			}
+			if got, _ := author["signature"].(string); got != "A signature that belongs to the mask" {
+				t.Errorf("author.signature = %q, want the mask's signature", got)
+			}
+			// The ACCOUNT is still gone: the mask is a display layer, not a
+			// resurrection.
+			if got, _ := author["role"].(string); got != "Deleted" {
+				t.Errorf("author.role = %q, want Deleted", got)
+			}
+		}
+		// The mask id lives in the nested DTO now — no top-level
+		// author_character_id on the post payload any more (F-21).
+		if author, ok := p["author"].(map[string]any); ok {
+			if got, _ := author["character_id"].(string); got != fixRoughMaskID {
+				t.Errorf("author.character_id = %q, want %q", got, fixRoughMaskID)
+			}
+		} else {
+			t.Error("the masked post has no nested author DTO")
 		}
 		found = true
 	}

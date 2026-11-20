@@ -34,9 +34,18 @@ const read = (relative) => readFileSync(fileURLToPath(new URL(relative, import.m
 
 const forumApi = read('../src/api/forum.js');
 const topicPage = read('../src/pages/TopicPage.jsx');
+const topicFormPage = read('../src/pages/TopicFormPage.jsx');
+const topicPostAuth = read('../src/hooks/topic/useTopicPostAuth.jsx');
+const topicPosts = read('../src/hooks/topic/useTopicPosts.js');
 const authProvider = read('../src/contexts/AuthProvider.jsx');
 const draftsGo = read('../backend/internal/platform/pocketbase/drafts.go');
 const forumPostsGo = read('../backend/internal/platform/pocketbase/forum_posts.go');
+const forumTopicsGo = read('../backend/internal/platform/pocketbase/forum_topics.go');
+const forumAuthorsGo = read('../backend/internal/platform/pocketbase/forum_authors.go');
+const topicHeader = read('../src/components/topic/TopicHeader.jsx');
+const topicPostCard = read('../src/components/topic/TopicPostCard.jsx');
+const profilePage = read('../src/pages/ProfilePage.jsx');
+const topicModalState = read('../src/hooks/topic/useTopicModalState.js');
 
 // Comments name the old symbols constantly while explaining why they went, so a
 // gate that failed on its own documentation would be deleted rather than obeyed.
@@ -48,7 +57,15 @@ const stripComments = (src) =>
 const code = {
   forumApi: stripComments(forumApi),
   topicPage: stripComments(topicPage),
+  topicFormPage: stripComments(topicFormPage),
+  topicPostAuth: stripComments(topicPostAuth),
+  topicPosts: stripComments(topicPosts),
   authProvider: stripComments(authProvider),
+  forumAuthorsGo: stripComments(forumAuthorsGo),
+  topicHeader: stripComments(topicHeader),
+  topicPostCard: stripComments(topicPostCard),
+  profilePage: stripComments(profilePage),
+  topicModalState: stripComments(topicModalState),
 };
 
 const failures = [];
@@ -140,8 +157,8 @@ check(
 );
 check(
   /func publishDraftHandler[\s\S]*decoratePostAuthors\(/.test(draftsGo),
-  'publishDraftHandler must return a DECORATED post — a raw payload carries no author_name or ' +
-    'is_character, and TopicPage renders the fresh card from that answer, so an undecorated ' +
+  'publishDraftHandler must return a DECORATED post — a raw payload carries no author DTO, ' +
+    'and TopicPage renders the fresh card from that answer, so an undecorated ' +
     'response repaints the just-published post without its mask'
 );
 check(
@@ -178,16 +195,166 @@ check(
   'decorateDraft must prefer the mask the SERVER stored on the draft row — that is the value ' +
     'publish will promote, and preferring the local picker silently disagrees with it'
 );
+// 2026-11-19: another member's mask is no longer resolved per character on
+// the client — the backend bakes its status/signature into the AuthorRef DTO
+// at read time (forum_authors.go, decoratePostAuthor/applyMask), so the post
+// card renders its final height on first paint. The old fetchCharacter
+// hydration re-fetched every used character on each topic mount and grew the
+// posts above the jump target ~1.3s after the scroll (F-07).
 check(
-  /await fetchCharacter\(charId\)/.test(code.topicPage),
-  "TopicPage must resolve another member's mask through fetchCharacter (the characters " +
-    'collection) — reading users.settings.characters is the ADR-5 fold, which is empty since the ' +
-    'migration, so every lookup resolved to null'
+  /post\.author\?\.status_line/.test(code.topicPostAuth) &&
+    /post\.author\?\.signature/.test(code.topicPostAuth),
+  "the post card must read another member's mask status/signature from the AuthorRef DTO — " +
+    'the backend bakes them at read time, and the old per-character fetch is gone'
+);
+check(
+  !/fetchCharacter/.test(code.topicPage),
+  'TopicPage must not re-fetch characters per topic load — status/signature arrive in the ' +
+    'posts payload DTO (the per-character hydration grew posts above the jump target, F-07)'
+);
+check(
+  /dto\["status_line"\] = mask\.StatusLine/.test(code.forumAuthorsGo) &&
+    /dto\["signature"\] = mask\.Signature/.test(code.forumAuthorsGo),
+  'forum_authors.go must write the mask status/signature into the AuthorRef DTO — the post ' +
+    'card reads them from there, and the account signature must never leak under the mask name'
+);
+check(
+  /const decorateDraft = \(draft[\s\S]*?author: \{[^}]*role[^}]*status_line[^}]*signature[^}]*\}/.test(code.topicPage),
+  'decorateDraft must carry role/status/signature in the draft author DTO — the draft card renders ' +
+    'through the same post card, which reads them from the DTO since the maskStats hydration ' +
+    'was removed (2026-11-19)'
+);
+// ── F-18: one AuthorRef DTO, no flat author_* fields ────────────────────────
+// The nested DTO is the single source of truth for author display; the legacy
+// flat keys (author_name, author_avatar, author_role_id, author_status_line,
+// author_signature, author_reputation, author_posts_count, author_deleted,
+// author_profile_id, owner_name, last_post_author*) are gone from every
+// writer. Post-level author_character_id / is_character are gone too (F-21):
+// the DTO carries character_id / is_character, and every reader takes them
+// from there — except the DRAFT payload (a draft has no DTO) and the edit
+// request body (the server takes character_id through the
+// author_character_id metadata key). Only author_id stays as a post-level ID.
+// The decorator input keys (last_post_author_name / last_post_guest_nickname /
+// last_post_guest_display_name) stay too: the decorator reads them to BUILD
+// the DTO for guest last-posters.
+check(
+  /dto\["role"\] = display\.Role/.test(code.forumAuthorsGo),
+  'forum_authors.go must write the role into the AuthorRef DTO — the badge and BBCode read it ' +
+    'from there now that the flat author_role_id is gone (F-18)'
+);
+check(
+  !/payload\["(author_name|author_avatar|author_role_id|author_status_line|author_signature|author_reputation|author_posts_count|author_deleted|author_profile_id|owner_name|last_post_author"|last_post_author_avatar|last_post_is_character|last_post_author_deleted)"\]/.test(code.forumAuthorsGo),
+  'forum_authors.go must not write flat author display fields into payloads — every reader ' +
+    'takes the nested AuthorRef DTO (F-18)'
+);
+check(
+  !/\bauthor_(name|avatar|role_id|status_line|signature|reputation|posts_count|profile_id|deleted)\b/.test(code.topicPage),
+  'TopicPage must not read or write flat author display fields — decorateDraft, buildPostData ' +
+    'and the publish reconciliation all build the nested author DTO (F-18)'
+);
+check(
+  !/\bauthor_(name|avatar|role_id|status_line|signature)\b/.test(code.topicFormPage),
+  'TopicFormPage must not send flat author display fields in the create-topic request — the ' +
+    'server derives the author from the session and the picked mask (F-18)'
+);
+check(
+  !/post\.author_name|\bpost\.owner_name/.test(code.topicPostAuth),
+  'useTopicPostAuth must not fall back to flat author fields — the owner name lives in the ' +
+    'author DTO (F-18)'
+);
+check(
+  /status_line: p\.author\?\.status_line/.test(code.topicPosts) &&
+    /role: p\.author\?\.role/.test(code.topicPosts),
+  'useTopicPosts must rebuild authorStats from the AuthorRef DTO — the flat fields it used ' +
+    'to read are gone (F-18)'
+);
+check(
+  /const updateLocalTopicLastPost = useCallback\(\(topicId\) =>/.test(code.authProvider),
+  'updateLocalTopicLastPost must take only the topic id — the flat lastPost object it used to ' +
+    'receive was ignored (stamp-only since the live-update rework), and every caller passes ' +
+    'just the id now (F-18)'
 );
 check(
   !/pb\.collection\('users'\)\.getOne\(uid\);\s*\n\s*const characters = u\?\.settings\?\.characters/.test(code.topicPage),
   'TopicPage must not rebuild the mask list out of users.settings.characters — that fold was ' +
     'retracted, and reading it per mask aborted the previous in-flight request every render pass'
+);
+
+// ── F-21: no top-level author_character_id / is_character on posts/topics ──
+// The nested AuthorRef DTO carries both (character_id, is_character) — the
+// top-level copies are gone from post/topic/stats responses. Two exceptions
+// stay: the DRAFT payload (a draft has no DTO — decorateDraft resolves the
+// mask from draft.author_character_id) and the edit request body (the server
+// takes character_id through the author_character_id metadata key).
+check(
+  !/payload\["author_character_id"\]/.test(forumPostsGo) &&
+    !/payload\["author_character_id"\]/.test(forumTopicsGo) &&
+    !/payload\["author_character_id"\]/.test(code.forumAuthorsGo),
+  'post/topic/stats payloads must not carry a top-level author_character_id — the mask id lives ' +
+    'in the nested AuthorRef DTO (F-21)'
+);
+check(
+  !/payload\["is_character"\]/.test(code.forumAuthorsGo) &&
+    !/payload\["is_character"\]/.test(forumTopicsGo),
+  'post/topic/stats payloads must not carry a top-level is_character — the mask flag lives in ' +
+    'the nested AuthorRef DTO (F-21)'
+);
+check(
+  !/\b(post|topic)\.is_character\b/.test(code.topicPage) &&
+    !/\b(post|topic)\.author_character_id\b/.test(code.topicPage) &&
+    !/\b(post|topic)\.is_character\b/.test(code.topicPostCard) &&
+    !/\b(post|topic)\.author_character_id\b/.test(code.topicPostCard) &&
+    !/\b(post|topic)\.is_character\b/.test(code.topicHeader) &&
+    !/\b(post|topic)\.author_character_id\b/.test(code.topicHeader) &&
+    !/\b(post|topic)\.is_character\b/.test(code.profilePage) &&
+    !/\b(post|topic)\.author_character_id\b/.test(code.profilePage) &&
+    !/\b(post|topic)\.is_character\b/.test(code.topicPostAuth) &&
+    !/\b(post|topic)\.author_character_id\b/.test(code.topicPostAuth) &&
+    !/\b(post|topic)\.is_character\b/.test(code.topicModalState) &&
+    !/\b(post|topic)\.author_character_id\b/.test(code.topicModalState),
+  'post/topic cards, header, profile and edit flow must read the mask id/flag from the nested ' +
+    'AuthorRef DTO — the top-level copies are gone (F-21). Drafts (draft./myDraft./publishedDraft.) ' +
+    'and the edit request body are the exceptions, not this pattern.'
+);
+check(
+  /character_id: charId \|\| null,[\s\S]{0,300}is_character: !!selChar,/.test(code.topicPage) &&
+    /character_id: char \? char\.id : null,[\s\S]{0,300}is_character: !!char,/.test(code.topicPage),
+  'buildAuthorDTO and decorateDraft must carry is_character in the author DTO — optimistic posts ' +
+    'and draft cards read the mask flag from there (F-21)'
+);
+// ── F-22: the draft DTO and the publish reconciliation must be complete ──
+// decorateDraft builds the draft card's DTO locally, and convergedAuthorDTO
+// rebuilds the published post's DTO from the server answer — both must carry
+// the same fields the server DTO carries, or the card silently degrades:
+// a draft card without owner_name shows the mask badge with no "Player: …"
+// tooltip, and a reconciled post without is_character flips from the mask
+// badge to the account role the moment the publish answers.
+check(
+  /character_id: char \? char\.id : null,[\s\S]{0,600}owner_name: profile\?\.nickname/.test(code.topicPage),
+  'decorateDraft must carry owner_name in the draft author DTO when masked — the Character badge ' +
+    'tooltip reads it from there (F-22)'
+);
+check(
+  /is_character: serverAuthor\.is_character \?\? pubAuthorDTO\.is_character/.test(code.topicPage),
+  'convergedAuthorDTO must carry is_character — after publish the card reads the mask flag from ' +
+    'the DTO, and without it the mask badge flips to the account role (F-22)'
+);
+// ── F-23: the optimistic card must not remount on confirm ──
+// The row's React key must stay the temp id after the server answers and the
+// row's id becomes the real one — otherwise React unmounts the optimistic
+// card, the avatar <img> is recreated and re-downloaded (visible flicker
+// with the cache disabled). The draft reconcile must also take the server
+// time, so only the id and the timestamp change in place.
+check(
+  /_stableKey: optimisticId/.test(code.topicPage) &&
+    /key=\{post\._stableKey \|\| post\.id\}/.test(code.topicPage),
+  'optimistic posts must carry a stable React key (_stableKey) that survives the temp→real id ' +
+    'swap — otherwise the card remounts on publish and the avatar re-downloads (F-23)'
+);
+check(
+  /pubResult\?\.created_at !== undefined \? \{ created_at: pubResult\.created_at/.test(code.topicPage),
+  'the draft publish reconcile must take the server created_at — the timestamp updates in place ' +
+    'with the id (F-23)'
 );
 
 // ── The edit form's mask picker is not a no-op ───────────────────────────────
@@ -248,6 +415,7 @@ console.log('OK  drafts: the card never falls back to a Guest author');
 console.log('OK  drafts: the picked mask is stored on the draft row and survives publish');
 console.log('OK  drafts: publish answers with a decorated post, so the mask does not vanish');
 console.log("OK  masks: another member's mask is resolved through the characters collection");
+console.log('OK  authors: one AuthorRef DTO — no flat author_* fields (F-18), no top-level author_character_id/is_character on posts/topics (F-21)');
 console.log('OK  masks: the edit form picker is transmitted, not silently dropped');
 console.log('OK  masks: only the author may re-file a post under a different mask');
 console.log('OK  settings: a save cannot delete keys the account form does not know');

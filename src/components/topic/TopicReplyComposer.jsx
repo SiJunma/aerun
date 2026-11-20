@@ -100,19 +100,33 @@ export const TopicReplyComposer = React.forwardRef(({
         <Card.Body className="p-3 p-md-4">
           <Form onSubmit={handleReply}>
             {!user && (
-              <Form.Group className="mb-3" controlId="guestNickname">
-                <Form.Label className="fw-semibold small">
-                  {t('forum.your_nickname')} <span className="text-danger">*</span>
-                </Form.Label>
-                <Form.Control
-                  type="text"
-                  placeholder={t('forum.nickname_placeholder')}
-                  value={guestNickname}
-                  onChange={(e) => setGuestNickname(e.target.value)}
-                  required
-                  className="w-auto"
-                  style={{ minWidth: '250px' }}
-                />
+              <Form.Group
+                className="mb-3 d-flex align-items-end justify-content-between"
+                controlId="guestNickname"
+              >
+                <div className="d-flex flex-column flex-grow-1 me-2">
+                  <Form.Label className="fw-semibold small mb-1">
+                    {t('forum.your_nickname')} <span className="text-danger">*</span>
+                  </Form.Label>
+                  <Form.Control
+                    type="text"
+                    placeholder={t('forum.nickname_placeholder')}
+                    value={guestNickname}
+                    onChange={(e) => setGuestNickname(e.target.value)}
+                    required
+                    className="w-auto"
+                    style={{ minWidth: '250px' }}
+                  />
+                </div>
+                <Button
+                  variant="outline-management"
+                  size="sm"
+                  onClick={() => replyEditorRef.current?.openHotkeysModal()}
+                  title={t('forum.hotkeys')}
+                >
+                  <Keyboard size={16} />
+                  <span className="d-none d-sm-inline small">{t('forum.help')}</span>
+                </Button>
               </Form.Group>
             )}
 
@@ -158,15 +172,17 @@ export const TopicReplyComposer = React.forwardRef(({
                 </Dropdown>
               )}
 
-              <Button
-                variant="outline-management"
-                className={`ms-auto d-none d-md-flex align-items-center gap-2 ${!(user && hasPermission(PERMISSIONS.USE_MASKS, { category })) ? 'mb-2' : ''}`}
-                onClick={() => replyEditorRef.current?.openHotkeysModal()}
-                title={t('forum.hotkeys')}
-              >
-                <Keyboard size={18} />
-                <span className="d-none d-md-inline small">{t('forum.help')}</span>
-              </Button>
+              {user && (
+                <Button
+                  variant="outline-management"
+                  className={`ms-auto d-none d-md-flex align-items-center gap-2 ${!(user && hasPermission(PERMISSIONS.USE_MASKS, { category })) ? 'mb-2' : ''}`}
+                  onClick={() => replyEditorRef.current?.openHotkeysModal()}
+                  title={t('forum.hotkeys')}
+                >
+                  <Keyboard size={18} />
+                  <span className="d-none d-md-inline small">{t('forum.help')}</span>
+                </Button>
+              )}
             </div>
 
             <Form.Group className="mb-3">

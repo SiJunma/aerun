@@ -248,7 +248,13 @@
   border: 1px solid var(--topic-post-card-border);
   border-radius: var(--topic-post-card-radius);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-  overflow: hidden;
+  /* overflow: clip, а не hidden: визуально то же самое (скруглённые углы
+     обрезают фон шапки поста и pinned-полоски), но clip НЕ создаёт
+     скролл-контейнер — а hidden создаёт, и браузер тогда не может выбрать
+     якорь внутри постов: scroll anchoring на странице топика мёртв, и пост
+     после поздней подгрузки статусов/подписей (maskStats, F-07) уезжает
+     вниз без компенсации. С clip анкоринг снова держит цель прыжка. */
+  overflow: clip;
   scroll-margin-top: 85px;
 }
 
@@ -323,6 +329,13 @@
 .post-author__avatar {
   display: flex;
   justify-content: center;
+  /* width: 100% — без неё контейнер shrink-to-fit (родитель .post-author
+     центрирует детей), и width: 100% у .author-avatar__wrap внутри
+     повисает без определённой базы: aspect-ratio не из чего считать высоту,
+     аватарка схлопывается до загрузки картинки, а посты растут уже после
+     прыжка (F-07). С width: 100% цепочка определённая: 200px колонка →
+     100% → max-width 150px → высота из aspect-ratio/height. */
+  width: 100%;
   margin-bottom: 0.5rem;
 }
 
@@ -330,7 +343,11 @@
   width: 100%;
   max-width: var(--topic-post-avatar-size, 150px);
   aspect-ratio: 1;
-  height: auto;
+  /* height: auto здесь отменяло определённую высоту из базового
+     .author-avatar__wrap (author-meta.css) — а aspect-ratio без
+     определённой ширины высоту не даёт. Явная высота = место под аватарку
+     зарезервировано до загрузки картинки, независимо от кеша и lazy. */
+  height: var(--topic-post-avatar-size, 150px);
   min-height: 0;
   flex: 0 0 auto;
 }
@@ -425,6 +442,23 @@
   padding-left: 1.5rem;
   padding-top: .5rem;
   padding-bottom: .5rem;
+  margin-bottom: 1rem;
+}
+
+/* Edit mode: the editor REPLACES .post-content (a sibling, not nested
+   inside it). The post body must be exactly the post body — controls
+   (mask picker, overflow menu) are <a> elements and do not belong inside
+   the text container. Same horizontal rhythm as the content it replaces;
+   nothing follows it (meta row and footer are hidden while editing), so no
+   bottom margin — but it needs air under the header. */
+.post-editor {
+  flex-grow: 1;
+  padding-right: 1.5rem;
+  padding-left: 1.5rem;
+  padding-top: .5rem;
+  padding-bottom: .5rem;
+  margin-top: 1rem;
+  margin-bottom: 0;
 }
 
 .post-header {
@@ -508,7 +542,7 @@
 }
 
 .post-signature {
-  margin-top: 1.5rem;
+  margin-top: 1rem;
   padding-top: 1rem;
   border-top: 1px solid var(--topic-post-signature-border);
   color: var(--topic-post-muted-color);
@@ -647,54 +681,6 @@
 #topic-actions-bottom .topic-actions-subscription.is-subscribed {
   background-color: var(--primary-color);
   color: var(--forum-view-btn-ghost-hover-text);
-}
-
-.topic-skeleton {
-  margin-bottom: var(--topic-post-margin-bottom);
-  background-color: var(--topic-post-card-bg);
-  border: 1px solid var(--topic-post-card-border);
-  border-radius: var(--topic-post-card-radius);
-  box-shadow: var(--topic-post-card-shadow);
-  overflow: hidden;
-}
-
-.topic-skeleton__grid {
-  display: flex;
-  flex-direction: column;
-}
-
-.topic-skeleton__author {
-  min-height: var(--topic-post-skeleton-author-min-height);
-  padding: var(--topic-post-skeleton-padding);
-  text-align: center;
-  border-bottom: 1px solid var(--topic-post-skeleton-footer-border);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--topic-post-skeleton-line-gap);
-}
-
-.topic-skeleton__body {
-  padding: var(--topic-post-skeleton-padding);
-}
-
-.topic-skeleton__row {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--topic-post-skeleton-row-gap);
-  margin-bottom: var(--topic-post-skeleton-row-gap);
-}
-
-.topic-skeleton__lines {
-  display: flex;
-  flex-direction: column;
-  gap: var(--topic-post-skeleton-line-gap);
-}
-
-.topic-skeleton__footer {
-  margin-top: var(--topic-post-skeleton-footer-margin-top);
-  padding-top: var(--topic-post-skeleton-footer-padding-top);
-  border-top: 1px solid var(--topic-post-skeleton-footer-border);
 }
 
 .topic-footer {
@@ -941,8 +927,7 @@
 
 @media (min-width: 768px) {
 
-  .topic-post-inner,
-  .topic-skeleton__grid {
+  .topic-post-inner {
     flex-direction: row;
     flex-wrap: nowrap;
   }
@@ -976,10 +961,6 @@
     padding-right: var(--topic-actions-row-padding-x-md);
   }
 
-  .topic-skeleton__author {
-    border-bottom: 0;
-    border-right: 1px solid var(--topic-post-skeleton-footer-border);
-  }
 }
 
 @media screen and (max-width: 993px) {
@@ -1003,8 +984,12 @@
     padding-left: .25rem;
   }
 
-  .post-author .author-avatar__wrap {
-    max-width: 70px;
+  /* Мобильный размер аватарки — одна переменная на всё: враппер, скелетон
+     и контейнер берут --topic-post-avatar-size (150px на десктопе, 70px
+     здесь). Будущая админ-настройка максимального размера аватарок
+     подставится в эту переменную из настроек форума. */
+  .post-author {
+    --topic-post-avatar-size: 70px;
   }
 
   .post-author__role-wrapper {
@@ -1189,7 +1174,6 @@
 }
 
 .post-meta-row {
-  margin-top: 1rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1197,10 +1181,6 @@
   padding-right: 1.5rem;
   padding-left: 1.5rem;
   margin-bottom: 0.5rem;
-}
-
-.topic-skeleton__avatar {
-  margin-bottom: 0.75rem;
 }
 
 .author-role {
@@ -1264,6 +1244,25 @@
   object-fit: cover;
 }
 
+/* --- Сайдбар: скелетон аватара — тот же размер, что у живого аватара.
+   Размер — из переменной --topic-post-avatar-size (150px на десктопе,
+   70px на мобиле через переопределение ниже): будущая админ-настройка
+   максимального размера аватарок подставится в переменную, а не в каждое
+   правило. Размер только из CSS: инлайн width/height не слушаются
+   медиазапросов. --- */
+.post-author__avatar-skeleton {
+  width: var(--topic-post-avatar-size, 150px);
+  height: var(--topic-post-avatar-size, 150px);
+}
+
+/* --- Футер поста: скелетон кнопок — отдельные квадратики с отступами
+   (отступы даёт gap контейнеров), а не одна сплошная полоска. На десктопе
+   кнопки текстовые, поэтому полоски шире; на мобиле — только иконки 16px. --- */
+.post-footer__btn-skeleton {
+  width: 48px;
+  height: 1rem;
+}
+
 /* --- Реп-строка: левый слот дайсов --- */
 .post-dice-slot {
   display: flex;
@@ -1305,7 +1304,8 @@
 
 
   .post-meta-row,
-  .post-content {
+  .post-content,
+  .post-editor {
     padding-left: 0.5rem;
     padding-right: 0.5rem;
   }
@@ -1317,9 +1317,15 @@
   .post-author__avatar {
     grid-area: avatar;
     margin-bottom: 0;
-    width: 70px;
+    width: var(--topic-post-avatar-size, 150px);
     display: flex;
     justify-content: flex-start;
+  }
+
+  .post-footer__btn-skeleton {
+    width: 30px;
+    height: 20px;
+    margin: 5px;
   }
 
   .post-author__name {
@@ -1363,7 +1369,8 @@
     padding-left: .5rem;
   }
 
-  .post-content {
+  .post-content,
+  .post-editor {
     padding-bottom: 0;
   }
 

@@ -21,6 +21,7 @@ import NewRepliesPage from './pages/NewRepliesPage';
 import SubscriptionsPage from './pages/SubscriptionsPage';
 import DraftsPage from './pages/DraftsPage';
 import MessagesPage from './pages/MessagesPage';
+import SkeletonDebugPage from './pages/SkeletonDebugPage';
 import { useAuth } from './contexts/AuthProvider';
 import GlobalModals from './components/common/GlobalModals';
 import UnsentReplyNotice from './components/common/UnsentReplyNotice';
@@ -149,6 +150,18 @@ const App = () => {
 
         {/* Admin-only Routes */}
         <Route path="/admin" element={<ProtectedRoute requireAdmin><Layout><AdminPage /></Layout></ProtectedRoute>} />
+
+        {/* Debug: скелетоны (только root-админ). Не в навигации, не индексируется. */}
+        <Route
+          path="/_debug/skeletons"
+          element={
+            <ProtectedRoute requireRootAdmin>
+              <Layout>
+                <SkeletonDebugPage />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
 
         {/* Catch all */}
         <Route path="*" element={<Navigate to="/" replace />} />

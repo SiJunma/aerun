@@ -176,10 +176,6 @@ const TopicFormPage = () => {
     try {
       const selectedChar = characters.find(c => c.id === selectedCharacterId);
 
-      const authorName = selectedChar
-        ? selectedChar.name
-        : (user ? (profile?.nickname || user.displayName || profile?.email?.split('@')[0] || 'User') : (guestNickname || 'Guest'));
-
       const topicData = {
         category_id: categoryId,
         title,
@@ -187,12 +183,6 @@ const TopicFormPage = () => {
         character_id: selectedCharacterId || '',
         pin_first_post: pinFirstPost,
         author_id: user?.uid || '',
-        author_name: authorName,
-        author_avatar: selectedChar ? selectedChar.avatar_url : (profile?.avatar_url || ''),
-        author_status_line: selectedChar ? (selectedChar.status_line || '') : (profile?.status_line || ''),
-        author_role_id: user ? (profile?.role || 'player') : 'guest',
-        is_character: !!selectedChar,
-        author_character_id: selectedCharacterId || null,
         first_post_pinned: pinFirstPost,
         is_pinned: false,
         guest_nickname: guestNickname || ''
@@ -201,14 +191,7 @@ const TopicFormPage = () => {
       const firstPostData = {
         content,
         author_id: user?.uid || '',
-        author_name: authorName,
-        author_avatar: topicData.author_avatar,
-        author_status_line: topicData.author_status_line,
-        author_role_id: user ? (profile?.role || 'player') : 'guest',
-        is_character: topicData.is_character,
-        author_character_id: topicData.author_character_id,
         character_title: selectedChar?.title || '',
-        author_signature: selectedChar ? (selectedChar.signature || '') : (profile?.settings?.signature || ''),
         guest_nickname: guestNickname || ''
       };
 

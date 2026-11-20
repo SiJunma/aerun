@@ -111,7 +111,7 @@ export const useTopicPageCore = ({
     showToast,
     lang,
     currentUser: user,
-    currentProfile: profile,
+    setProfile,
     readMap,
     initialVisitMap,
     updateLocalTopicLastPost,

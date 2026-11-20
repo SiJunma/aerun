@@ -36,7 +36,7 @@ const PostVotersModal = ({
     } finally {
       setLoading(false);
     }
-  }, [postId]);
+  }, [postId, t]);
 
   useEffect(() => {
     if (show && postId) {

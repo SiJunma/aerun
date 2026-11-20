@@ -61,7 +61,6 @@ import {
 import { toggleSubscription } from '../api/subscriptions';
 import { subscribeToTopicNotifications, markNotificationRead } from '../api/notifications';
 import { refreshUnreadCounts } from '../api/dms';
-import { fetchCharacter } from '../api/character';
 import { playNotificationSound } from '../utils/notificationSound';
 import { canDeleteTopic, topicDeleteErrorText } from '../utils/topic-delete';
 import { queueOptimisticPost, clearPendingOptimisticPost, resolveOptimisticPost } from '../utils/optimisticPostQueue';
@@ -188,9 +187,17 @@ export default function TopicPage() {
         ? selChar.avatar_url
         : (profile?.avatar_url || ''),
       character_id: charId || null,
+      // The DTO is the single source of truth for the card, including the
+      // mask flag — the optimistic post carries no top-level
+      // author_character_id / is_character any more (F-21).
+      is_character: !!selChar,
       role: profile?.role || 'spectator',
       status_line: selChar ? (selChar.status_line || '') : (profile?.status_line || ''),
       signature: selChar ? (selChar.signature || '') : (profile?.settings?.signature || ''),
+      // Under a mask the tooltip needs the account name behind the character
+      // (same rule as the server's applyMask: owner_name lives in the DTO,
+      // only when masked).
+      ...(selChar ? { owner_name: profile?.nickname || user?.displayName || '' } : {}),
     };
   }, [characters, user, profile]);
 
@@ -208,11 +215,6 @@ export default function TopicPage() {
       ...draft,
       is_draft: true,
       author_id: authorUid,
-      author_name: authorName,
-      author_avatar: authorAvatar,
-      author_role_id: roleId,
-      author_status_line: char ? (char.status_line || '') : (profile?.status_line || ''),
-      author_signature: char ? (char.signature || '') : (profile?.settings?.signature || ''),
       is_character: !!char,
       author_character_id: char ? char.id : null,
       author: {
@@ -221,7 +223,24 @@ export default function TopicPage() {
         display_name: authorName,
         avatar_url: authorAvatar,
         character_id: char ? char.id : null,
+        // The draft card reads the mask flag from the DTO, like every other
+        // card — the draft's own top-level author_character_id stays (it is
+        // the draft's data, not a response duplicate: the raw draft payload
+        // carries no DTO at all), but the card never reads it (F-21).
+        is_character: !!char,
         role: roleId,
+        // The draft card renders through the same post card, which reads
+        // status/signature from the AuthorRef DTO (no maskStats hydration
+        // any more) — so the DTO carries them, resolved from the same local
+        // mask. No extra fetch: the mask is the author's own, and the
+        // characters list is already loaded for the composer picker.
+        status_line: char ? (char.status_line || '') : (profile?.status_line || ''),
+        signature: char ? (char.signature || '') : (profile?.settings?.signature || ''),
+        // The Character badge tooltip ("Player: …") reads the account name
+        // from the DTO — same rule as buildAuthorDTO and the server's
+        // applyMask: owner_name lives in the DTO, only when masked (F-22).
+        // Without it the draft card shows the mask badge with no tooltip.
+        ...(char ? { owner_name: profile?.nickname || user?.displayName || '' } : {}),
       },
     };
   };
@@ -337,6 +356,8 @@ export default function TopicPage() {
     goLastParam,
     hash,
     hasExplicitPage,
+    isPageLoading,
+    loadedPageRef,
   });
 
   const { scrollToReply } = useTopicNavigation();
@@ -408,7 +429,6 @@ export default function TopicPage() {
     }
   }, [user, characters, setLastSelectedMask]);
 
-  const [maskStats, setMaskStats] = useState({});
   const [unreadQuotes, setUnreadQuotes] = useState([]);
 
   // ── Reply draft autosave & unsent-reply rescue (legacy monolith parity) ──
@@ -588,7 +608,6 @@ export default function TopicPage() {
     profile,
     characters,
     authorStats,
-    maskStats,
     isUserOnline,
     hasPermission,
     PERMISSIONS,
@@ -600,7 +619,7 @@ export default function TopicPage() {
 
   // 9. Reply and Draft Handlers (contract: check-forum-read-contract.mjs & check-drafts-and-settings.mjs)
   const buildPostData = (tempId, processedContent = '', rolls = null, authorDTO = {}) => {
-    const selectedChar = characters.find((c) => c.id === selectedCharacterId);
+    const optimisticId = tempId || `temp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     return {
       topic_id: id,
       category_id: topic?.category_id,
@@ -608,20 +627,18 @@ export default function TopicPage() {
       author_id: user?.uid || null,
       guest_nickname: !user ? guestNickname.trim() : undefined,
       character_id: selectedCharacterId || '',
-      author_name: selectedChar ? selectedChar.name : (profile?.nickname || guestNickname.trim() || user?.displayName || 'Guest'),
-      author_avatar: selectedChar ? selectedChar.avatar_url : (profile?.avatar_url || ''),
-      author_status_line: selectedChar ? (selectedChar.status_line || '') : (profile?.status_line || ''),
-      author_role_id: profile?.role || 'spectator',
-      is_character: !!selectedChar,
-      author_character_id: selectedCharacterId || null,
-      author_signature: selectedChar ? (selectedChar.signature || '') : (profile?.settings?.signature || ''),
       rolls: rolls && Object.keys(rolls).length > 0 ? rolls : null,
       karma: 0,
-      id: tempId || `temp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+      id: optimisticId,
+      // The React key for this row stays the temp id even after the server
+      // confirms the post and the row's id becomes the real one — otherwise
+      // React unmounts the optimistic card and mounts a fresh one, and the
+      // avatar <img> is recreated and re-downloaded (visible flicker with the
+      // cache disabled). Server rows have no _stableKey and key off their id.
+      _stableKey: optimisticId,
       _isOptimistic: true,
       author: { ...authorDTO },
       created_at: new Date().toISOString(),
-      owner_name: profile?.nickname || guestNickname.trim() || user?.displayName || 'Guest',
     };
   };
 
@@ -768,30 +785,14 @@ export default function TopicPage() {
     }
 
     const curCategoryId = topicRef.current?.category_id || topic?.category_id;
-    const curTitle = topicRef.current?.title || topic?.title;
     if (curCategoryId) {
-      updateLocalTopicLastPost?.(id, curCategoryId, curTitle, {
-        id: tempId,
-        author_id: user?.uid || null,
-        author_name: publishedDraft?.author_name || profile?.nickname || 'User',
-        author_avatar: publishedDraft?.author_avatar || profile?.avatar_url || '',
-        author_role_id: profile?.role || 'player',
-        is_character: !!publishedDraft?.is_character,
-        author_character_id: publishedDraft?.author_character_id || null,
-        created_at: new Date().toISOString(),
-      }, newTotalPosts, 1);
+      updateLocalTopicLastPost?.(id);
     }
 
     const pubAuthorDTO = buildAuthorDTO(publishedDraft?.author_character_id);
     const optimisticPost = {
       topic_id: id,
       author_id: user?.uid || null,
-      author_name: publishedDraft?.author_name || profile?.nickname || user?.displayName || 'User',
-      author_avatar: publishedDraft?.author_avatar || profile?.avatar_url || '',
-      is_character: !!publishedDraft?.is_character,
-      author_character_id: publishedDraft?.author_character_id || null,
-      author_status_line: publishedDraft?.author_status_line || '',
-      author_signature: publishedDraft?.author_signature || '',
       content: publishedDraft.content || '',
       rolls: null,
       karma: 0,
@@ -839,16 +840,7 @@ export default function TopicPage() {
       // The server's decorated post is the authority on WHO spoke — the
       // published row is what the read endpoints will serve from now on.
       if (curCategoryId && newPostId) {
-        updateLocalTopicLastPost?.(id, curCategoryId, curTitle, {
-          id: newPostId,
-          author_id: pubResult?.author?.user_id || user?.uid || null,
-          author_name: pubResult?.author_name || publishedDraft?.author_name || profile?.nickname || 'User',
-          author_avatar: pubResult?.author_avatar || publishedDraft?.author_avatar || profile?.avatar_url || '',
-          author_role_id: pubResult?.author_role_id || profile?.role || 'player',
-          is_character: pubResult?.is_character ?? !!publishedDraft?.is_character,
-          author_character_id: pubResult?.author_character_id || publishedDraft?.author_character_id || null,
-          created_at: new Date().toISOString(),
-        }, newTotalPosts, 1);
+        updateLocalTopicLastPost?.(id);
       }
 
       // Legacy parity: applyMutationResult ≈ forum-state refresh.
@@ -863,14 +855,24 @@ export default function TopicPage() {
             }
             // Build the converged author DTO from the server's response so
             // the reconciled card shows correct data without a page reload.
+            // The server DTO is the authority; the optimistic DTO built
+            // locally (pubAuthorDTO) is the fallback — no flat fields any
+            // more (F-18).
             const serverAuthor = pubResult?.author || {};
             const convergedAuthorDTO = {
-              kind: serverAuthor.kind || 'member',
-              user_id: serverAuthor.user_id || user?.uid || null,
-              display_name: serverAuthor.display_name || pubResult?.author_name || publishedDraft?.author_name || profile?.nickname || 'User',
-              avatar_url: serverAuthor.avatar_url || pubResult?.author_avatar || publishedDraft?.author_avatar || profile?.avatar_url || '',
-              character_id: serverAuthor.character_id || pubResult?.author_character_id || null,
-              role: serverAuthor.role || profile?.role || 'player',
+              kind: serverAuthor.kind || pubAuthorDTO.kind || 'member',
+              user_id: serverAuthor.user_id || pubAuthorDTO.user_id || user?.uid || null,
+              display_name: serverAuthor.display_name || pubAuthorDTO.display_name || profile?.nickname || 'User',
+              avatar_url: serverAuthor.avatar_url || pubAuthorDTO.avatar_url || profile?.avatar_url || '',
+              character_id: serverAuthor.character_id ?? pubAuthorDTO.character_id ?? null,
+              // The card branches on author.is_character (F-21) — without
+              // it here the reconciled post loses the mask badge and falls
+              // back to the account role the moment the publish answers (F-22).
+              is_character: serverAuthor.is_character ?? pubAuthorDTO.is_character ?? false,
+              role: serverAuthor.role || pubAuthorDTO.role || profile?.role || 'player',
+              status_line: serverAuthor.status_line ?? pubAuthorDTO.status_line ?? '',
+              signature: serverAuthor.signature ?? pubAuthorDTO.signature ?? '',
+              ...(serverAuthor.owner_name || pubAuthorDTO.owner_name ? { owner_name: serverAuthor.owner_name || pubAuthorDTO.owner_name } : {}),
             };
             return prev.map((p) => {
               if (p.id === tempId) {
@@ -882,12 +884,9 @@ export default function TopicPage() {
                   // optimistic row showed the unrolled [dice=N] placeholder.
                   ...(pubResult?.content !== undefined ? { content: pubResult.content } : {}),
                   ...(pubResult?.rolls !== undefined ? { rolls: pubResult.rolls } : {}),
-                  ...(pubResult?.author_name ? { author_name: pubResult.author_name } : {}),
-                  ...(pubResult?.author_avatar !== undefined ? { author_avatar: pubResult.author_avatar } : {}),
-                  ...(pubResult?.author_status_line !== undefined ? { author_status_line: pubResult.author_status_line } : {}),
-                  ...(pubResult?.author_signature !== undefined ? { author_signature: pubResult.author_signature } : {}),
-                  ...(pubResult?.is_character !== undefined ? { is_character: pubResult.is_character } : {}),
-                  ...(pubResult?.author_character_id !== undefined ? { author_character_id: pubResult.author_character_id } : {}),
+                  // The server time replaces the optimistic client time, so
+                  // only the id and the timestamp change in place (F-23).
+                  ...(pubResult?.created_at !== undefined ? { created_at: pubResult.created_at, created_at_ms: pubResult.created_at_ms } : {}),
                   author: convergedAuthorDTO,
                 };
               }
@@ -1021,18 +1020,8 @@ export default function TopicPage() {
     }
 
     const curCategoryId = topicRef.current?.category_id || topic?.category_id;
-    const curTitle = topicRef.current?.title || topic?.title;
     if (curCategoryId) {
-      updateLocalTopicLastPost?.(id, curCategoryId, curTitle, {
-        id: tempId,
-        author_id: user?.uid || null,
-        author_name: optimisticPost.author_name || profile?.nickname || guestNickname || 'User',
-        author_avatar: optimisticPost.author_avatar || profile?.avatar_url || '',
-        author_role_id: profile?.role || 'player',
-        is_character: !!optimisticPost.is_character,
-        author_character_id: optimisticPost.author_character_id || null,
-        created_at: new Date().toISOString(),
-      }, newTotalPosts, 1);
+      updateLocalTopicLastPost?.(id);
     }
 
     if (targetPage !== currentPage) {
@@ -1099,16 +1088,7 @@ export default function TopicPage() {
             // confirmed post after a same-page send.
             setAlreadyJumped(false);
             if (curCategoryId) {
-              updateLocalTopicLastPost?.(id, curCategoryId, curTitle, {
-                id: newPostId,
-                author_id: user?.uid || null,
-                author_name: optimisticPost.author_name || profile?.nickname || savedGuestNickname || 'User',
-                author_avatar: optimisticPost.author_avatar || profile?.avatar_url || '',
-                author_role_id: profile?.role || 'player',
-                is_character: !!optimisticPost.is_character,
-                author_character_id: optimisticPost.author_character_id || null,
-                created_at: new Date().toISOString(),
-              }, newTotalPosts, 1);
+              updateLocalTopicLastPost?.(id);
             }
           }
         },
@@ -1280,7 +1260,7 @@ export default function TopicPage() {
           }
 
           if (category?.id && nextLastPost && isDeletedPostLast) {
-            updateLocalTopicLastPost?.(id, category.id, topic?.title || '', nextLastPost, nextPostCount, -1);
+            updateLocalTopicLastPost?.(id);
           } else {
             updateLocalTopicPostsCount?.(id, category?.id, -1);
           }
@@ -1412,39 +1392,12 @@ export default function TopicPage() {
     return () => observer.disconnect();
   }, [unreadQuotes, posts, user?.uid]);
 
-  // 13. Mask stats hydration via fetchCharacter
-  useEffect(() => {
-    if (posts.length === 0) return;
-    const uniqueChars = new Map();
-    posts.forEach((p) => {
-      if (p.author?.user_id && p.author_character_id && maskStats[p.author_character_id] === undefined) {
-        uniqueChars.set(p.author_character_id, p.author?.user_id);
-      }
-    });
-
-    if (uniqueChars.size === 0) return;
-    const pending = Array.from(uniqueChars.keys());
-    let cancelled = false;
-
-    (async () => {
-      const entries = await Promise.all(pending.map(async (charId) => {
-        try {
-          const char = await fetchCharacter(charId);
-          return [charId, char || null];
-        } catch {
-          return [charId, null];
-        }
-      }));
-      if (cancelled || !isMountedRef.current) return;
-      setMaskStats((prev) => {
-        const next = { ...prev };
-        for (const [charId, char] of entries) next[charId] = char;
-        return next;
-      });
-    })();
-
-    return () => { cancelled = true; };
-  }, [posts, maskStats, isMountedRef]);
+  // 13. REMOVED (2026-11-19): mask stats hydration via fetchCharacter — the
+  // AuthorRef DTO now carries the resolved status/signature (backend baking
+  // in forum_authors.go), so the page renders its final height on first
+  // paint and no per-character fetch runs. The old effect re-fetched every
+  // used character on each topic mount and grew the posts above the jump
+  // target ~1.3s after the scroll (F-07).
 
   // 14. Author stats come from the posts payload itself — every decorated
   // post carries its author's posts_count/reputation (post.author), so no
@@ -1584,9 +1537,17 @@ export default function TopicPage() {
       return;
     }
 
+    const currentPostsCount = Number(topic?.posts_count || 0);
+    // A SHRINKING count is a deletion, and the last_post_id guard below must
+    // not swallow it: deleting a post that is not the last one leaves
+    // last_post_id unchanged and already rendered, so the old guard returned
+    // without ever re-reading the list — the deleted post stayed on screen
+    // until a reload. Only skip the refetch when the count did NOT shrink.
+    const isCountShrank = currentPostsCount < prevPostsCount;
     // If the server's newest last_post_id is ALREADY rendered on this page (e.g. reconciled
-    // from our own submit onSuccess), there is nothing new to re-fetch from the server.
-    if (topic.last_post_id && postsRef.current.some((p) => p.id === topic.last_post_id)) {
+    // from our own submit onSuccess), there is nothing new to re-fetch from the server —
+    // unless the count shrank, which means a post was deleted.
+    if (!isCountShrank && topic.last_post_id && postsRef.current.some((p) => p.id === topic.last_post_id)) {
       return;
     }
 
@@ -1594,7 +1555,6 @@ export default function TopicPage() {
     // but NEVER scroll the viewport — the reader stays exactly where they
     // were. Browser scroll anchoring keeps the composer/caret stable when
     // content is inserted above it.
-    const currentPostsCount = Number(topic?.posts_count || 0);
     const isForeignPostArrived = currentPostsCount > prevPostsCount;
     if (isForeignPostArrived) {
       const isSoundEnabled = profile?.settings?.sound?.enabled !== false;
@@ -1608,13 +1568,27 @@ export default function TopicPage() {
 
     // Silent refetch: the rendered page stays on screen while the request is
     // in flight (stale-while-revalidate), and loadPosts merges the server
-    // answer around the still-pending optimistic cards.
-    loadPostsRef.current();
+    // answer around the still-pending optimistic cards. `silent: true` keeps
+    // the skeleton from flashing over the page the reader is already on.
+    loadPostsRef.current(undefined, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, topic, topicNotFound, topicRestricted, currentPage, searchParams, scheduleForumStateRefresh]);
 
   // Render Skeleton / ErrorCard
-  if (isTopicLoading) return <Skeleton />;
+  if (isTopicLoading) return (
+    <main id="topic-page" data-topic-id={id} className="topic-page-container topic">
+      <div style={{ padding: '1rem' }}>
+        <Skeleton width="70%" height="2rem" />
+        <Skeleton width="50%" height="1rem" />
+        <Skeleton width="30%" height="1rem" />
+        <section id="topic-posts" className="topic-posts-list topic-posts">
+          {[...Array(3)].map((_, i) => (
+            <TopicPostCard key={`page-skel-${i}`} skeleton />
+          ))}
+        </section>
+      </div>
+    </main>
+  );
   if (topicNotFound || accessError || !topic) {
     // RES-02: parametrize the card. The branch used to render a bare
     // `<ErrorCard />` — no title, no diagnosis, no retry — so a 404, a 403
@@ -1698,40 +1672,16 @@ export default function TopicPage() {
             onRetry={() => loadPosts(currentPage)}
           />
         ) : null}
-        {!postsLoadError && posts.length === 0 && isPageLoading
-          ? /* Inline skeleton while page posts are loading (legacy parity). */
-            [...Array(3)].map((_, i) => (
-              <article key={`skel-${i}`} className="topic-skeleton">
-                <div className="topic-skeleton__grid">
-                  <div className="topic-skeleton__author">
-                    <Skeleton variant="avatar" width={80} height={80} className="topic-skeleton__avatar" />
-                    <Skeleton width="70%" height="1.2rem" />
-                    <Skeleton width="50%" height="0.8rem" />
-                  </div>
-                  <div className="topic-skeleton__body">
-                    <div className="topic-skeleton__row">
-                      <Skeleton width="25%" height="1rem" />
-                      <Skeleton width="40px" height="1rem" />
-                    </div>
-                    <div className="topic-skeleton__lines">
-                      <Skeleton width="100%" height="1rem" />
-                      <Skeleton width="100%" height="1rem" />
-                      <Skeleton width="85%" height="1rem" />
-                      <Skeleton width="40%" height="1rem" />
-                    </div>
-                    <div className="topic-skeleton__footer">
-                      <Skeleton width="150px" height="1.5rem" />
-                    </div>
-                  </div>
-                </div>
-              </article>
+        {!postsLoadError && isPageLoading
+          ? [...Array(3)].map((_, i) => (
+              <TopicPostCard key={`skel-${i}`} skeleton />
             ))
           : null}
         {/* Unpin must take effect live: the flag is the TOPIC's (refreshed by
             the stats poll and by the PATCH merge in handleSaveEdit), so the
             card is gated on it — pinnedFirstPost alone is a load-time
             snapshot that kept a unpinned post rendered until reload. */}
-        {currentPage > 1 && pinnedFirstPost && topic?.first_post_pinned !== false && (
+        {currentPage > 1 && pinnedFirstPost && topic?.first_post_pinned !== false && !isPageLoading && (
           <TopicPostCard
             post={pinnedFirstPost}
             postNumber={1}
@@ -1796,14 +1746,15 @@ export default function TopicPage() {
           />
         )}
 
-        {posts.map((post, index) => {
+        {!isPageLoading &&
+          posts.map((post, index) => {
           const postNum = (currentPage - 1) * ITEMS_PER_PAGE + index + 1;
           const isPostFirst = postNum === 1;
           const isThisEditing = modalState.editingPostId === post.id;
 
           return (
             <TopicPostCard
-              key={post.id}
+              key={post._stableKey || post.id}
               post={post}
               postNumber={postNum}
               topicId={id}

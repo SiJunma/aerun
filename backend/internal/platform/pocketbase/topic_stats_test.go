@@ -44,7 +44,6 @@ func TestTopicStatsReturnsOnlyItsContract(t *testing.T) {
 		"author":            true,
 		"category_id":       true,
 		"author_id":         true,
-		"author_name":       true,
 		"pinned":            true,
 		"first_post_pinned": true,
 		"created":           true,
@@ -71,6 +70,7 @@ func TestTopicStatsReturnsOnlyItsContract(t *testing.T) {
 		t.Errorf("stats title = %v, want 'A topic with stats'", payload["title"])
 	}
 	for _, forbidden := range []string{
+		"author_name",
 		"author_avatar",
 		"author_status_line",
 		"author_signature",

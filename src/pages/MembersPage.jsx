@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useEffectEvent, useMemo, useCallback, useRef } from 'react';
 import { Container, Table, Form, InputGroup, Image, Badge, Row, Col, Card, Button } from 'react-bootstrap';
 import { Search, ArrowUpDown, User, Calendar, MessageSquare, Award, Clock, RefreshCw } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -13,7 +13,7 @@ import ForumPagination from '../components/common/ForumPagination';
 import Timestamp from '../components/common/Timestamp';
 import { toMillis as sharedToMillis } from '../utils/dates';
 import ErrorCard from '../components/common/ErrorCard';
-import Skeleton from '../components/common/Skeleton';
+import MembersRowSkeleton from '../components/common/MembersRowSkeleton';
 
 // The legacy pseudo-role labels are no longer used for sorting: the server
 // orders by the stored role id, since the rendered label lives in the roles
@@ -125,12 +125,21 @@ const MembersPage = () => {
 
   // One request renders one page. `fetchMembers` narrows and orders on the
   // server, so the envelope's totals are the NARROWED set's.
-  useEffect(() => {
-    let alive = true;
+  //
+  // The fetch lives in an effect event, not in the effect body and not in a
+  // plain callback: setting `membersLoading` synchronously inside the effect
+  // — even through a callback — triggers cascading renders. The event reads
+  // the latest page/search/sort from its closure, so the effect below only
+  // lists the keys that should re-trigger the fetch. The token replaces the
+  // old `alive` flag — a newer fetch invalidates an older one, so a slow
+  // page-1 response can't overwrite a fresh page-2 board.
+  const fetchTokenRef = useRef(0);
+  const loadMembers = useEffectEvent(() => {
+    const token = ++fetchTokenRef.current;
     setMembersLoading(true);
     fetchMembers({ page, search, sort: sortParams.sort, order: sortParams.order })
       .then(res => {
-        if (!alive) return;
+        if (fetchTokenRef.current !== token) return;
         setMembersError(null);
         const items = (res?.items || []).map(u => withLegacyDates(toMembersRow(u)));
         const tp = Math.max(1, res?.totalPages ?? 1);
@@ -143,7 +152,7 @@ const MembersPage = () => {
         if (items.length === 0 && page > tp) setPage(tp);
       })
       .catch((err) => {
-        if (alive) {
+        if (fetchTokenRef.current === token) {
           // RES-03: save the error instead of zeroing the board. The
           // old catch set users/totalItems/totalPages to empty values,
           // so a network failure rendered exactly like "0 participants"
@@ -154,9 +163,12 @@ const MembersPage = () => {
         }
       })
       .finally(() => {
-        if (alive) setMembersLoading(false);
+        if (fetchTokenRef.current === token) setMembersLoading(false);
       });
-    return () => { alive = false; };
+  });
+
+  useEffect(() => {
+    loadMembers();
   }, [page, search, sortParams, refreshNonce]);
 
   useEffect(() => {
@@ -421,11 +433,13 @@ const MembersPage = () => {
           </thead>
           <tbody className="border-0">
             {membersLoading && users.length === 0 ? (
-              <tr>
-                <td colSpan="6" className="py-5 border-0">
-                  <Skeleton width="100%" height="14rem" className="mb-2" />
-                </td>
-              </tr>
+              <>
+                <MembersRowSkeleton key="ms-1" showRep={settings?.enableReputation} />
+                <MembersRowSkeleton key="ms-2" showRep={settings?.enableReputation} />
+                <MembersRowSkeleton key="ms-3" showRep={settings?.enableReputation} />
+                <MembersRowSkeleton key="ms-4" showRep={settings?.enableReputation} />
+                <MembersRowSkeleton key="ms-5" showRep={settings?.enableReputation} />
+              </>
             ) : tableUsers.length > 0 ? (
               tableUsers.map(u => (
                 <tr key={u.id} className="align-middle members-table-row">

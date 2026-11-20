@@ -13,7 +13,7 @@ const SmilesPicker = ({ onSelect }) => {
       borderRadius: '8px',
       overscrollBehavior: 'contain'
     }}>
-      <Tabs defaultActiveKey={SMILE_PACKS[0]?.id} id="smiles-tabs" className="mb-2 smiles-tabs-custom">
+      <Tabs defaultActiveKey={SMILE_PACKS[0]?.id} id="smiles-tabs" className="mb-2 smiles-tabs-custom" mountOnEnter>
         {SMILE_PACKS.map(pack => (
           <Tab eventKey={pack.id} title={pack.name} key={pack.id}>
             <div className="d-flex flex-wrap gap-2 mt-2">
@@ -31,6 +31,7 @@ const SmilesPicker = ({ onSelect }) => {
                   <img
                     src={smile.url}
                     alt={smile.code}
+                    loading="lazy"
                     className="smile-image"
                     style={{ width: 'auto', height: 'auto', objectFit: 'contain' }}
                     onMouseOver={(e) => e.currentTarget.parentElement.style.transform = 'scale(1.05)'}

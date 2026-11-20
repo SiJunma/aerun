@@ -5,6 +5,7 @@ import ForumAuthorAvatar from '../common/ForumAuthorAvatar';
 import ForumAuthorName from '../common/ForumAuthorName';
 import Timestamp from '../common/Timestamp';
 import BBCode from '../common/BBCode';
+import Skeleton from '../common/Skeleton';
 
 /**
  * TopicPostCard: semantic DOM per SPEC_forum-topic-view-theme-dom.md.
@@ -48,8 +49,87 @@ export const TopicPostCard = ({
   onOpenDm,
   onOpenRepVote,
   t,
-  showToast
+  showToast,
+  skeleton = false,
+  skeletonLines = 3,
 }) => {
+  if (skeleton) {
+    // Скелетон-ветка живого компонента: та же оболочка и классы (.topic-post →
+    // .topic-post-inner → .post-author 200px + .post-body), контент — полосками.
+    // Нет id/якорей, нет data-хуков, нет живых ссылок/кнопок. Предзаполненный
+    // текст скрыт через visibility: hidden, чтобы сохранить высоту строк.
+    const lineWidths = ['100%', '100%', '85%', '60%', '40%', '100%', '70%', '45%'];
+    const contentLines = Array.from({ length: Math.max(1, skeletonLines) }, (_, i) => {
+      const width = lineWidths[i % lineWidths.length];
+      return <Skeleton key={i} width={width} height="1.25rem" />;
+    });
+    return (
+      <article className="topic-post">
+        <div className="topic-post-inner">
+          <aside className="post-author">
+            <div className="post-author__content">
+              <div className="post-author__name">
+                <Skeleton width="100%" height="1rem" />
+              </div>
+              <div className="post-author__status">
+                <Skeleton width="60%" height="0.875rem" />
+              </div>
+              <div className="post-author__avatar">
+                {/* Размер аватара — только из CSS (.post-author__avatar-skeleton:
+                    150px на десктопе, 70px на мобиле, как живой аватар).
+                    Инлайн 150×150 не слушается медиазапросов и на мобиле
+                    раздувал колонку аватара в огромную плашку. */}
+                <Skeleton variant="avatar" className="post-author__avatar-skeleton" />
+              </div>
+              <dl className="post-author__meta">
+                <div className="post-author__meta-row">
+                  {/* Ширины в px: на мобиле dl живёт в auto-колонке грида
+                      автора, и полоски в % там схлопываются в ноль. */}
+                  <Skeleton width={64} height="1rem" />
+                  <Skeleton width={36} height="1rem" />
+                </div>
+                <div className="post-author__meta-row">
+                  <Skeleton width={64} height="1rem" />
+                  <Skeleton width={36} height="1rem" />
+                </div>
+              </dl>
+              <div className="post-author__role">
+                <Skeleton width={84} height="1rem" />
+              </div>
+            </div>
+          </aside>
+          <div className="post-body">
+            <header className="post-header">
+              {/* Таймштамп слева, номер поста справа — как в живом посте.
+                  Было 35% × 30px: полоска в два раза выше строки таймштампа. */}
+              <Skeleton width={180} height="0.9rem" />
+              <Skeleton width={40} height="0.9rem" />
+            </header>
+            <div className="post-content">
+              <span style={{ visibility: 'hidden' }}>{' '.repeat(180)}</span>
+              {contentLines}
+            </div>
+            <footer className="post-footer">
+              <div className="post-footer__links">
+                {/* Кнопки — отдельными квадратиками, а не одной сплошной
+                    полоской: в живом футере это отдельные кнопки (на мобиле
+                    только иконки 16px), а отступы между ними даёт gap
+                    контейнера. Размер — из CSS (.post-footer__btn-skeleton). */}
+                <Skeleton className="post-footer__btn-skeleton" />
+                <Skeleton className="post-footer__btn-skeleton" />
+              </div>
+              <div className="post-footer__spacer" />
+              <div className="post-footer__actions">
+                <Skeleton className="post-footer__btn-skeleton" />
+                <Skeleton className="post-footer__btn-skeleton" />
+                <Skeleton className="post-footer__btn-skeleton" />
+              </div>
+            </footer>
+          </div>
+        </div>
+      </article>
+    );
+  }
   if (!post) return null;
 
   const authorId = post.author?.user_id || post.author?.user_id;
@@ -127,7 +207,7 @@ export const TopicPostCard = ({
               <ForumAuthorName
                 userId={authorId}
                 characterId={post.author?.character_id}
-                isCharacter={!!post.is_character}
+                isCharacter={!!post.author?.is_character}
                 author={post.author}
                 fallbackName={post.author?.display_name}
                 onClick={onQuoteAuthor}
@@ -148,7 +228,7 @@ export const TopicPostCard = ({
               <ForumAuthorAvatar
                 userId={authorId}
                 characterId={post.author?.character_id}
-                isCharacter={!!post.is_character}
+                isCharacter={!!post.author?.is_character}
                 author={post.author}
                 initialAvatar={post.author?.avatar_url}
                 size={150}
@@ -262,28 +342,28 @@ export const TopicPostCard = ({
             ) : null}
           </header>
 
-          <div className="post-content">
-            {isEditing && editingChildren ? (
-              editingChildren
-            ) : (
-              <>
-                <BBCode rolls={post.rolls} authorId={authorId} authorRole={post.author_role_id}>
-                  {post.content}
-                </BBCode>
+          {isEditing && editingChildren ? (
+            <div className="post-editor">{editingChildren}</div>
+          ) : (
+            <div className="post-content">
+              <BBCode rolls={post.rolls} authorId={authorId} authorRole={post.author?.role}>
+                {post.content}
+              </BBCode>
 
-                {liveSignature && (
-                  <div className="post-signature">
-                    <BBCode>{liveSignature}</BBCode>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
+              {liveSignature && (
+                <div className="post-signature">
+                  <BBCode>{liveSignature}</BBCode>
+                </div>
+              )}
+            </div>
+          )}
 
 
           {/* Reputation section at bottom - matches reference HTML.
-              A draft has no karma at all — it is not published yet. */}
-          {!isDraft && (post.author?.user_id || (post.rolls && Object.keys(post.rolls).length > 0)) && (
+              A draft has no karma at all — it is not published yet.
+              While editing the card shows only the editor — no karma row
+              (same as the footer below). */}
+          {!isDraft && !isEditing && (post.author?.user_id || (post.rolls && Object.keys(post.rolls).length > 0)) && (
             <div className="post-meta-row">
               {/* Dice throws sit LEFT; the karma controls stay RIGHT.
                   Guest posts render the throws too — they simply have no
@@ -390,20 +470,22 @@ export const TopicPostCard = ({
               {/* Mobile-only links (Profile/PM): the sidebar contact is hidden
                   on mobile, so the footer carries them instead. */}
               <div className="post-footer__links">
-                <Link className="footer-link footer-link--icon" to={`/profile/${authorId}`} data-discover="true">
-                  <User size={16} />
-                  <span className="footer-link__label">{t?.('profile.view_profile') || 'Profile'}</span>
-                </Link>
+                {authorId && (
+                  <Link className="footer-link footer-link--icon" to={`/profile/${authorId}`} data-discover="true">
+                    <User size={16} />
+                    <span className="footer-link__label">{t?.('profile.view_profile') || 'Profile'}</span>
+                  </Link>
+                )}
                 {canDm && onOpenDm && (
-                  <a
+                  <Link
                     className="footer-link footer-link--icon"
-                    href={`/messages/${authorId}`}
+                    to={`/messages/${authorId}`}
                     data-discover="true"
                     onClick={() => onOpenDm(authorId)}
                   >
                     <MessageCircle size={16} />
                     <span className="footer-link__label">{t('forum.pm_label')}</span>
-                  </a>
+                  </Link>
                 )}
               </div>
               <div className="post-footer__spacer" />

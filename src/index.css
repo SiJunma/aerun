@@ -232,9 +232,11 @@ a:hover {
   text-decoration: none;
 }
 
-/* Links inside posts, user text and direct messages */
-.bbcode-content a,
-.post-content a {
+/* Links in rendered rich text (posts, signatures, direct messages).
+   Scoped to .bbcode-content on purpose: .post-content is only a LAYOUT
+   shell, and any <a> inside it that is not post text (a control, a
+   dropdown item) must not be underlined. */
+.bbcode-content a {
   color: var(--content-link-color, var(--link-color));
   text-decoration: underline;
   text-underline-offset: 2px;
@@ -242,8 +244,7 @@ a:hover {
   transition: opacity 0.2s ease, color 0.2s ease;
 }
 
-.bbcode-content a:hover,
-.post-content a:hover {
+.bbcode-content a:hover {
   text-decoration: underline;
   opacity: 0.8;
 }
@@ -3705,17 +3706,14 @@ a.rep-preview-name:hover {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25) !important;
 }
 
-/* Overflow menu items are <a class="dropdown-item">. Outside post bodies
-   Bootstrap already leaves them un-underlined, but the inline post editor
-   lives inside .post-content, where .post-content a underlines every link
-   — including these menu items. The ancestor-scoped selector (0,3,0) beats
-   .post-content a:hover (0,2,1) without !important; same leak the modal
-   variant already guards against below. */
+/* Overflow menu items are <a class="dropdown-item">. Bootstrap already
+   leaves them un-underlined; the guard below keeps it that way wherever
+   the editor is used (reply composer, edit form, create form, DMs). The
+   old `.post-content ...` variant is gone: since the edit form lives in
+   .post-editor instead of .post-content, no overflow menu can sit inside
+   .post-content any more, and the underline rule is scoped to
+   .bbcode-content anyway. */
 .editor-overflow-dropdown-menu .dropdown-item {
-  text-decoration: none;
-}
-
-.post-content .editor-overflow-dropdown-menu .dropdown-item {
   text-decoration: none;
 }
 

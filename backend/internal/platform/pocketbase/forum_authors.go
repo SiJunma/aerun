@@ -328,24 +328,23 @@ func collectLastPostAuthorIDs(payloads []map[string]any, idField string) []strin
 	return out
 }
 
-// decoratePostAuthor adds the author_* fields a post card renders.
+// applyMask swaps the DISPLAY fields of a payload's nested AuthorRef DTO
+// for a mask's, when the DTO names a character the author actually owns.
 //
-// These are the legacy flat names the page components already read, so no
-// render site has to learn a second vocabulary for the same data.
-// applyMask swaps the DISPLAY fields for a mask's, when the payload names one
-// the author actually owns.
+// The mask id comes from the DTO itself (authorDTOFromRecord builds it from
+// the record) — there is no top-level `author_character_id` on the payload
+// any more (F-21), and no top-level `is_character` either: the DTO carries
+// both, and every reader takes them from there.
 //
 // A mask whose row is gone, or one owned by somebody else, is IGNORED: the
 // account identity already written stands. loadCharacterDisplays only resolves
 // rows that exist, and the owner check is against the same author_id the
 // payload was decorated with, so a payload can never borrow another member's
 // mask.
-func applyMask(payload map[string]any, field string, authorID string, masks map[string]characterDisplay) {
-	id, _ := payload[field].(string)
-	if id == "" {
-		if dto, ok := payload["author"].(map[string]any); ok && dto != nil {
-			id, _ = dto["character_id"].(string)
-		}
+func applyMask(payload map[string]any, authorID string, masks map[string]characterDisplay) {
+	id := ""
+	if dto, ok := payload["author"].(map[string]any); ok && dto != nil {
+		id, _ = dto["character_id"].(string)
 	}
 	if id == "" || authorID == "" {
 		return
@@ -363,74 +362,25 @@ func applyMask(payload map[string]any, field string, authorID string, masks map[
 		dto["avatar_url"] = mask.AvatarURL
 		dto["is_character"] = true
 		dto["character_id"] = id
+		// Status/signature come from the mask record itself — NOT from the
+		// account's record: a mask with no signature of its own renders
+		// NO signature (the account's must not leak under the mask's name).
+		dto["status_line"] = mask.StatusLine
+		dto["signature"] = mask.Signature
+		// The account nickname is the name behind the mask: the Character
+		// badge's "Player: …" tooltip reads it from here. A mask is a
+		// display layer over an identity the forum already publishes
+		// (the profile link points at this account), not an anonymity
+		// feature — so naming the player discloses nothing new.
 		if accountName != "" {
 			dto["owner_name"] = accountName
 		}
 	}
-
-	// The ACCOUNT nickname is captured here, before the mask takes the display
-	// name, because that is the moment it exists in the payload at all: on a
-	// masked post `author_name` is the mask's name, so without this key the
-	// person behind the character is not named anywhere in the response.
-	//
-	// It is what the "Player: …" tooltip on the Character badge reads. That
-	// tooltip silently rendered for your own posts and for nobody else's,
-	// because the page could only fill it from its own `profile.nickname` or
-	// from `authorStats[uid].nickname`, which no hydration path ever writes —
-	// and from a guest session there is no local profile either, so the badge
-	// came out bare.
-	//
-	// `owner_name` is the name the legacy Firestore document used, so the
-	// tooltip's existing lookup starts working again with no client change.
-	// It discloses nothing new: the profile link already points at this very
-	// account (author_profile_id) and the post's counters are already stamped
-	// with it. A mask is a display layer over an identity the forum already
-	// publishes, not an anonymity feature.
-	if accountName == "" {
-		if cur, _ := payload["author_name"].(string); cur != "" {
-			accountName = cur
-		}
-	}
-	if accountName != "" {
-		payload["owner_name"] = accountName
-	}
-
-	payload["is_character"] = true
-	payload["author_name"] = mask.Name
-	payload["author_avatar"] = mask.AvatarURL
-	payload["author_status_line"] = mask.StatusLine
-	if mask.Signature != "" {
-		payload["author_signature"] = mask.Signature
-	}
-	// The card links the name to a profile. A mask has no profile page, so the
-	// account stays the link target while the LABEL is the mask's name.
-	payload["author_profile_id"] = authorID
 }
 
-// syncAuthorDTO copies the RESOLVED flat display fields into the nested
-// AuthorRef DTO, so both representations are written by one adapter and can
-// never disagree. It runs after the flat decoration pass; the identity fields
-// (kind/user_id/profile_id/character_id) were already set from the stored
-// record, so only the display fields are copied here. An empty flat value
-// leaves the DTO's stored display_name (guest) or null (deleted account)
-// untouched.
-func syncAuthorDTO(payload map[string]any, dtoKey, nameKey, avatarKey string) {
-	dto, ok := payload[dtoKey].(map[string]any)
-	if !ok || dto == nil {
-		return
-	}
-	if name, _ := payload[nameKey].(string); name != "" {
-		dto["display_name"] = name
-	}
-	if avatar, _ := payload[avatarKey].(string); avatar != "" {
-		dto["avatar_url"] = avatar
-	}
-}
-
-// decoratePostAuthor adds the author_* fields a post card renders.
-//
-// These are the legacy flat names the page components already read, so no
-// render site has to learn a second vocabulary for the same data.
+// decoratePostAuthor resolves the author display fields into the nested
+// AuthorRef DTO — the single source of truth for author display (F-18).
+// The legacy flat author_* keys are gone; every reader takes the DTO.
 //
 // A MASK REPLACES THE DISPLAY ONLY. When the post names a character, the
 // character supplies name/avatar/status/signature and `is_character` is set, so
@@ -445,13 +395,10 @@ func decoratePostAuthor(app core.App, payload map[string]any, displays map[strin
 	}
 	id, _ := dto["user_id"].(string)
 	if id == "" {
-		// Guest post
+		// Guest post: the display name already lives in the nested DTO.
 		if dto["kind"] == authorKindGuest {
 			if s := loadForumSettings(app); s.GuestAvatarURL != "" {
 				dto["avatar_url"] = s.GuestAvatarURL
-			}
-			if name, _ := dto["display_name"].(string); name != "" {
-				payload["author_name"] = name
 			}
 		}
 		return
@@ -465,25 +412,21 @@ func decoratePostAuthor(app core.App, payload map[string]any, displays map[strin
 		return
 	}
 
-	// Write the resolved display fields into the nested AuthorRef DTO
+	// Write the resolved display fields into the nested AuthorRef DTO — the
+	// single source of truth for author display (F-18). The post card reads
+	// status/signature from here, so the page renders its final height on
+	// first paint with no separate per-character fetch.
 	dto["display_name"] = display.Nickname
 	dto["avatar_url"] = display.AvatarURL
 	dto["reputation"] = display.Reputation
 	dto["posts_count"] = display.PostsCount
+	dto["status_line"] = display.StatusLine
+	dto["signature"] = display.Signature
+	dto["role"] = display.Role
 	dto["is_character"] = false
 	if display.IsDeleted {
 		dto["deleted"] = true
 	}
-
-	payload["author_name"] = display.Nickname
-	payload["author_avatar"] = display.AvatarURL
-	payload["author_role_id"] = display.Role
-	payload["author_status_line"] = display.StatusLine
-	if display.Signature != "" {
-		payload["author_signature"] = display.Signature
-	}
-	payload["author_reputation"] = display.Reputation
-	payload["author_posts_count"] = display.PostsCount
 
 	// THE MASK IS BAKED, SO IT STILL RENDERS.
 	//
@@ -499,11 +442,9 @@ func decoratePostAuthor(app core.App, payload map[string]any, displays map[strin
 	// layer over an identity, and the identity is gone. The mask does not
 	// resurrect the account, and it does not make the account's other
 	// actions (profile link, direct messages, quoting) available again.
-	applyMask(payload, "author_character_id", id, masks)
+	applyMask(payload, id, masks)
 
 	if display.IsDeleted {
-		payload["author_deleted"] = true
-		payload["author_profile_id"] = id
 		return
 	}
 }
@@ -515,14 +456,14 @@ func decoratePostAuthors(app core.App, payloads []map[string]any) {
 		return
 	}
 	displays := loadAuthorDisplays(app, collectAuthorIDs(payloads, "author_id"))
-	masks := loadCharacterDisplays(app, collectCharacterIDs(payloads, "author_character_id"))
+	masks := loadCharacterDisplays(app, collectCharacterIDs(payloads, ""))
 	for _, payload := range payloads {
 		decoratePostAuthor(app, payload, displays, masks)
 	}
 }
 
-// decorateTopicAuthor adds the author_* and last_post_author_* fields a topic
-// row and the forum index render.
+// decorateTopicAuthor resolves the author display fields into the nested
+// AuthorRef DTOs a topic row and the forum index render.
 //
 // The last-post author is resolved from the SAME maps as the topic author: a
 // page of topics usually names a handful of accounts and a couple of masks, so
@@ -541,9 +482,6 @@ func decorateTopicAuthor(app core.App, payload map[string]any, displays map[stri
 			if s := loadForumSettings(app); s.GuestAvatarURL != "" {
 				dto["avatar_url"] = s.GuestAvatarURL
 			}
-			if name, _ := dto["display_name"].(string); name != "" {
-				payload["author_name"] = name
-			}
 		}
 		decorateLastPostAuthor(app, payload, displays, masks)
 		return
@@ -558,23 +496,20 @@ func decorateTopicAuthor(app core.App, payload map[string]any, displays map[stri
 		return
 	}
 
-	// Write the resolved display fields into the nested AuthorRef DTO
+	// Write the resolved display fields into the nested AuthorRef DTO — the
+	// single source of truth for author display (F-18).
 	dto["display_name"] = display.Nickname
 	dto["avatar_url"] = display.AvatarURL
+	dto["role"] = display.Role
 	dto["is_character"] = false
 	if display.IsDeleted {
 		dto["deleted"] = true
 	}
 
-	payload["author_name"] = display.Nickname
-	payload["author_avatar"] = display.AvatarURL
-
 	// The mask is baked, so it still renders (see decoratePostAuthor).
-	applyMask(payload, "author_character_id", id, masks)
+	applyMask(payload, id, masks)
 
 	if display.IsDeleted {
-		payload["author_deleted"] = true
-		payload["author_profile_id"] = id
 		decorateLastPostAuthor(app, payload, displays, masks)
 		return
 	}
@@ -597,7 +532,7 @@ func decorateTopicAuthors(app core.App, payloads []map[string]any) {
 	ids = append(ids, collectLastPostAuthorIDs(payloads, "last_post_author_id")...)
 	displays := loadAuthorDisplays(app, ids)
 
-	maskIDs := collectCharacterIDs(payloads, "author_character_id")
+	maskIDs := collectCharacterIDs(payloads, "")
 	maskIDs = append(maskIDs, collectLastPostCharacterIDs(payloads, "last_post_author_character_id")...)
 	masks := loadCharacterDisplays(app, maskIDs)
 
@@ -646,15 +581,12 @@ func applyLastPostMask(payload map[string]any, authorID string, masks map[string
 
 	// The mask renames the LAST POSTER only. The unread dot and the reputation
 	// stay the account's.
-	payload["last_post_author"] = mask.Name
-	payload["last_post_author_avatar"] = mask.AvatarURL
-	payload["last_post_is_character"] = true
 }
 
-// decorateLastPostAuthor applies only the last_post_author_* pair, for the
-// category index whose payload names a last-post author but no topic author,
-// and for topic-list rows whose nested `last_post_author_ref` came from the
-// stored variant and now needs the resolved display fields.
+// decorateLastPostAuthor resolves the display fields into the nested
+// `last_post_author_ref` DTO, for the category index whose payload names a
+// last-post author but no topic author, and for topic-list rows whose nested
+// DTO came from the stored variant and now needs the resolved display fields.
 //
 // It is the SINGLE place that builds the public last-post AuthorRef DTO, so
 // the category index and the topic lists can never disagree about who spoke
@@ -715,10 +647,6 @@ func decorateLastPostAuthor(app core.App, payload map[string]any, displays map[s
 			dto["is_character"] = false
 			dto["avatar_url"] = avatarVal
 		}
-		payload["last_post_author"] = name
-		if avatarVal != nil {
-			payload["last_post_author_avatar"] = avatarVal
-		}
 		return
 	}
 	display, ok := displays[id]
@@ -773,14 +701,10 @@ func decorateLastPostAuthor(app core.App, payload map[string]any, displays map[s
 		dto["character_id"] = characterID
 	}
 
-	payload["last_post_author"] = display.Nickname
-	payload["last_post_author_avatar"] = display.AvatarURL
-
 	// The mask is baked, so it still renders (see decoratePostAuthor).
 	applyLastPostMask(payload, id, masks)
 
 	if display.IsDeleted {
-		payload["last_post_author_deleted"] = true
 		return
 	}
 }

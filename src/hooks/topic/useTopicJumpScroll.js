@@ -30,6 +30,8 @@ export const useTopicJumpScroll = ({
   goLastParam,
   hash,
   hasExplicitPage,
+  isPageLoading,
+  loadedPageRef,
 }) => {
   // Track jump intent changes to reset alreadyJumped
   useEffect(() => {
@@ -51,6 +53,12 @@ export const useTopicJumpScroll = ({
   // Scroll to target post when navigation target changes (post=, #post-, goLast)
   useEffect(() => {
     if (alreadyJumpedRef.current) return;
+    // Скроллим только по свеже загруженной странице: не по старой (isPageLoading
+    // ещё не сбросился) и не по странице, чьи посты уже не соответствуют currentPage
+    // (loadedPageRef). Нативный scrollIntoView сам учтёт scroll-margin-top: 85px
+    // из topic-view.css — никакой ручной арифметики, замеров и докрутки.
+    if (isPageLoading) return;
+    if (loadedPageRef.current !== currentPage) return;
 
     let targetId = null;
 
@@ -90,23 +98,9 @@ export const useTopicJumpScroll = ({
     if (targetId) {
       const el = document.getElementById(targetId);
       if (el) {
-        // Точный скролл с фиксированным отступом от навбара.
-        // scrollIntoView({ block: 'start' }) нестабилен при асинхронной
-        // загрузке картинок/шрифтов — центрирует родительский блок или
-        // пересчитывает позицию некорректно. Явный window.scrollTo с
-        // getBoundingClientRect даёт стабильный результат.
-        const NAVBAR_OFFSET = 85; // высота шапки + запас
-        const runScroll = () => {
-          const rect = el.getBoundingClientRect();
-          const absoluteTop = rect.top + window.pageYOffset - NAVBAR_OFFSET;
-          window.scrollTo({
-            top: Math.max(0, absoluteTop),
-            behavior: 'smooth',
-          });
-        };
-        // requestAnimationFrame гарантирует, что DOM уже отрендерен
-        // (картинки, цитаты, шрифты — занимают своё место) перед замером.
-        requestAnimationFrame(runScroll);
+        // Нативный скролл: браузер сам учтёт scroll-margin-top: 85px
+        // (.topic-post, topic-view.css) и удержит цель при догрузке картинок выше.
+        el.scrollIntoView({ block: 'start' });
         el.classList.add('highlight-target-post');
         setTimeout(() => el.classList.remove('highlight-target-post'), 2500);
         setAlreadyJumped(true);
@@ -127,7 +121,7 @@ export const useTopicJumpScroll = ({
     }
     // If targetId resolved but the DOM element isn't mounted yet (cold start),
     // we deliberately do NOT set alreadyJumped, so the next posts render retries.
-  }, [topicId, topic, postParam, hash, goLastParam, posts, currentPage, ITEMS_PER_PAGE, setAlreadyJumped, markTopicRead, alreadyJumpedRef, pendingCreatedPostIdRef, readCutoffRef]);
+  }, [topicId, topic, postParam, hash, goLastParam, posts, currentPage, ITEMS_PER_PAGE, setAlreadyJumped, markTopicRead, alreadyJumpedRef, pendingCreatedPostIdRef, readCutoffRef, isPageLoading, loadedPageRef]);
 
   const navigateToCreatedPost = useCallback((tempId, postId) => {
     const currentLocation = locationRef.current;

@@ -25,18 +25,17 @@ const LoginPage = () => {
    * "Show Maintenance Message". Renders the admin's HTML message in a
    * highlighted box; without a custom message a default text is shown.
    */
-  const maintenanceNotice = React.useMemo(() => {
-    if (!settings?.maintenanceMode || !settings?.whitelistMode || !settings?.showMaintenanceMessage) {
-      return null;
-    }
+  // No manual useMemo here: its deps missed `t` and `lang`, which made the
+  // compiler rule skip this component — and the computation is a few string
+  // checks plus one sanitize of a short message, so memoizing it buys nothing.
+  let maintenanceNotice = null;
+  if (settings?.maintenanceMode && settings?.whitelistMode && settings?.showMaintenanceMessage) {
     const raw = settings?.maintenanceMessage;
     const custom = sanitizeHtml(
       typeof raw === 'string' ? raw : (raw?.[lang] || raw?.en || raw?.ru || '')
     );
-    return custom || sanitizeHtml(
-      t('forum.maintenance_default')
-    );
-  }, [settings?.maintenanceMode, settings?.whitelistMode, settings?.showMaintenanceMessage, settings?.maintenanceMessage]);
+    maintenanceNotice = custom || sanitizeHtml(t('forum.maintenance_default'));
+  }
 
   if (user) {
     if (!profile) return null; // Wait for profile to load before redirecting
