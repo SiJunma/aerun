@@ -1,6 +1,7 @@
 import React from 'react';
 import { User, Keyboard, FilePen, Lock, MessageSquareOff } from 'lucide-react';
 import RichEditor from '../common/RichEditor';
+import MaskPicker from './MaskPicker';
 
 /**
  * TopicReplyComposer: Reply composer card including character/mask selection,
@@ -117,29 +118,15 @@ export const TopicReplyComposer = React.forwardRef(({
             )}
             <div className="topic-reply__field topic-reply__mask-row">
               {canUseMasks && (
-                <div className="topic-reply__mask-wrap">
-                  <label className="topic-reply__label" htmlFor="reply-mask-select">
-                    {t?.('forum.post_as_label') || 'Post as'}
-                  </label>
-                  <select
-                    id="reply-mask-select"
-                    className="topic-reply__mask-select"
-                    value={selectedCharacterId}
-                    onChange={(e) => {
-                      setSelectedCharacterId(e.target.value);
-                      if (user && setLastSelectedMask) setLastSelectedMask(e.target.value);
-                    }}
-                  >
-                    <option value="">
-                      {t?.('forum.post_as_user') || 'User'}: {profile?.nickname || profile?.email?.split('@')[0]}
-                    </option>
-                    {characters.length > 0 && characters.map(char => (
-                      <option key={char.id} value={char.id}>
-                        {t?.('forum.post_as_character') || 'Character'}: {char.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <MaskPicker
+                  value={selectedCharacterId}
+                  onChange={setSelectedCharacterId}
+                  characters={characters}
+                  profile={profile}
+                  user={user}
+                  setLastSelectedMask={setLastSelectedMask}
+                  t={t}
+                />
               )}
               <button
                 type="button"
@@ -177,7 +164,7 @@ export const TopicReplyComposer = React.forwardRef(({
                   disabled={submitting || draftSaving || !replyContent?.trim()}
                   onClick={handleSaveDraft}
                 >
-                  <FilePen size={14} className="me-1" />
+                  <FilePen size={14} className="topic-btn__icon" />
                   {draftSaving ? t?.('forum.draft_saving') || 'Saving...' : t?.('forum.draft_save') || 'Save Draft'}
                 </button>
               )}

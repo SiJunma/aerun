@@ -1,6 +1,7 @@
 import React, { useRef } from 'react';
 import { User, Keyboard } from 'lucide-react';
 import RichEditor from '../common/RichEditor';
+import MaskPicker from './MaskPicker';
 
 /**
  * PostInlineEditor: Inline editor for editing existing posts and drafts.
@@ -38,7 +39,7 @@ export const PostInlineEditor = ({
   const canUseDice = hasPermission?.(PERMISSIONS.USE_DICE, { category });
 
   return (
-    <div className="topic-post-editor pb-3">
+    <div className="topic-post-editor topic-post-editor--with-spacing">
       {isFirstPost && !isDraft && (
         <div className="topic-post-editor__field">
           <div className="topic-post-editor__field-row">
@@ -90,26 +91,16 @@ export const PostInlineEditor = ({
               character_id of a non-author edit, so the picker is hidden for
               moderated edits of other members' posts. */}
           {canUseMasks && canChangeMask && (
-            <div className="topic-post-editor__mask-wrap">
-              <label className="topic-post-editor__label" htmlFor="edit-mask-select">
-                <User size={14} className="me-1" />
-                <select
-                  id="edit-mask-select"
-                  className="topic-post-editor__mask-select"
-                  value={editCharacterId}
-                  onChange={(e) => setEditCharacterId?.(e.target.value)}
-                >
-                  <option value="">
-                    {t('forum.post_as_user')}: {profile?.nickname || profile?.email?.split('@')[0] || 'User'}
-                  </option>
-                  {characters.length > 0 && characters.map(char => (
-                    <option key={char.id} value={char.id}>
-                      {t('forum.post_as_character')}: {char.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
+            <MaskPicker
+              value={editCharacterId}
+              onChange={setEditCharacterId}
+              characters={characters}
+              profile={profile}
+              user={user}
+              setLastSelectedMask={null} // Not available in inline editor context
+              t={t}
+              className="topic-mask-picker--inline"
+            />
           )}
 
           <button

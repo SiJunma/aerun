@@ -453,6 +453,7 @@
    bottom margin — but it needs air under the header. */
 .post-editor {
   flex-grow: 1;
+  min-width: 0;
   padding-right: 1.5rem;
   padding-left: 1.5rem;
   padding-top: .5rem;
@@ -744,6 +745,9 @@
 }
 
 .topic-reply__field {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
   margin-bottom: var(--topic-reply-field-margin-bottom);
 }
 
@@ -857,6 +861,9 @@
 }
 
 .topic-post-editor {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
   padding-bottom: var(--topic-post-editor-margin-bottom);
 }
 
@@ -956,6 +963,18 @@
   gap: var(--topic-post-editor-actions-gap);
 }
 
+/* Spacing variant for PostInlineEditor root */
+.topic-post-editor--with-spacing {
+  padding-bottom: 1rem;
+}
+
+/* RichEditor container — ensure it can shrink within flex parent */
+.rich-editor-container {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+}
+
 .topic-btn {
   display: inline-flex;
   align-items: center;
@@ -1028,8 +1047,12 @@
 }
 
 .topic-btn-sm {
-  padding: 0.125rem 0.5rem;
-  font-size: 0.8125rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+}
+
+.topic-btn__icon {
+  margin-right: 0.5rem;
 }
 
 /* Hotkeys button — hidden on mobile (keyboard shortcuts not applicable) */
@@ -1356,6 +1379,131 @@
 }
 
 .topic-reply__mask-divider {
+  margin: 0.25rem 0;
+  border: 0;
+  border-top: 1px solid var(--topic-post-footer-border);
+}
+
+/* ===== MaskPicker component (replaces native select) ===== */
+.topic-mask-picker {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+}
+
+.topic-mask-picker__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--text-color);
+  background-color: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 0.375rem;
+  cursor: pointer;
+  min-width: 200px;
+  max-width: var(--topic-reply-mask-toggle-max-width, 320px);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+.topic-mask-picker__toggle:hover:not(:disabled) {
+  border-color: var(--primary-color);
+}
+
+.topic-mask-picker__toggle:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 0.25rem rgba(var(--primary-rgb), 0.25);
+}
+
+.topic-mask-picker__toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.topic-mask-picker__icon {
+  flex: 0 0 auto;
+  color: var(--secondary-color);
+}
+
+.topic-mask-picker__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topic-mask-picker__chevron {
+  flex: 0 0 auto;
+  color: var(--secondary-color);
+  transition: transform 0.15s ease;
+}
+
+.topic-mask-picker__chevron--open {
+  transform: rotate(180deg);
+}
+
+.topic-mask-picker__menu {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  right: 0;
+  z-index: 1050;
+  background-color: var(--topic-reply-card-bg);
+  border: 1px solid var(--topic-reply-card-border);
+  border-radius: 0.375rem;
+  box-shadow: var(--topic-post-card-shadow);
+  overflow: hidden;
+  min-width: var(--topic-reply-mask-toggle-min-width, 200px);
+  max-width: var(--topic-reply-mask-toggle-max-width, 320px);
+}
+
+.topic-mask-picker__item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.375rem 0.75rem;
+  border: 0;
+  background: transparent;
+  color: var(--text-color);
+  text-align: left;
+  font-size: 0.875rem;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topic-mask-picker__item:hover,
+.topic-mask-picker__item:focus,
+.topic-mask-picker__item--active {
+  background-color: rgba(var(--primary-rgb), 0.1);
+  color: var(--primary-color);
+}
+
+.topic-mask-picker__item-icon {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--secondary-color);
+}
+
+.topic-mask-picker__item--active .topic-mask-picker__item-icon {
+  color: var(--primary-color);
+}
+
+.topic-mask-picker__divider {
   margin: 0.25rem 0;
   border: 0;
   border-top: 1px solid var(--topic-post-footer-border);
@@ -1690,3 +1838,157 @@
     color: var(--topic-post-muted-color);
   }
 }
+/* ===== TopicFormPage (create topic) ===== */
+.topic-form-page {
+  padding: 2rem 1rem;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.topic-form-card {
+  background-color: var(--topic-reply-card-bg);
+  border: 1px solid var(--topic-reply-card-border);
+  border-radius: 0.5rem;
+  box-shadow: var(--topic-post-card-shadow);
+  overflow: hidden;
+}
+
+.topic-form-header {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--topic-reply-card-border);
+  background-color: var(--topic-reply-header-bg);
+}
+
+.topic-form-title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-color);
+}
+
+.topic-form {
+  padding: 1.5rem;
+}
+
+.topic-form-field {
+  margin-bottom: 1.5rem;
+}
+
+.topic-form-label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  color: var(--text-color);
+  font-size: 0.875rem;
+}
+
+.topic-form-required {
+  color: var(--topic-locked-color);
+  margin-left: 0.25rem;
+}
+
+.topic-form-input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--text-color);
+  background-color: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 0.375rem;
+  transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+.topic-form-input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 0.25rem rgba(var(--primary-rgb), 0.25);
+}
+
+.topic-form-input--auto {
+  width: auto;
+  min-width: 200px;
+}
+
+.topic-form-feedback {
+  margin-top: 0.375rem;
+  font-size: 0.8125rem;
+}
+
+.topic-form-feedback--error {
+  color: var(--topic-locked-color);
+}
+
+.topic-form-field--checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.topic-form-checkbox {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--primary-color);
+}
+
+.topic-form-checkbox-label {
+  margin: 0;
+  font-weight: 500;
+  color: var(--text-color);
+  font-size: 0.875rem;
+}
+
+.topic-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--topic-reply-card-border);
+}
+
+/* Loading state */
+.topic-form-loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 300px;
+}
+
+.topic-form-loading .spinner {
+  width: 3rem;
+  height: 3rem;
+  border: 3px solid var(--border-color);
+  border-top-color: var(--primary-color);
+  border-radius: 50%;
+  animation: topic-spin 1s linear infinite;
+}
+
+@keyframes topic-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Access denied state */
+.topic-form-access-denied {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+  text-align: center;
+  padding: 2rem;
+}
+
+.topic-form-access-denied__title {
+  margin: 0 0 0.5rem;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-color);
+}
+
+.topic-form-access-denied__text {
+  margin: 0 0 1.5rem;
+  color: var(--secondary-color);
+  max-width: 400px;
+}
+
