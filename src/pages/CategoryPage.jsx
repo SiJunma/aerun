@@ -23,14 +23,13 @@ import TopicRow from '../components/common/TopicRow';
 import CategoryHeaderSkeleton from '../components/common/CategoryHeaderSkeleton';
 import ErrorCard from '../components/common/ErrorCard';
 import { resolveField } from '../utils/text';
-import { toMillis, unreadFloor } from '../utils/dates';
 import { useToast } from '../contexts/ToastProvider';
 import { usePageTitle } from '../contexts/TitleProvider';
 
 const CategoryPage = () => {
   const { id } = useParams();
   const { t, lang } = useI18n();
-  const { user, profile, readMap, hasPermission, PERMISSIONS, categories, settings, scheduleForumStateRefresh, applyForumState } = useAuth();
+  const { user, hasPermission, PERMISSIONS, categories, settings, scheduleForumStateRefresh, applyForumState } = useAuth();
   const { showToast } = useToast();
   const { setPageTitle } = usePageTitle();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -298,117 +297,21 @@ const CategoryPage = () => {
               <span className="category-col--lastpost">{t('forum.last_post')}</span>
             </div>
             <div className="topic-list">
-              {currentTopics.map(topic => {
-                const stateClasses = [
-                  topic.is_pinned ? 'is-pinned' : '',
-                  topic.is_locked ? 'is-locked' : '',
-                  isManaging ? 'is-managing' : '',
-                ].filter(Boolean).join(' ');
-
-                // Same read-state predicate as MainPage.renderCategoryRows and
-                // TopicRow: a topic is unread only if the server considers it
-                // unread AND this device has not visited it since the last post.
-                // `topic.unread` is stamped server-side by listForumIndexHandler
-                // for category cards; listTopicsHandler (used here) does not
-                // stamp it, so serverUnread is null and we fall back to the
-                // localStorage read-map via isLocallyRead.
-                const lastVisitRaw = readMap[topic.id];
-                const lastVisitValue = lastVisitRaw?.timestamp || lastVisitRaw;
-                const effectiveLastVisitMs = unreadFloor(lastVisitValue, profile?.created_at);
-                const lastPostMs = toMillis(topic.last_post_at);
-                const serverUnread = typeof topic.unread === 'boolean' ? topic.unread : null;
-                const isLocallyRead = effectiveLastVisitMs >= lastPostMs;
-                const isUnreadByServer = serverUnread !== null ? serverUnread : true;
-                const hasUnread = !!user &&
-                  profile?.role !== 'pending' &&
-                  topic.last_post_author_ref?.user_id !== user?.uid &&
-                  isUnreadByServer &&
-                  !isLocallyRead;
-
-                return (
-                  <article
-                    key={topic.id}
-                    className={'forum-item forum-item--topic ' + stateClasses}
-                    id={'topic-' + topic.id}
-                    data-topic-id={topic.id}
-                  >
-                    {isManaging && (
-                      <div className="topic-select">
-                        <input
-                          type="checkbox"
-                          className="topic-select-input"
-                          checked={selectedTopicIds.includes(topic.id)}
-                          onChange={() => toggleSelect(topic.id)}
-                        />
-                      </div>
-                    )}
-                    <div className="forum-info">
-                      <h3 className="forum-title">
-                        {/* State icons sit INLINE with the title, bullet-like —
-                            never on their own line above it. */}
-                        {topic.is_pinned && (
-                          <span className="topic-icon topic-pinned" aria-hidden="true">
-                            <Pin size={14} fill="currentColor" />
-                          </span>
-                        )}
-                        {topic.is_locked && (
-                          <span className="topic-icon topic-locked" aria-hidden="true">
-                            <Lock size={14} />
-                          </span>
-                        )}
-                        <Link
-                          to={'/topic/' + topic.id}
-                          className="cat-link"
-                          title={t('stats.to_first_post')}
-                        >
-                          {topic.title}
-                        </Link>
-                        <TopicMiniPagination topic={topic} />
-                      </h3>
-                      {topic.description && (
-                        <div className="forum-description cat-desc">
-                          {topic.description}
-                        </div>
-                      )}
-                      {/* Creation meta (date · author) under the title,
-                          same as the TopicRow reference render. */}
-                      <div className="topic-author">
-                        <AuthorMeta
-                          date={topic.created_at}
-                          author={topic.author}
-                          showAvatar={false}
-                          lang={lang}
-                        />
-                      </div>
-                      <div className="forum-mobile-stats">
-                        <span className="forum-mobile-stat">
-                          <MessageSquare size={12} />
-                          {' '}
-                          {Math.max(0, (topic.posts_count || 1) - 1)}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="forum-posts" data-value={topic.posts_count}>
-                      {topic.posts_count || 0}
-                    </div>
-                    {/* Last post on the category page: timestamp + author only —
-                        the topic title is already in the first column. */}
-                    <div className="forum-last-post last-post-strip" data-label={t('forum.last_post')}>
-                      <LastPostInfo
-                        topicId={topic.id}
-                        lastPostAt={topic.last_post_at}
-                        author={topic.last_post_author_ref}
-                        hasUnread={hasUnread}
-                        lastReadOffset={
-                          readMap[topic.id]?.offset ?? null
-                        }
-                        postsCount={topic.posts_count}
-                        lang={lang}
-                      />
-                    </div>
-                  </article>
-                );
-              })}
+              {currentTopics.map(topic => (
+                <TopicRow
+                  key={topic.id}
+                  topic={topic}
+                  user={user}
+                  lang={lang}
+                  isManaging={isManaging}
+                  isSelected={selectedTopicIds.includes(topic.id)}
+                  onSelect={toggleSelect}
+                  showCategory={false}
+                  categoryName=""
+                  showCategoryInColumn={false}
+                  skeleton={false}
+                />
+              ))}
             </div>
             {totalPages > 1 && (
               <nav id="forum-pagination-bottom" className="forum-view-pagination">

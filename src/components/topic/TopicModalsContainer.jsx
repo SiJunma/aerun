@@ -1,5 +1,4 @@
 import React from 'react';
-import { Button, Badge, Form } from 'react-bootstrap';
 import ConfirmModal from '../common/ConfirmModal';
 import ForumModal from '../common/ForumModal';
 import MoveTopicsModal from '../modals/MoveTopicsModal';
@@ -40,10 +39,10 @@ export const TopicModalsContainer = ({
   showRepModal,
   onCancelRepVote,
   onConfirmRepVote,
-  repValue,
-  repComment,
-  setRepComment,
-  submittingRep,
+  _repValue,
+  _repComment,
+  _setRepComment,
+  _submittingRep,
 
   // Vote info
   showVoteInfoModal,
@@ -121,80 +120,38 @@ export const TopicModalsContainer = ({
       <MovePostsModal
         show={showMovePostsModal}
         onHide={onCancelMovePosts}
-        posts={posts || []}
-        startIndex={(indexOfFirstItem || 0) + 1}
-        // "First post" here means the TOPIC's first post. Moving it does NOT
-        // delete the topic (owner ruling 2026-11-01): the next earliest post
-        // becomes the opener — hence the label, not a scary warning. That is
-        // page-1 index 0 ONLY: on pages 2+ posts[0] is an ordinary reply and
-        // must not carry the mark. Same gate the delete-post check above
-        // applies (indexOfFirstItem === 0); on pages 2+ the first post is
-        // absent from this list anyway (when pinned it renders as the pinned
-        // card, which the modal does not list).
-        firstPostId={indexOfFirstItem === 0 ? posts?.[0]?.id : null}
-        currentTopicId={topicId}
         onConfirm={onConfirmMovePosts}
+        posts={posts}
+        indexOfFirstItem={indexOfFirstItem}
+        topicId={topicId}
       />
 
       {/* Reputation Vote Modal */}
-      <ForumModal
+      <ConfirmModal
         show={showRepModal}
         onHide={onCancelRepVote}
-        title={t?.('profile.rep_give') || 'Give Reputation'}
-        footer={
-          <>
-            <Button variant="outline-secondary" onClick={onCancelRepVote}>
-              {t?.('common.cancel') || 'Cancel'}
-            </Button>
-            <Button variant="primary" onClick={onConfirmRepVote} disabled={submittingRep}>
-              {submittingRep ? t?.('common.loading') || 'Loading...' : t?.('common.confirm') || 'Confirm'}
-            </Button>
-          </>
-        }
-      >
-        <div className="text-center mb-4">
-          <Badge bg={repValue > 0 ? 'success' : 'danger'} className="fs-3 px-4 py-2">
-            {repValue > 0 ? `+${repValue}` : repValue}
-          </Badge>
-          <div className="mt-3 text-muted small px-3">
-            {t('forum.rep_vote_explanation')}
-          </div>
-        </div>
-        <Form.Group>
-          <Form.Label className="fw-bold small">
-            {t('forum.vote_comment')}
-          </Form.Label>
-          <Form.Control
-            as="textarea"
-            rows={3}
-            value={repComment}
-            onChange={(e) => setRepComment(e.target.value)}
-            placeholder=""
-            className="modal-section-themed"
-          />
-        </Form.Group>
-      </ForumModal>
+        onConfirm={onConfirmRepVote}
+        title={t('forum.rep_vote_title')}
+        message={t('forum.rep_vote_message')}
+        confirmText={t('forum.rep_vote_confirm')}
+        cancelText={t?.('common.cancel') || 'Cancel'}
+      />
 
       {/* Vote Info Modal */}
       <ForumModal
         show={showVoteInfoModal}
         onHide={onCancelVoteInfo}
-        title={t('forum.vote_title')}
-        className="premium-modal shadow-lg"
-        footer={
-          <Button variant="outline-secondary" className="w-100" onClick={onCancelVoteInfo}>
-            {t?.('common.close') || 'Close'}
-          </Button>
-        }
+        size="md"
+        title={t('forum.vote_info_title')}
       >
         {selectedVote && (
-          <div className="d-flex flex-column gap-3">
-            <div className="d-flex justify-content-between align-items-center modal-inner-card p-3">
+          <div className="vote-info-modal">
+            <div className="d-flex justify-content-between align-items-start mb-3">
               <div>
-                <div className="small text-muted">{t('forum.your_vote')}</div>
-                <Badge bg={selectedVote.value > 0 ? 'success' : 'danger'} className="fs-5 mt-1">
+                <div className="fw-bold">{t('forum.your_vote')}</div>
+                <span className={`topic-badge topic-badge--${selectedVote.value > 0 ? 'success' : 'danger'} fs-5 mt-1`}>
                   {selectedVote.value > 0 ? `+${selectedVote.value}` : selectedVote.value}
-                </Badge>
+                </span>
               </div>
               <div className="text-end">
                 <div className="small text-muted">{t('forum.vote_date')}</div>
@@ -208,51 +165,49 @@ export const TopicModalsContainer = ({
               <div className="d-flex justify-content-between align-items-center mb-2">
                 <div className="small text-muted">{t('forum.vote_comment')}</div>
                 {(selectedVote.voter_id === currentUserId || !selectedVote.voter_id) && !isEditingRepComment && (
-                  <Button
-                    variant="link"
-                    size="sm"
-                    className="p-0 text-decoration-none small"
+                  <button
+                    type="button"
+                    className="topic-btn topic-btn--link p-0 text-decoration-none small"
                     onClick={() => {
                       setEditingRepComment(selectedVote.comment || '');
                       setIsEditingRepComment(true);
                     }}
                   >
                     {selectedVote.comment ? t('forum.vote_edit') : t('forum.vote_add')}
-                  </Button>
+                  </button>
                 )}
               </div>
 
               {isEditingRepComment ? (
                 <div className="modal-inner-card p-3 border-start border-4 border-accent">
-                  <Form.Control
-                    as="textarea"
+                  <textarea
+                    className="topic-textarea modal-section-themed mb-2"
                     rows={2}
                     value={editingRepComment}
                     onChange={(e) => setEditingRepComment(e.target.value)}
                     placeholder={t('forum.vote_comment_placeholder')}
-                    className="modal-section-themed mb-2"
                   />
                   <div className="d-flex justify-content-end gap-2">
-                    <Button
-                      variant="outline-secondary"
-                      size="sm"
+                    <button
+                      type="button"
+                      className="topic-btn topic-btn--secondary topic-btn-sm"
                       onClick={() => setIsEditingRepComment(false)}
                       disabled={savingRepComment}
                     >
                       {t?.('common.cancel') || 'Cancel'}
-                    </Button>
-                    <Button
-                      variant="primary"
-                      size="sm"
+                    </button>
+                    <button
+                      type="button"
+                      className="topic-btn topic-btn--primary topic-btn-sm"
                       onClick={onUpdateRepComment}
                       disabled={savingRepComment}
                     >
                       {savingRepComment ? t('common.loading') : t('forum.vote_save')}
-                    </Button>
+                    </button>
                   </div>
                 </div>
               ) : (
-                <div className="p-3 modal-inner-card border-start border-4 border-accent" style={{ minHeight: '60px' }}>
+                <div className="modal-inner-card p-3 border-start border-4 border-accent min-h-60px">
                   {selectedVote.comment || <span className="opacity-50 italic">{t('forum.vote_no_comment')}</span>}
                 </div>
               )}
