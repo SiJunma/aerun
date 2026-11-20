@@ -401,6 +401,9 @@ export const translations = {
       nickname_placeholder: "Enter your name...",
       content_label: "Content",
       content_placeholder: "Write your message here...",
+      title_placeholder: "Enter topic title...",
+      description_placeholder: "Short description...",
+      title_required: "Title is required",
     },
 
     topic_page: {
@@ -1871,6 +1874,9 @@ export const translations = {
       nickname_placeholder: "Введите имя...",
       content_label: "Содержание",
       content_placeholder: "Напишите ваше сообщение здесь...",
+      title_placeholder: "Введите заголовок темы...",
+      description_placeholder: "Краткое описание...",
+      title_required: "Заголовок обязателен",
     },
 
     topic_page: {

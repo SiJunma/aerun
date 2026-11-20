@@ -434,6 +434,7 @@
   flex-direction: column;
   flex-grow: 1;
   min-height: 100%;
+  min-width: 0;
 }
 
 .post-content {
@@ -895,6 +896,11 @@
   gap: 0.5rem;
   margin-bottom: var(--topic-post-editor-mask-row-margin-bottom);
   flex-wrap: wrap;
+}
+
+/* Mask row variant — space-between to push hotkeys button to right */
+.topic-post-editor__field-row--mask {
+  justify-content: space-between;
 }
 
 .topic-post-editor__field-row > label {
@@ -1863,7 +1869,7 @@
   margin: 0;
   font-size: 1.25rem;
   font-weight: 700;
-  color: var(--text-color);
+  color: var(--topic-reply-header-text);
 }
 
 .topic-form {
@@ -1990,5 +1996,176 @@
   margin: 0 0 1.5rem;
   color: var(--secondary-color);
   max-width: 400px;
+}
+
+/* ===== Button component ===== */
+.topic-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 0.375rem;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-color);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  white-space: nowrap;
+}
+
+.topic-btn:disabled,
+.topic-btn--loading {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.topic-btn:focus {
+  outline: none;
+  box-shadow: 0 0 0 0.25rem rgba(var(--primary-rgb), 0.25);
+}
+
+/* Variants */
+.topic-btn--primary {
+  background-color: var(--primary-color);
+  border-color: var(--primary-color);
+  color: var(--topic-reply-header-text);
+}
+
+.topic-btn--primary:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.topic-btn--secondary {
+  background-color: var(--topic-reply-card-bg);
+  border-color: var(--secondary-color);
+  color: var(--secondary-color);
+}
+
+.topic-btn--secondary:hover:not(:disabled) {
+  color: var(--text-color);
+  border-color: var(--text-color);
+}
+
+.topic-btn--ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--link-color);
+  padding: 0;
+}
+
+.topic-btn--ghost:hover:not(:disabled) {
+  color: var(--link-hover-color);
+  text-decoration: underline;
+}
+
+.topic-btn--danger {
+  background-color: var(--danger-bg);
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+}
+
+.topic-btn--danger:hover:not(:disabled) {
+  background-color: var(--danger-border);
+  color: var(--danger-text);
+}
+
+/* Sizes */
+.topic-btn-sm {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+}
+
+.topic-btn-lg {
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+}
+
+/* Full width */
+.topic-btn--block {
+  width: 100%;
+}
+
+/* Icon only (square) */
+.topic-btn--icon-only {
+  padding: 0.5rem;
+  border-radius: 0.375rem;
+}
+
+.topic-btn-sm.topic-btn--icon-only {
+  padding: 0.25rem;
+}
+
+/* Icon positioning */
+.topic-btn__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.topic-btn__icon--left {
+  margin-right: 0.25rem;
+}
+
+.topic-btn__icon--right {
+  margin-left: 0.25rem;
+}
+
+/* Loading state */
+.topic-btn--loading {
+  position: relative;
+  color: transparent !important;
+  pointer-events: none;
+}
+
+.topic-btn__spinner {
+  position: absolute;
+  width: 1em;
+  height: 1em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: topic-btn-spin 0.6s linear infinite;
+}
+
+.topic-btn--primary .topic-btn__spinner,
+.topic-btn--danger .topic-btn__spinner {
+  color: var(--topic-reply-header-text);
+}
+
+.topic-btn__loading-text {
+  position: absolute;
+  white-space: nowrap;
+}
+
+@keyframes topic-btn-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Form actions layout */
+.topic-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--topic-reply-card-border);
+}
+
+.topic-post-editor__actions {
+  display: flex;
+  gap: var(--topic-post-editor-actions-gap);
+  justify-content: flex-end;
+}
+
+.topic-reply__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
 }
 

@@ -2,6 +2,7 @@ import React, { useRef } from 'react';
 import { User, Keyboard } from 'lucide-react';
 import RichEditor from '../common/RichEditor';
 import MaskPicker from './MaskPicker';
+import Button from '../common/Button';
 
 /**
  * PostInlineEditor: Inline editor for editing existing posts and drafts.
@@ -86,7 +87,7 @@ export const PostInlineEditor = ({
       )}
 
       <div className="topic-post-editor__field">
-        <div className="topic-post-editor__field-row">
+        <div className="topic-post-editor__field-row topic-post-editor__field-row--mask">
           {/* Mask re-filing is the AUTHOR's decision: the server ignores the
               character_id of a non-author edit, so the picker is hidden for
               moderated edits of other members' posts. */}
@@ -103,14 +104,16 @@ export const PostInlineEditor = ({
             />
           )}
 
-          <button
+          <Button
             type="button"
-            className="topic-btn topic-btn--accent topic-btn--hotkeys"
+            variant="ghost"
+            size="sm"
+            iconOnly
             onClick={() => editorRef.current?.openHotkeysModal()}
             title={t('forum.hotkeys')}
-          >
-            <Keyboard size={16} />
-          </button>
+            leftIcon={<Keyboard size={16} />}
+            aria-label={t('forum.hotkeys')}
+          />
         </div>
 
         <RichEditor
@@ -130,9 +133,10 @@ export const PostInlineEditor = ({
       </div>
 
       <div className="topic-post-editor__actions">
-        <button
+        <Button
           type="button"
-          className={`topic-btn topic-btn--${isDraft ? 'secondary' : 'primary'} topic-btn-sm`}
+          variant={isDraft ? 'secondary' : 'primary'}
+          size="sm"
           onClick={onSave}
           disabled={isSaving}
         >
@@ -141,15 +145,16 @@ export const PostInlineEditor = ({
             : isDraft
             ? t('forum.draft_update_btn')
             : t('common.save')}
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          className="topic-btn topic-btn--secondary topic-btn-sm"
+          variant="secondary"
+          size="sm"
           onClick={onCancel}
           disabled={isSaving}
         >
           {t('common.cancel')}
-        </button>
+        </Button>
       </div>
     </div>
   );

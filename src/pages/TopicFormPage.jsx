@@ -13,6 +13,7 @@ import { useToast } from '../contexts/ToastProvider';
 import { usePageTitle } from '../contexts/TitleProvider';
 import { makeStorageKey } from '../utils/storageScope';
 import MaskPicker from '../components/topic/MaskPicker';
+import Button from '../components/common/Button';
 
 const LIMITS = {
   title: 100,
@@ -220,13 +221,13 @@ const TopicFormPage = () => {
       <div className="topic-form-access-denied">
         <h3 className="topic-form-access-denied__title">{t('topic_form.access_denied')}</h3>
         <p className="topic-form-access-denied__text">{t('topic_form.no_permission_desc')}</p>
-        <button
+        <Button
           type="button"
-          className="topic-btn topic-btn--accent"
+          variant="danger"
           onClick={() => navigate('/')}
         >
           {t('topic_form.go_home')}
-        </button>
+        </Button>
       </div>
     );
   }
@@ -236,12 +237,12 @@ const TopicFormPage = () => {
       <ForumBreadcrumbs categoryId={categoryId} />
       <section className="topic-form-card">
         <header className="topic-form-header">
-          <h2 className="topic-form-title">{t('forum.create_topic', 'Create Topic')}</h2>
+          <h2 className="topic-form-title">{t('forum.create_topic')}</h2>
         </header>
         <form className="topic-form" onSubmit={handleSubmit} noValidate>
           <div className="topic-form-field">
             <label className="topic-form-label" htmlFor="topicTitle">
-              {t('topic_form.title_label')} <span className="topic-form-required">*</span>
+              {t('forum.topic_title')} <span className="topic-form-required">*</span>
             </label>
             <input
               type="text"
@@ -263,7 +264,7 @@ const TopicFormPage = () => {
 
           <div className="topic-form-field">
             <label className="topic-form-label" htmlFor="topicDescription">
-              {t('topic_form.description_label')}
+              {t('forum.short_description')}
             </label>
             <input
               type="text"
@@ -279,7 +280,7 @@ const TopicFormPage = () => {
           {canUseMasks && (
             <div className="topic-form-field">
               <label className="topic-form-label">
-                {t('topic_form.mask_label')}
+                {t('forum.post_as')}
               </label>
               <MaskPicker
                 value={selectedCharacterId}
@@ -347,21 +348,21 @@ const TopicFormPage = () => {
           </div>
 
           <div className="topic-form-actions">
-            <button
+            <Button
               type="button"
-              className="topic-btn topic-btn--secondary"
+              variant="secondary"
               disabled={submitting}
               onClick={() => navigate(`/category/${categoryId}`)}
             >
               {t('common.cancel')}
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
-              className="topic-btn topic-btn--primary"
+              variant="primary"
               disabled={submitting}
             >
               {submitting ? 'Creating...' : t('forum.create_topic')}
-            </button>
+            </Button>
           </div>
         </form>
       </section>

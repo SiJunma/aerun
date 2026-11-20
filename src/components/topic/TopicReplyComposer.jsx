@@ -2,6 +2,7 @@ import React from 'react';
 import { User, Keyboard, FilePen, Lock, MessageSquareOff } from 'lucide-react';
 import RichEditor from '../common/RichEditor';
 import MaskPicker from './MaskPicker';
+import Button from '../common/Button';
 
 /**
  * TopicReplyComposer: Reply composer card including character/mask selection,
@@ -128,15 +129,16 @@ export const TopicReplyComposer = React.forwardRef(({
                   t={t}
                 />
               )}
-              <button
+              <Button
                 type="button"
-                className="topic-btn topic-btn--accent topic-btn--hotkeys"
+                variant="ghost"
+                size="sm"
+                iconOnly
                 onClick={() => replyEditorRef.current?.openHotkeysModal()}
                 title={t('forum.hotkeys')}
-              >
-                <Keyboard size={18} />
-                <span>{t('forum.help')}</span>
-              </button>
+                leftIcon={<Keyboard size={18} />}
+                aria-label={t('forum.hotkeys')}
+              />
             </div>
 
             <div className="topic-reply__field">
@@ -158,25 +160,25 @@ export const TopicReplyComposer = React.forwardRef(({
 
             <div className="topic-reply__actions">
               {user && !hasDraft && (
-                <button
+                <Button
                   type="button"
-                  className="topic-btn topic-btn--secondary"
+                  variant="secondary"
                   disabled={submitting || draftSaving || !replyContent?.trim()}
                   onClick={handleSaveDraft}
+                  leftIcon={<FilePen size={14} />}
                 >
-                  <FilePen size={14} className="topic-btn__icon" />
                   {draftSaving ? t?.('forum.draft_saving') || 'Saving...' : t?.('forum.draft_save') || 'Save Draft'}
-                </button>
+                </Button>
               )}
-              <button
+              <Button
                 type="submit"
-                className="topic-btn topic-btn--primary topic-reply__submit"
+                variant="primary"
                 disabled={submitting}
               >
                 {submitting
                   ? t?.('forum.posting') || 'Posting...'
                   : t?.('forum.create_post') || 'Submit Reply'}
-              </button>
+              </Button>
             </div>
           </form>
         </div>

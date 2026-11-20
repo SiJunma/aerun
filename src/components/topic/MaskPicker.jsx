@@ -34,10 +34,10 @@ export const MaskPicker = ({
   // Get display label for current selection
   const getDisplayLabel = (charId) => {
     if (!charId) {
-      return `${t?.('forum.post_as_user') || 'User'}: ${profile?.nickname || profile?.email?.split('@')[0]}`;
+      return `${t?.('forum.post_as_user_label') || 'User'}: ${profile?.nickname || profile?.email?.split('@')[0]}`;
     }
     const char = characters.find(c => c.id === charId);
-    return char ? `${t?.('forum.post_as_character') || 'Character'}: ${char.name}` : '';
+    return char ? `${t?.('forum.post_as_character_label') || 'Character'}: ${char.name}` : '';
   };
 
   // Handle click outside to close
@@ -99,7 +99,7 @@ export const MaskPicker = ({
             onClick={() => handleSelect('')}
           >
             <User size={14} className="topic-mask-picker__item-icon" />
-            <span>{t?.('forum.post_as_user') || 'User'}: {profile?.nickname || profile?.email?.split('@')[0]}</span>
+            <span>{t?.('forum.post_as_user_label') || 'User'}: {profile?.nickname || profile?.email?.split('@')[0]}</span>
           </button>
           {characters.length > 0 && (
             <>
@@ -114,7 +114,7 @@ export const MaskPicker = ({
                   onClick={() => handleSelect(char.id)}
                 >
                   <span className="topic-mask-picker__item-icon" aria-hidden="true">★</span>
-                  <span>{t?.('forum.post_as_character') || 'Character'}: {char.name}</span>
+                  <span>{t?.('forum.post_as_character_label') || 'Character'}: {char.name}</span>
                 </button>
               ))}
             </>

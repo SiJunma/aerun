@@ -5,6 +5,7 @@ import MoveTopicsModal from '../modals/MoveTopicsModal';
 import MovePostsModal from '../modals/MovePostsModal';
 import PostVotersModal from '../common/PostVotersModal';
 import Timestamp from '../common/Timestamp';
+import Button from '../common/Button';
 
 /**
  * TopicModalsContainer: Encapsulates all modal dialogs for topic & post actions
@@ -165,16 +166,17 @@ export const TopicModalsContainer = ({
               <div className="topic-flex-between topic-mb-2">
                 <div className="topic-text-sm topic-text-muted">{t('forum.vote_comment')}</div>
                 {(selectedVote.voter_id === currentUserId || !selectedVote.voter_id) && !isEditingRepComment && (
-                  <button
+                  <Button
                     type="button"
-                    className="topic-btn topic-btn--link topic-text-sm"
+                    variant="ghost"
+                    size="sm"
                     onClick={() => {
                       setEditingRepComment(selectedVote.comment || '');
                       setIsEditingRepComment(true);
                     }}
                   >
                     {selectedVote.comment ? t('forum.vote_edit') : t('forum.vote_add')}
-                  </button>
+                  </Button>
                 )}
               </div>
 
@@ -188,22 +190,24 @@ export const TopicModalsContainer = ({
                     placeholder={t('forum.vote_comment_placeholder')}
                   />
                   <div className="topic-flex-end topic-gap-2">
-                    <button
+                    <Button
                       type="button"
-                      className="topic-btn topic-btn--secondary topic-btn-sm"
+                      variant="secondary"
+                      size="sm"
                       onClick={() => setIsEditingRepComment(false)}
                       disabled={savingRepComment}
                     >
                       {t?.('common.cancel') || 'Cancel'}
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       type="button"
-                      className="topic-btn topic-btn--primary topic-btn-sm"
+                      variant="primary"
+                      size="sm"
                       onClick={onUpdateRepComment}
                       disabled={savingRepComment}
                     >
                       {savingRepComment ? t('common.loading') : t('forum.vote_save')}
-                    </button>
+                    </Button>
                   </div>
                 </div>
               ) : (
