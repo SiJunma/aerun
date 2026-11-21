@@ -305,7 +305,7 @@ const RichEditor = forwardRef(({
       { id: 'advanced', priority: 9, width: (showHide ? 45 : 0) + (showDice && !isEdit ? 45 : 0) + 75 }
     ];
 
-    const manualButtonWidth = 45;
+    const manualButtonWidth = 60;
     const moreButtonWidth = 50;
     const padding = 16; // Toolbar padding
     
@@ -912,7 +912,7 @@ const handleUserSearch = async (queryText) => {
               <Clapperboard size={16} /> {t('editor.spoiler')}
             </Dropdown.Item>
             <Dropdown.Item onClick={openAbbrModal} className="d-flex align-items-center gap-2 py-2 px-3">
-              {t('editor.abbreviation')}
+              <HelpCircle size={16} /> {t('editor.abbreviation')}
             </Dropdown.Item>
             <Dropdown.Item onClick={() => insertText('[code]', '[/code]', 'code')} className="d-flex align-items-center gap-2 py-2 px-3">
               <Code size={16} /> {t('editor.code_block')}
@@ -1025,7 +1025,7 @@ const handleUserSearch = async (queryText) => {
                 <MoreHorizontal size={18} />
               </Button>
             ) : (
-              <Dropdown className="d-inline-block">
+              <Dropdown className="d-inline-block" drop="up">
                 <Dropdown.Toggle variant="light" size="sm" className="p-1 px-2 no-caret editor-dropdown-toggle" title={t('editor.additional_formatting_title')}>
                   <MoreHorizontal size={18} />
                 </Dropdown.Toggle>
@@ -1034,7 +1034,7 @@ const handleUserSearch = async (queryText) => {
                   style={{
                     borderRadius: '12px',
                     minWidth: '220px',
-                    maxHeight: '260px',
+                    maxHeight: '400px',
                     overflowY: 'auto'
                   }}
                 >

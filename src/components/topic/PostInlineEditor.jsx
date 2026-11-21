@@ -44,11 +44,12 @@ export const PostInlineEditor = ({
       {isFirstPost && !isDraft && (
         <div className="topic-post-editor__field">
           <div className="topic-post-editor__field-row">
-            <label className="topic-post-editor__label">
+            <label className="topic-post-editor__label" htmlFor="editTopicTitle">
               {t('forum.topic_title_label')}
             </label>
             <input
               type="text"
+              id="editTopicTitle"
               className="topic-post-editor__input"
               value={editTopicTitle}
               onChange={(e) => setEditTopicTitle?.(e.target.value)}
@@ -57,11 +58,12 @@ export const PostInlineEditor = ({
             />
           </div>
           <div className="topic-post-editor__field-row">
-            <label className="topic-post-editor__label">
+            <label className="topic-post-editor__label" htmlFor="editTopicDescription">
               {t('forum.topic_description_label')}
             </label>
             <input
               type="text"
+              id="editTopicDescription"
               className="topic-post-editor__input"
               value={editTopicDescription}
               onChange={(e) => setEditTopicDescription?.(e.target.value)}
@@ -101,6 +103,7 @@ export const PostInlineEditor = ({
               setLastSelectedMask={null} // Not available in inline editor context
               t={t}
               className="topic-mask-picker--inline"
+              aria-label={t('forum.post_as')}
             />
           )}
 
@@ -136,7 +139,6 @@ export const PostInlineEditor = ({
         <Button
           type="button"
           variant={isDraft ? 'secondary' : 'primary'}
-          size="sm"
           onClick={onSave}
           disabled={isSaving}
         >
@@ -149,7 +151,6 @@ export const PostInlineEditor = ({
         <Button
           type="button"
           variant="secondary"
-          size="sm"
           onClick={onCancel}
           disabled={isSaving}
         >

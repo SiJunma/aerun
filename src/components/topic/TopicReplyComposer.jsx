@@ -127,6 +127,7 @@ export const TopicReplyComposer = React.forwardRef(({
                   user={user}
                   setLastSelectedMask={setLastSelectedMask}
                   t={t}
+                  aria-label={t('forum.post_as')}
                 />
               )}
               <Button

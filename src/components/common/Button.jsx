@@ -9,6 +9,7 @@ import { useI18n } from '../../contexts/I18nProvider';
  * - primary: Main action button (filled primary color)
  * - secondary: Secondary action (outlined, subtle)
  * - ghost: Text-only button (like link but button semantics)
+ * - filled: Filled with secondary color (for less prominent filled buttons)
  * - danger: Destructive action (red)
  * 
  * Sizes:
@@ -17,7 +18,7 @@ import { useI18n } from '../../contexts/I18nProvider';
  * - lg: Large (for prominent CTAs)
  * 
  * Props:
- * - variant: 'primary' | 'secondary' | 'ghost' | 'danger'
+ * - variant: 'primary' | 'secondary' | 'ghost' | 'filled' | 'danger'
  * - size: 'default' | 'sm' | 'lg'
  * - fullWidth: boolean (block button)
  * - iconOnly: boolean (icon only, square)
@@ -53,6 +54,7 @@ export const Button = ({
     primary: 'topic-btn--primary',
     secondary: 'topic-btn--secondary',
     ghost: 'topic-btn--ghost',
+    filled: 'topic-btn--filled',
     danger: 'topic-btn--danger',
   };
   const sizeClasses = {

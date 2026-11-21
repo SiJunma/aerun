@@ -42,6 +42,7 @@ const TopicFormPage = () => {
   const [characters, setCharacters] = useState([]);
   const [category, setCategory] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [titleTouched, setTitleTouched] = useState(false);
   const submitInFlightRef = useRef(null);
   if (submitInFlightRef.current === null) {
     submitInFlightRef.current = createInFlight();
@@ -151,6 +152,7 @@ const TopicFormPage = () => {
 
   const handleSubmit = useCallback(async (e) => {
     e.preventDefault();
+    setTitleTouched(true);
     if (submitting) return;
     if (!submitInFlightRef.current.tryEnter()) return;
 
@@ -234,7 +236,12 @@ const TopicFormPage = () => {
 
   return (
     <div className="topic-form-page">
-      <ForumBreadcrumbs categoryId={categoryId} />
+      <ForumBreadcrumbs
+        items={[
+          { label: category?.title || '', to: `/category/${categoryId}` },
+          { label: t('forum.create_topic'), active: true }
+        ]}
+      />
       <section className="topic-form-card">
         <header className="topic-form-header">
           <h2 className="topic-form-title">{t('forum.create_topic')}</h2>
@@ -251,11 +258,12 @@ const TopicFormPage = () => {
               placeholder={t('topic_form.title_placeholder')}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
+              onBlur={() => setTitleTouched(true)}
               maxLength={LIMITS.title}
               required
-              aria-invalid={!title && draftLoaded}
+              aria-invalid={!title && titleTouched}
             />
-            {!title && draftLoaded && (
+            {!title && titleTouched && (
               <div className="topic-form-feedback topic-form-feedback--error">
                 {t('topic_form.title_required')}
               </div>
@@ -279,10 +287,11 @@ const TopicFormPage = () => {
 
           {canUseMasks && (
             <div className="topic-form-field">
-              <label className="topic-form-label">
+              <label className="topic-form-label" id="maskPickerLabel">
                 {t('forum.post_as')}
               </label>
               <MaskPicker
+                id="maskPickerToggle"
                 value={selectedCharacterId}
                 onChange={(charId) => {
                   const char = characters.find(c => c.id === charId);
@@ -294,6 +303,7 @@ const TopicFormPage = () => {
                 user={user}
                 setLastSelectedMask={setLastSelectedMask}
                 t={t}
+                aria-labelledby="maskPickerLabel"
               />
             </div>
           )}
@@ -338,11 +348,11 @@ const TopicFormPage = () => {
             <input
               type="checkbox"
               id="pinFirstPost"
-              className="topic-form-checkbox"
+              className="topic-post-editor__checkbox"
               checked={pinFirstPost}
               onChange={(e) => setPinFirstPost(e.target.checked)}
             />
-            <label htmlFor="pinFirstPost" className="topic-form-checkbox-label">
+            <label htmlFor="pinFirstPost">
               {t('forum.pin_first_post')}
             </label>
           </div>

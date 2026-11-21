@@ -26,6 +26,9 @@ export const MaskPicker = ({
   t,
   disabled = false,
   className = '',
+  id,
+  ariaLabelledBy,
+  'aria-label': ariaLabel,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const wrapperRef = useRef(null);
@@ -78,6 +81,9 @@ export const MaskPicker = ({
       <button
         type="button"
         ref={buttonRef}
+        id={id}
+        aria-labelledby={ariaLabelledBy}
+        aria-label={ariaLabel}
         className="topic-mask-picker__toggle"
         onClick={() => !disabled && setIsOpen(!isOpen)}
         disabled={disabled}

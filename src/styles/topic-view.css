@@ -1931,26 +1931,13 @@
   gap: 0.5rem;
 }
 
-.topic-form-checkbox {
-  width: 1rem;
-  height: 1rem;
-  accent-color: var(--primary-color);
-}
 
-.topic-form-checkbox-label {
-  margin: 0;
-  font-weight: 500;
-  color: var(--text-color);
-  font-size: 0.875rem;
-}
 
 .topic-form-actions {
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
-  margin-top: 2rem;
-  padding-top: 1.5rem;
-  border-top: 1px solid var(--topic-reply-card-border);
+  margin-top: 1.5rem;
 }
 
 /* Loading state */
@@ -2051,6 +2038,16 @@
   border-color: var(--text-color);
 }
 
+.topic-btn--filled {
+  background-color: var(--secondary-color);
+  border-color: var(--secondary-color);
+  color: var(--topic-reply-header-text);
+}
+
+.topic-btn--filled:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
 .topic-btn--ghost {
   background: transparent;
   border-color: transparent;
@@ -2134,6 +2131,7 @@
 }
 
 .topic-btn--primary .topic-btn__spinner,
+.topic-btn--filled .topic-btn__spinner,
 .topic-btn--danger .topic-btn__spinner {
   color: var(--topic-reply-header-text);
 }
@@ -2148,15 +2146,6 @@
 }
 
 /* Form actions layout */
-.topic-form-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
-  margin-top: 2rem;
-  padding-top: 1.5rem;
-  border-top: 1px solid var(--topic-reply-card-border);
-}
-
 .topic-post-editor__actions {
   display: flex;
   gap: var(--topic-post-editor-actions-gap);
