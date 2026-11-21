@@ -1110,11 +1110,480 @@
   box-shadow: 0 0 0 0.25rem rgba(var(--primary-rgb), 0.25);
 }
 
+/* ============================================================
+   Editor Toolbar — semantic classes (replacing Bootstrap)
+   ============================================================ */
+
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.5rem;
+  border-radius: var(--topic-reply-card-radius);
+  background-color: var(--topic-reply-card-bg);
+  border: 1px solid var(--topic-reply-card-border);
+  min-height: 46px;
+}
+
+.editor-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.editor-toolbar-divider {
+  width: 1px;
+  height: 1.5rem;
+  background-color: var(--topic-reply-card-border);
+  opacity: 0.25;
+}
+
+/* Toolbar buttons — icon-only ghost variant */
+.editor-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--text-color);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.editor-toolbar-btn:hover:not(:disabled),
+.editor-toolbar-btn:focus:not(:disabled) {
+  background-color: rgba(var(--primary-rgb), 0.1);
+  color: var(--primary-color);
+  border-color: rgba(var(--primary-rgb), 0.2);
+}
+
+.editor-toolbar-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.editor-toolbar-btn--active {
+  background-color: rgba(var(--primary-rgb), 0.15);
+  color: var(--primary-color);
+  border-color: rgba(var(--primary-rgb), 0.3);
+}
+
+.editor-toolbar-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Mobile more-tools button */
+.editor-more-tools-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--text-color);
+  cursor: pointer;
+}
+
+.editor-more-tools-btn:hover:not(:disabled),
+.editor-more-tools-btn:focus:not(:disabled) {
+  background-color: rgba(var(--primary-rgb), 0.1);
+  color: var(--primary-color);
+  border-color: rgba(var(--primary-rgb), 0.2);
+}
+
+.editor-more-tools-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
 .min-h-60px {
   min-height: 60px;
 }
 
-/* Semantic utility classes for modals (replacing Bootstrap utilities) */
+/* /* ============================================================
+   Custom Dropdown Pickers (Size, Color) — like MaskPicker
+   ============================================================ */
+
+.editor-picker {
+  position: relative;
+  display: inline-flex;
+}
+
+.editor-picker__toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--text-color);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.editor-picker__toggle:hover:not(:disabled),
+.editor-picker__toggle:focus:not(:disabled) {
+  background-color: rgba(var(--primary-rgb), 0.1);
+  color: var(--primary-color);
+  border-color: rgba(var(--primary-rgb), 0.2);
+}
+
+.editor-picker__toggle:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.editor-picker__toggle svg {
+  width: 16px;
+  height: 16px;
+}
+
+.editor-picker__menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 1050;
+  min-width: 180px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 0.25rem;
+  background-color: var(--topic-reply-card-bg);
+  border: 1px solid var(--topic-reply-card-border);
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.editor-picker__menu--right {
+  left: auto;
+  right: 0;
+}
+
+.editor-picker__item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.375rem 0.5rem;
+  border: none;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: var(--text-color);
+  font-size: 0.875rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+
+.editor-picker__item:hover,
+.editor-picker__item:focus {
+  background-color: rgba(var(--primary-rgb), 0.1);
+  outline: none;
+}
+
+.editor-picker__item--active {
+  background-color: rgba(var(--primary-rgb), 0.15);
+  color: var(--primary-color);
+}
+
+.editor-picker__divider {
+  height: 1px;
+  margin: 0.25rem 0;
+  background-color: var(--topic-reply-card-border);
+  opacity: 0.25;
+}
+
+/* Color picker swatches */
+.editor-color-swatch {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 0.25rem;
+  border: 1px solid var(--topic-reply-card-border);
+  flex-shrink: 0;
+}
+
+/* ============================================================
+   Overflow Menu (More Tools "...")
+   ============================================================ */
+
+.editor-overflow-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--text-color);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.editor-overflow-toggle:hover:not(:disabled),
+.editor-overflow-toggle:focus:not(:disabled) {
+  background-color: rgba(var(--primary-rgb), 0.1);
+  color: var(--primary-color);
+  border-color: rgba(var(--primary-rgb), 0.2);
+}
+
+.editor-overflow-toggle:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.editor-overflow-toggle svg {
+  width: 18px;
+  height: 18px;
+}
+
+.editor-overflow-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 1050;
+  min-width: 220px;
+  max-height: 400px;
+  overflow-y: auto;
+  padding: 0.25rem;
+  background-color: var(--topic-reply-card-bg);
+  border: 1px solid var(--topic-reply-card-border);
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.editor-overflow-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: none;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--text-color);
+  font-size: 0.875rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+
+.editor-overflow-item:hover,
+.editor-overflow-item:focus {
+  background-color: rgba(var(--primary-rgb), 0.1);
+  outline: none;
+}
+
+.editor-overflow-item svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--secondary-color);
+}
+
+.editor-overflow-item:hover svg,
+.editor-overflow-item:focus svg {
+  color: var(--primary-color);
+}
+
+.editor-overflow-group {
+  margin-top: 0.25rem;
+  padding-top: 0.25rem;
+  border-top: 1px solid var(--topic-reply-card-border);
+  opacity: 0.25;
+}
+
+.editor-overflow-group:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+/* ============================================================
+   Editor Textarea & Footer
+   ============================================================ */
+
+.editor-textarea {
+  width: 100%;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--text-color);
+  background-color: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 0.375rem;
+  transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+  resize: vertical;
+  min-height: 60px;
+  font-family: inherit;
+}
+
+.editor-textarea:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 0.25rem rgba(var(--primary-rgb), 0.225);
+}
+
+.editor-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+.editor-footer__hint {
+  color: var(--secondary-color);
+}
+
+.editor-footer__counter {
+  font-weight: 600;
+  color: var(--secondary-color);
+}
+
+.editor-footer__counter--danger {
+  color: var(--danger-text);
+}
+
+/* ============================================================
+   Hotkeys Modal — dl/grid instead of Table
+   ============================================================ */
+
+.editor-hotkeys-hint {
+  margin-bottom: 0.75rem;
+  font-size: 0.875rem;
+  color: var(--secondary-color);
+}
+
+.editor-hotkeys-group {
+  margin-bottom: 1rem;
+}
+
+.editor-hotkeys-group-title {
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--text-color);
+}
+
+.editor-hotkeys-list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 0.75rem;
+  font-size: 0.8125rem;
+}
+
+.editor-hotkeys-key {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem 0.375rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.75rem;
+  background-color: var(--topic-reply-card-bg);
+  border: 1px solid var(--topic-reply-card-border);
+  border-radius: 0.25rem;
+  white-space: nowrap;
+}
+
+.editor-hotkeys-desc {
+  color: var(--text-color);
+}
+
+/* ============================================================
+   Mentions Dropdown & Additional Formatting Modal
+   ============================================================ */
+
+.editor-mentions-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 1050;
+  width: 100%;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 0.25rem;
+  background-color: var(--topic-reply-card-bg);
+  border: 1px solid var(--topic-reply-card-border);
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.editor-mentions-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.375rem 0.5rem;
+  border: none;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: var(--text-color);
+  font-size: 0.875rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+
+.editor-mentions-item:hover,
+.editor-mentions-item:focus {
+  background-color: rgba(var(--primary-rgb), 0.1);
+  outline: none;
+}
+
+.editor-mentions-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.editor-mentions-avatar-placeholder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background-color: var(--primary-color);
+  color: var(--topic-reply-header-text);
+  font-size: 0.75rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.editor-more-tools-modal {
+  padding: 0.25rem;
+}
+
+.editor-more-tools-group {
+  margin-top: 0.25rem;
+  padding-top: 0.25rem;
+  border-top: 1px solid var(--topic-reply-card-border);
+  opacity: 0.25;
+}
+
+.editor-more-tools-group:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+Semantic utility classes for modals (replacing Bootstrap utilities) */
 .topic-flex-between {
   display: flex;
   justify-content: space-between;
