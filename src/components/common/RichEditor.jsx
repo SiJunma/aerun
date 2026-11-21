@@ -1029,7 +1029,7 @@ const handleUserSearch = async (queryText) => {
                 <MoreHorizontal size={18} />
               </Button>
             ) : (
-              <Dropdown className="d-inline-block" drop="up">
+              <Dropdown className="d-inline-block">
                 <Dropdown.Toggle variant="light" size="sm" className="p-1 px-2 no-caret editor-dropdown-toggle" title={t('editor.additional_formatting_title')}>
                   <MoreHorizontal size={18} />
                 </Dropdown.Toggle>
