@@ -171,23 +171,47 @@ const RichEditor = forwardRef(({
     ];
     const TOOLBAR_GROUP_ORDER = ['style', 'history', 'smiles', 'links', 'typography', 'align', 'inserts', 'media', 'advanced'];
 
-    // Reserve space for: overflow toggle (38px) + divider (2px) + container padding (16px) = ~56px
-    const fixedReserved = 56;
-    let availableWidth = editorWidth - fixedReserved;
-    const visible = [];
-    const overflow = [];
-    for (const groupId of TOOLBAR_GROUP_ORDER) {
+    // Exact width budget (px). Every constant is taken from topic-view.css —
+    // the previous estimate (editorWidth - 56, groups only) ignored the
+    // dividers, the toolbar gaps and the toolbar padding, admitted one group
+    // too many, and the toolbar overflowed the card: the tail groups and the
+    // "…" toggle were clipped off-screen by overflow-x: hidden.
+    // - toolbar chrome: padding 0.5rem*2 (16) + border 1px*2 (2) = 18;
+    //   offsetWidth includes both, so the flex content box is editorWidth - 18
+    // - boundary between two visible groups: toolbar gap 4 + divider
+    //   (1px wide + margins 0.25rem*2 = 9) + gap 4 = 17
+    // - overflow toggle section: gap 4 + divider 9 + gap 4 + toggle 34 = 51
+    const TOOLBAR_CHROME = 18;
+    const GROUP_BOUNDARY = 17;
+    const TOGGLE_SECTION = 51;
+    const contentWidth = editorWidth - TOOLBAR_CHROME;
+    const widthOf = (groupId) => {
       const group = TOOLBAR_GROUPS.find(g => g.id === groupId);
       if (!group) {
         // This should never happen — groups and order must stay in sync
         console.error('[RichEditor] Group not found in TOOLBAR_GROUPS:', groupId);
-        continue;
+        return 0;
       }
-      if (availableWidth >= group.minWidth) {
-        visible.push(groupId);
-        availableWidth -= group.minWidth;
-      } else {
-        overflow.push(groupId);
+      return group.minWidth;
+    };
+
+    const visible = [];
+    const overflow = [];
+    const allGroupsWidth = TOOLBAR_GROUPS.reduce((sum, g) => sum + g.minWidth, 0)
+      + (TOOLBAR_GROUPS.length - 1) * GROUP_BOUNDARY;
+    if (allGroupsWidth <= contentWidth) {
+      // Everything fits — no overflow toggle needed.
+      visible.push(...TOOLBAR_GROUP_ORDER);
+    } else {
+      let used = 0;
+      for (const groupId of TOOLBAR_GROUP_ORDER) {
+        const add = visible.length === 0 ? widthOf(groupId) : GROUP_BOUNDARY + widthOf(groupId);
+        if (used + add + TOGGLE_SECTION <= contentWidth) {
+          visible.push(groupId);
+          used += add;
+        } else {
+          overflow.push(groupId);
+        }
       }
     }
     /* eslint-disable react-hooks/set-state-in-effect */
@@ -834,7 +858,18 @@ const RichEditor = forwardRef(({
                   <MoreHorizontal size={18} />
                 </button>
                 {showDesktopOverflow && (
-                  <div className="editor-overflow-menu" role="listbox">
+                  <div
+                    className="editor-overflow-menu"
+                    role="listbox"
+                    onClick={(event) => {
+                      // Close after choosing a formatting action. Picker
+                      // toggles inside the menu are not .editor-overflow-item,
+                      // so opening a size/color picker does not close the menu.
+                      if (event.target.closest('.editor-overflow-item')) {
+                        setShowDesktopOverflow(false);
+                      }
+                    }}
+                  >
                     {overflowGroupIds.map(groupId => (
                       <React.Fragment key={groupId}>
                         {renderGroup(groupId, true)}

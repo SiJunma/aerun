@@ -1170,8 +1170,12 @@
   margin-bottom: 0.5rem;
 }
 
-/* Toolbar buttons — light chips with border */
-.editor-toolbar-btn {
+/* Toolbar buttons — light chips with border.
+   Scoped under .editor-toolbar so these rules beat .topic-btn--ghost
+   (same specificity, later in this file): the toolbar buttons are ghost
+   Buttons, and without the extra scope the ghost background/border
+   (transparent) and the ghost hover (white icon) win. */
+.editor-toolbar .editor-toolbar-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1186,19 +1190,19 @@
   transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
-.editor-toolbar-btn:hover:not(:disabled),
-.editor-toolbar-btn:focus:not(:disabled) {
+.editor-toolbar .editor-toolbar-btn:hover:not(:disabled),
+.editor-toolbar .editor-toolbar-btn:focus:not(:disabled) {
   background-color: var(--topic-post-footer-bg);
   border-color: var(--secondary-color);
   color: var(--text-color);
 }
 
-.editor-toolbar-btn:disabled {
+.editor-toolbar .editor-toolbar-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
 
-.editor-toolbar-btn svg {
+.editor-toolbar .editor-toolbar-btn svg {
   width: 16px;
   height: 16px;
   color: var(--text-color);
@@ -1220,8 +1224,10 @@
 
 
 
-/* Mobile more-tools button */
-.editor-more-tools-btn {
+/* Mobile more-tools button.
+   Same scoping as .editor-toolbar-btn: this is a ghost Button, and without
+   the .editor-toolbar scope the later .topic-btn--ghost rules win. */
+.editor-toolbar .editor-more-tools-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1236,14 +1242,14 @@
   transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
-.editor-more-tools-btn:hover:not(:disabled),
-.editor-more-tools-btn:focus:not(:disabled) {
+.editor-toolbar .editor-more-tools-btn:hover:not(:disabled),
+.editor-toolbar .editor-more-tools-btn:focus:not(:disabled) {
   background-color: var(--topic-post-footer-bg);
   border-color: var(--secondary-color);
   color: var(--text-color);
 }
 
-.editor-more-tools-btn svg {
+.editor-toolbar .editor-more-tools-btn svg {
   width: 18px;
   height: 18px;
   color: var(--text-color);
