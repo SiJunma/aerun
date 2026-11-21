@@ -820,7 +820,11 @@ const handleUserSearch = async (queryText) => {
           </div>
         );
       case 'smiles':
-        return (
+        return isOverflow ? (
+          <Dropdown.Item onClick={() => setShowSmilesModal(true)} className="d-flex align-items-center gap-2 py-2 px-3">
+            <Smile size={16} /> {t('editor.smiles')}
+          </Dropdown.Item>
+        ) : (
           <Button
             variant="light"
             size="sm"
@@ -1104,26 +1108,30 @@ const handleUserSearch = async (queryText) => {
           </>
         }
       >
-        <Form.Group className="mb-3">
-          <Form.Label>{t('editor.link_text_label')}</Form.Label>
-          <Form.Control
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="linkText">{t('editor.link_text_label')}</label>
+          <input
+            id="linkText"
             type="text"
+            className="editor-modal-input"
             value={linkData.text}
             onChange={e => setLinkData({ ...linkData, text: e.target.value })}
             placeholder={t('editor.link_text_placeholder')}
           />
-        </Form.Group>
-        <Form.Group>
-          <Form.Label>URL</Form.Label>
-          <Form.Control
+        </div>
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="linkUrl">URL</label>
+          <input
+            id="linkUrl"
             type="url"
+            className="editor-modal-input"
             value={linkData.url}
             onChange={e => setLinkData({ ...linkData, url: e.target.value })}
             required
             autoFocus
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleLinkSubmit(e); } }}
           />
-        </Form.Group>
+        </div>
       </ForumModal>
 
       <ForumModal
@@ -1141,27 +1149,31 @@ const handleUserSearch = async (queryText) => {
           </>
         }
       >
-        <Form.Group className="mb-3">
-          <Form.Label>{t('editor.abbr_text_label')}</Form.Label>
-          <Form.Control
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="abbrText">{t('editor.abbr_text_label')}</label>
+          <input
+            id="abbrText"
             type="text"
+            className="editor-modal-input"
             value={abbrData.text}
             onChange={e => setAbbrData({ ...abbrData, text: e.target.value })}
             placeholder={t('editor.abbr_text_placeholder')}
             autoFocus
           />
-        </Form.Group>
-        <Form.Group>
-          <Form.Label>{t('editor.abbr_title_label')}</Form.Label>
-          <Form.Control
+        </div>
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="abbrTitle">{t('editor.abbr_title_label')}</label>
+          <input
+            id="abbrTitle"
             type="text"
+            className="editor-modal-input"
             value={abbrData.title}
             onChange={e => setAbbrData({ ...abbrData, title: e.target.value })}
             placeholder={t('editor.abbr_title_placeholder')}
             required
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAbbrSubmit(e); } }}
           />
-        </Form.Group>
+        </div>
       </ForumModal>
 
       <ForumModal
@@ -1179,35 +1191,41 @@ const handleUserSearch = async (queryText) => {
           </>
         }
       >
-        <Form.Group className="mb-3">
-          <Form.Label>{t('editor.image_alt_label')}</Form.Label>
-          <Form.Control
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="imageAlt">{t('editor.image_alt_label')}</label>
+          <input
+            id="imageAlt"
             type="text"
+            className="editor-modal-input"
             value={imageData.alt}
             onChange={e => setImageData({ ...imageData, alt: e.target.value })}
             placeholder={t('editor.image_alt_placeholder')}
           />
-        </Form.Group>
-        <Form.Group className="mb-3">
-          <Form.Label>{t('editor.image_width_label')}</Form.Label>
-          <Form.Control
+        </div>
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="imageWidth">{t('editor.image_width_label')}</label>
+          <input
+            id="imageWidth"
             type="text"
+            className="editor-modal-input"
             value={imageData.width || ''}
             onChange={e => setImageData({ ...imageData, width: e.target.value })}
             placeholder={t('editor.image_width_placeholder')}
           />
-        </Form.Group>
-        <Form.Group>
-          <Form.Label>{t('editor.image_url_label')}</Form.Label>
-          <Form.Control
+        </div>
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="imageUrl">{t('editor.image_url_label')}</label>
+          <input
+            id="imageUrl"
             type="url"
+            className="editor-modal-input"
             value={imageData.url}
             onChange={e => setImageData({ ...imageData, url: e.target.value })}
             required
             autoFocus
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleImageSubmit(e); } }}
           />
-        </Form.Group>
+        </div>
       </ForumModal>
 
       <ForumModal
@@ -1225,16 +1243,17 @@ const handleUserSearch = async (queryText) => {
           </>
         }
       >
-        <div className="alert alert-info py-2" style={{ fontSize: '0.875rem' }}>
+        <div className="editor-modal-notice">
           {t('editor.dice_immutable')}
         </div>
 
-        <Form.Group className="mb-3">
-          <Form.Label>{t('editor.dice_select_label')}</Form.Label>
-          <Form.Select
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="diceSides">{t('editor.dice_select_label')}</label>
+          <select
+            id="diceSides"
+            className="editor-modal-select"
             value={diceData.sides}
             onChange={e => setDiceData({ ...diceData, sides: parseInt(e.target.value) })}
-            className="form-select-themed"
           >
             <option value="4">d4</option>
             <option value="6">d6</option>
@@ -1243,24 +1262,23 @@ const handleUserSearch = async (queryText) => {
             <option value="12">d12</option>
             <option value="20">d20</option>
             <option value="100">d100</option>
-          </Form.Select>
-          <Form.Text className="text-muted small mt-1 d-block">
-            {t('editor.dice_type_hint')}
-          </Form.Text>
-        </Form.Group>
+          </select>
+          <small className="editor-modal-hint">{t('editor.dice_type_hint')}</small>
+        </div>
 
         {!hideDiceType && (
-          <Form.Group className="mb-3">
-            <Form.Label>{t('editor.dice_type_label')}</Form.Label>
-            <Form.Select
+          <div className="editor-modal-field">
+            <label className="editor-modal-label" htmlFor="diceType">{t('editor.dice_type_label')}</label>
+            <select
+              id="diceType"
+              className="editor-modal-select"
               value={diceData.type}
               onChange={e => setDiceData({ ...diceData, type: e.target.value })}
-              className="form-select-themed"
             >
               <option value="normal">{t('editor.dice_normal')}</option>
               <option value="master">{t('editor.dice_master')}</option>
-            </Form.Select>
-          </Form.Group>
+            </select>
+          </div>
         )}
       </ForumModal>
 
@@ -1279,99 +1297,100 @@ const handleUserSearch = async (queryText) => {
           </>
         }
       >
-        <Form onSubmit={handleHideSubmit}>
-          <div className="mb-3 p-3 rounded" style={{ backgroundColor: 'rgba(var(--primary-rgb, 13, 110, 253), 0.05)', border: '1px solid var(--border-color)' }}>
+                <form onSubmit={handleHideSubmit} className="editor-modal-form">
+          <div className="editor-modal-card">
             {/* Threshold Mode */}
-            <Form.Check
-              type="radio"
-              id="hide-type-posts"
-              label={t('editor.hide_threshold')}
-              name="hideType"
-              checked={hideData.type === 'posts'}
-              onChange={() => setHideData(prev => ({ ...prev, type: 'posts' }))}
-              className="fw-bold mb-2 cursor-pointer"
-            />
+            <label className="editor-modal-radio">
+              <input
+                type="radio"
+                id="hide-type-posts"
+                name="hideType"
+                checked={hideData.type === 'posts'}
+                onChange={() => setHideData(prev => ({ ...prev, type: 'posts' }))}
+              />
+              <span>{t('editor.hide_threshold')}</span>
+            </label>
             {hideData.type === 'posts' && (
-              <div className="ms-4 mb-3">
-                <Form.Control
+              <div className="editor-modal-field editor-modal-field--indented">
+                <input
                   type="number"
+                  id="hideThreshold"
+                  className="editor-modal-input editor-modal-input--small"
                   value={hideData.threshold}
                   onChange={(e) => setHideData(prev => ({ ...prev, threshold: e.target.value }))}
                   min="1"
                   placeholder="10"
-                  className="modal-section-themed"
-                  style={{ width: '120px' }}
                   autoFocus
                 />
               </div>
             )}
 
             {/* Addressed Mode */}
-            <Form.Check
-              type="radio"
-              id="hide-type-user"
-              label={t('editor.hide_addressed_label')}
-              name="hideType"
-              checked={hideData.type === 'user'}
-              onChange={() => setHideData(prev => ({ ...prev, type: 'user' }))}
-              className="fw-bold mb-2 cursor-pointer"
-            />
+            <label className="editor-modal-radio">
+              <input
+                type="radio"
+                id="hide-type-user"
+                name="hideType"
+                checked={hideData.type === 'user'}
+                onChange={() => setHideData(prev => ({ ...prev, type: 'user' }))}
+              />
+              <span>{t('editor.hide_addressed_label')}</span>
+            </label>
             {hideData.type === 'user' && (
-              <div className="ms-4 mb-3 position-relative">
-                <Form.Control
+              <div className="editor-modal-field editor-modal-field--indented editor-modal-field--relative">
+                <input
                   type="text"
+                  id="hideUsername"
+                  className="editor-modal-input"
                   placeholder={t('editor.hide_username_placeholder')}
                   value={hideData.username}
                   onChange={(e) => handleUserSearch(e.target.value)}
-                  className="modal-section-themed"
                   autoComplete="off"
                 />
-                {isSearchingUsers && <div className="small text-muted mt-1">{t('editor.hide_searching')}</div>}
+                {isSearchingUsers && <small className="editor-modal-hint">{t('editor.hide_searching')}</small>}
                 {!isSearchingUsers && userSearchResults.length > 0 && (
-                  <div className="position-absolute w-100 mt-1 shadow-sm rounded border bg-white" style={{ zIndex: 1000, maxHeight: '200px', overflowY: 'auto' }}>
+                  <div className="editor-modal-dropdown">
                     {userSearchResults.map(u => (
-                      <div 
-                        key={u.id} 
-                        className="p-2 cursor-pointer dropdown-item d-flex align-items-center gap-2"
+                      <button
+                        key={u.id}
+                        type="button"
+                        className="editor-modal-dropdown-item"
                         onClick={() => selectUser(u)}
                       >
-                        <div style={{ width: 24, height: 24, borderRadius: '50%', backgroundColor: 'var(--bs-gray-300)', overflow: 'hidden' }}>
+                        <div className="editor-modal-avatar">
                           {u.avatar_url ? (
-                            <img src={resolveAvatarUrl(u.avatar_url)} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            <img src={resolveAvatarUrl(u.avatar_url)} alt="avatar" />
                           ) : (
-                            <div className="d-flex align-items-center justify-content-center h-100 text-white small fw-bold">
-                              {u.nickname?.charAt(0).toUpperCase()}
-                            </div>
+                            <span>{u.nickname?.charAt(0).toUpperCase()}</span>
                           )}
                         </div>
-                        <span className="fw-semibold text-dark">{u.nickname}</span>
-                      </div>
+                        <span>{u.nickname}</span>
+                      </button>
                     ))}
                   </div>
                 )}
                 {hideData.uid && (
-                  <div className="small text-success mt-1">
+                  <small className="editor-modal-hint editor-modal-hint--success">
                     {t('editor.hide_user_selected')}
-                  </div>
+                  </small>
                 )}
               </div>
             )}
 
             {/* Hidden Mode */}
-            <Form.Check
-              type="radio"
-              id="hide-type-hidden"
-              label={t('editor.hide_hidden')}
-              name="hideType"
-              checked={hideData.type === 'hidden'}
-              onChange={() => setHideData(prev => ({ ...prev, type: 'hidden' }))}
-              className="fw-bold cursor-pointer"
-            />
+            <label className="editor-modal-radio">
+              <input
+                type="radio"
+                id="hide-type-hidden"
+                name="hideType"
+                checked={hideData.type === 'hidden'}
+                onChange={() => setHideData(prev => ({ ...prev, type: 'hidden' }))}
+              />
+              <span>{t('editor.hide_hidden')}</span>
+            </label>
           </div>
-          <p className="small text-muted mb-0">
-            {t('editor.hide_hidden_hint')}
-          </p>
-        </Form>
+          <small className="editor-modal-hint">{t('editor.hide_hidden_hint')}</small>
+        </form>
       </ForumModal>
 
       <ForumModal
@@ -1389,21 +1408,25 @@ const handleUserSearch = async (queryText) => {
           </>
         }
       >
-        <Form.Group className="mb-3">
-          <Form.Label>{t('editor.columns_count_label')}</Form.Label>
-          <Form.Select
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="columnsCount">{t('editor.columns_count_label')}</label>
+          <select
+            id="columnsCount"
+            className="editor-modal-select"
             value={columnsData.count}
             onChange={(e) => setColumnsData({ ...columnsData, count: parseInt(e.target.value) })}
           >
             <option value={2}>2</option>
             <option value={3}>3</option>
             <option value={4}>4</option>
-          </Form.Select>
-        </Form.Group>
+          </select>
+        </div>
 
-        <Form.Group className="mb-3">
-          <Form.Label>{t('editor.columns_stack_label')}</Form.Label>
-          <Form.Select
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="columnsStack">{t('editor.columns_stack_label')}</label>
+          <select
+            id="columnsStack"
+            className="editor-modal-select"
             value={columnsData.stack}
             onChange={(e) => setColumnsData({ ...columnsData, stack: e.target.value })}
           >
@@ -1412,11 +1435,9 @@ const handleUserSearch = async (queryText) => {
             <option value="768">{t('editor.columns_tablet')}</option>
             <option value="992">{t('editor.columns_desktop')}</option>
             <option value="9999">{t('editor.columns_always')}</option>
-          </Form.Select>
-          <Form.Text className="text-muted small mt-1 d-block">
-            {t('editor.columns_hint')}
-          </Form.Text>
-        </Form.Group>
+          </select>
+          <small className="editor-modal-hint">{t('editor.columns_hint')}</small>
+        </div>
       </ForumModal>
 
       <ForumModal
@@ -1434,9 +1455,11 @@ const handleUserSearch = async (queryText) => {
           </>
         }
       >
-        <Form.Group className="mb-3">
-          <Form.Label>{t('editor.table_rows_label')}</Form.Label>
-          <Form.Select
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="tableRows">{t('editor.table_rows_label')}</label>
+          <select
+            id="tableRows"
+            className="editor-modal-select"
             value={tableData.rows}
             onChange={(e) => setTableData({ ...tableData, rows: parseInt(e.target.value) })}
           >
@@ -1450,12 +1473,14 @@ const handleUserSearch = async (queryText) => {
             <option value={8}>8</option>
             <option value={9}>9</option>
             <option value={10}>10</option>
-          </Form.Select>
-        </Form.Group>
+          </select>
+        </div>
 
-        <Form.Group className="mb-3">
-          <Form.Label>{t('editor.table_cols_label')}</Form.Label>
-          <Form.Select
+                <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="tableCols">{t('editor.table_cols_label')}</label>
+          <select
+            id="tableCols"
+            className="editor-modal-select"
             value={tableData.cols}
             onChange={(e) => setTableData({ ...tableData, cols: parseInt(e.target.value) })}
           >
@@ -1469,59 +1494,60 @@ const handleUserSearch = async (queryText) => {
             <option value={8}>8</option>
             <option value={9}>9</option>
             <option value={10}>10</option>
-          </Form.Select>
-        </Form.Group>
+          </select>
+        </div>
 
-        <Form.Group className="mb-3">
-          <Form.Label>{t('editor.table_layout_label')}</Form.Label>
-          <Form.Select
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="tableLayout">{t('editor.table_layout_label')}</label>
+          <select
+            id="tableLayout"
+            className="editor-modal-select"
             value={tableData.layout}
             onChange={(e) => setTableData({ ...tableData, layout: e.target.value })}
           >
             <option value="auto">{t('editor.table_layout_auto')}</option>
             <option value="fixed">{t('editor.table_layout_fixed')}</option>
             <option value="revert">{t('editor.table_layout_revert')}</option>
-          </Form.Select>
-        </Form.Group>
+          </select>
+        </div>
 
-        <Form.Group className="mb-3">
-          <Form.Label>{t('editor.table_width_label')}</Form.Label>
-          <Form.Control
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="tableWidth">{t('editor.table_width_label')}</label>
+          <input
+            id="tableWidth"
             type="text"
+            className="editor-modal-input"
             value={tableData.width}
             onChange={(e) => setTableData({ ...tableData, width: e.target.value })}
             placeholder="100%"
           />
-          <Form.Text className="text-muted small mt-1 d-block">
-            {t('editor.table_width_hint')}
-          </Form.Text>
-        </Form.Group>
+          <small className="editor-modal-hint">{t('editor.table_width_hint')}</small>
+        </div>
 
-        <Form.Group className="mb-3">
-          <Form.Label>{t('editor.table_border_label')}</Form.Label>
-          <Form.Control
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="tableBorder">{t('editor.table_border_label')}</label>
+          <input
+            id="tableBorder"
             type="text"
+            className="editor-modal-input"
             value={tableData.border}
             onChange={(e) => setTableData({ ...tableData, border: e.target.value })}
             placeholder="#cccccc"
           />
-          <Form.Text className="text-muted small mt-1 d-block">
-            {t('editor.table_border_hint')}
-          </Form.Text>
-        </Form.Group>
+          <small className="editor-modal-hint">{t('editor.table_border_hint')}</small>
+        </div>
 
-        <Form.Group className="mb-3">
-          <Form.Check
+        <div className="editor-modal-field editor-modal-field--checkbox">
+          <input
             type="checkbox"
-            id="table-no-borders"
-            label={t('editor.table_no_borders')}
+            id="tableNoBorders"
+            className="topic-select-input"
             checked={tableData.noBorders}
             onChange={(e) => setTableData({ ...tableData, noBorders: e.target.checked })}
           />
-          <Form.Text className="text-muted small mt-1 d-block">
-            {t('editor.table_no_borders_hint')}
-          </Form.Text>
-        </Form.Group>
+          <label htmlFor="tableNoBorders">{t('editor.table_no_borders')}</label>
+          <small className="editor-modal-hint">{t('editor.table_no_borders_hint')}</small>
+        </div>
       </ForumModal>
 
       {/* Hotkeys Manual Modal */}
@@ -1565,7 +1591,7 @@ const handleUserSearch = async (queryText) => {
         title={t('editor.smiles_modal_title')}
         size="md"
       >
-        <div style={{ minHeight: '300px' }}>
+        <div className="editor-modal-body">
           <SmilesPicker onSelect={(code) => {
             insertText(code, '');
             setShowSmilesModal(false);

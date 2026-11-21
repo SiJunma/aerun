@@ -76,7 +76,7 @@ export const PostInlineEditor = ({
               <input
                 type="checkbox"
                 id="editPinFirstPost"
-                className="topic-post-editor__checkbox"
+                className="topic-select-input"
                 checked={editPinFirstPost}
                 onChange={(e) => setEditPinFirstPost(e.target.checked)}
               />

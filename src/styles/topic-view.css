@@ -903,13 +903,13 @@
   justify-content: space-between;
 }
 
-.topic-post-editor__field-row > label {
+.topic-post-editor__field-row>label {
   flex: 0 0 auto;
   white-space: nowrap;
 }
 
-.topic-post-editor__field-row > input,
-.topic-post-editor__field-row > select {
+.topic-post-editor__field-row>input,
+.topic-post-editor__field-row>select {
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -958,12 +958,6 @@
 }
 
 /* Checkbox */
-.topic-post-editor__checkbox {
-  width: 1rem;
-  height: 1rem;
-  accent-color: var(--primary-color);
-}
-
 .topic-post-editor__actions {
   display: flex;
   gap: var(--topic-post-editor-actions-gap);
@@ -1844,10 +1838,9 @@
     color: var(--topic-post-muted-color);
   }
 }
+
 /* ===== TopicFormPage (create topic) ===== */
 .topic-form-page {
-  padding: 2rem 1rem;
-  max-width: 800px;
   margin: 0 auto;
 }
 
@@ -1958,7 +1951,9 @@
 }
 
 @keyframes topic-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* Access denied state */
@@ -2142,7 +2137,9 @@
 }
 
 @keyframes topic-btn-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* Form actions layout */
@@ -2158,3 +2155,258 @@
   gap: 0.5rem;
 }
 
+/* ===== SmilesPicker ===== */
+.smiles-picker-container {
+  max-height: 350px;
+  overflow-y: auto;
+  width: 100%;
+  background-color: var(--card-bg);
+  color: var(--text-color);
+  border-radius: 8px;
+  overscroll-behavior: contain;
+  padding: 0.5rem;
+}
+
+.smiles-tabs {
+  border-bottom: 1px solid var(--border-color);
+}
+
+.smiles-tabs .nav-link {
+  padding: 0.4rem 0.8rem;
+  font-size: 0.85rem;
+  color: var(--secondary-color);
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.smiles-tabs .nav-link.active {
+  background: transparent;
+  color: var(--primary-color);
+  border-bottom-color: var(--primary-color);
+  font-weight: 600;
+}
+
+.smiles-tab {
+  padding: 0.5rem 0;
+}
+
+.smiles-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.smile-item {
+  border-radius: 0.375rem;
+  padding: 0.25rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: transform 0.1s ease, background-color 0.15s ease;
+}
+
+.smile-item:hover {
+  background-color: rgba(var(--primary-rgb), 0.15);
+  transform: scale(1.05);
+}
+
+.smile-image {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 64px;
+  object-fit: contain;
+  display: block;
+}
+
+.smiles-picker-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.smiles-picker-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.smiles-picker-container::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 10px;
+}
+
+/* Generic modal body for editor modals */
+.editor-modal-body {
+  min-height: 300px;
+}
+
+/* ===== Editor Modal Fields ===== */
+.editor-modal-field {
+  margin-bottom: 1rem;
+}
+
+.editor-modal-field--indented {
+  margin-left: 1.5rem;
+}
+
+.editor-modal-field--relative {
+  position: relative;
+}
+
+.editor-modal-field--checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.editor-modal-label {
+  display: block;
+  font-weight: 500;
+  color: var(--text-color);
+  font-size: 0.875rem;
+  margin-bottom: 0.375rem;
+}
+
+.editor-modal-input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  color: var(--text-color);
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 0.375rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.editor-modal-input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 0.25rem rgba(var(--primary-rgb), 0.25);
+}
+
+.editor-modal-input--small {
+  width: auto;
+  max-width: 120px;
+}
+
+.editor-modal-select {
+  width: 100%;
+  padding: 0.5rem 2rem 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  color: var(--text-color);
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 0.375rem;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%236c757d' stroke-width='2'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E");
+  background-position: right 0.5rem center;
+  background-size: 1rem;
+  background-repeat: no-repeat;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.editor-modal-select:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 0.25rem rgba(var(--primary-rgb), 0.25);
+}
+
+.editor-modal-hint {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--secondary-color);
+  margin-top: 0.25rem;
+}
+
+.editor-modal-hint--success {
+  color: #198754;
+}
+
+.editor-modal-notice {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  color: var(--text-color);
+  background-color: rgba(var(--primary-rgb), 0.1);
+  border: 1px solid var(--primary-color);
+  border-radius: 0.375rem;
+  margin-bottom: 1rem;
+}
+
+.editor-modal-card {
+  padding: 1rem;
+  background-color: rgba(var(--primary-rgb), 0.05);
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.editor-modal-radio {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  color: var(--text-color);
+  cursor: pointer;
+  margin-bottom: 0.5rem;
+}
+
+.editor-modal-radio input[type="radio"] {
+  accent-color: var(--primary-color);
+  width: 1rem;
+  height: 1rem;
+}
+
+.editor-modal-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  max-height: 200px;
+  overflow-y: auto;
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 0.375rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  margin-top: 0.25rem;
+}
+
+.editor-modal-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: none;
+  border: none;
+  text-align: left;
+  color: var(--text-color);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.editor-modal-dropdown-item:hover {
+  background-color: rgba(var(--primary-rgb), 0.15);
+}
+
+.editor-modal-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  overflow: hidden;
+  background-color: var(--secondary-color);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.editor-modal-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}

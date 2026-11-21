@@ -349,7 +349,7 @@ const TopicFormPage = () => {
             <input
               type="checkbox"
               id="pinFirstPost"
-              className="topic-post-editor__checkbox"
+              className="topic-select-input"
               checked={pinFirstPost}
               onChange={(e) => setPinFirstPost(e.target.checked)}
             />
