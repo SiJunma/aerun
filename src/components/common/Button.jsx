@@ -84,9 +84,10 @@ export const Button = ({
     </>
   ) : (
     <>
-      {leftIcon && !iconOnly && <span className="topic-btn__icon topic-btn__icon--left">{leftIcon}</span>}
+      {iconOnly && leftIcon && <span className="topic-btn__icon">{leftIcon}</span>}
+      {!iconOnly && leftIcon && <span className="topic-btn__icon topic-btn__icon--left">{leftIcon}</span>}
       <span className="topic-btn__label">{children}</span>
-      {rightIcon && !iconOnly && <span className="topic-btn__icon topic-btn__icon--right">{rightIcon}</span>}
+      {!iconOnly && rightIcon && <span className="topic-btn__icon topic-btn__icon--right">{rightIcon}</span>}
     </>
   );
 

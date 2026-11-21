@@ -1170,6 +1170,40 @@
   margin-bottom: 0.5rem;
 }
 
+/* Toolbar buttons — light chips with border */
+.editor-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--topic-post-footer-border);
+  border-radius: 0.375rem;
+  background: var(--topic-reply-card-bg);
+  color: var(--text-color);
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.editor-toolbar-btn:hover:not(:disabled),
+.editor-toolbar-btn:focus:not(:disabled) {
+  background-color: var(--topic-post-footer-bg);
+  border-color: var(--secondary-color);
+  color: var(--text-color);
+}
+
+.editor-toolbar-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.editor-toolbar-btn svg {
+  width: 16px;
+  height: 16px;
+  color: var(--text-color);
+}
+
 .editor-toolbar-group {
   display: flex;
   align-items: center;

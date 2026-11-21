@@ -50,6 +50,8 @@ const RichEditor = forwardRef(({
   const [showAbbrModal, setShowAbbrModal] = useState(false);
   const [abbrData, setAbbrData] = useState({ text: '', title: '' });
   const [showMoreToolsModal, setShowMoreToolsModal] = useState(false);
+  const [showDesktopOverflow, setShowDesktopOverflow] = useState(false);
+  const desktopOverflowRef = useRef(null);
   const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 992);
 
   // Custom pickers state
@@ -64,7 +66,7 @@ const RichEditor = forwardRef(({
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Click outside handler for pickers
+  // Click outside handler for pickers and desktop overflow
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (sizePickerRef.current && !sizePickerRef.current.contains(event.target)) {
@@ -72,6 +74,9 @@ const RichEditor = forwardRef(({
       }
       if (colorPickerRef.current && !colorPickerRef.current.contains(event.target)) {
         setShowColorPicker(false);
+      }
+      if (desktopOverflowRef.current && !desktopOverflowRef.current.contains(event.target)) {
+        setShowDesktopOverflow(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -142,37 +147,42 @@ const RichEditor = forwardRef(({
   useEffect(() => {
     if (editorWidth === 0) return;
 
-    // Groups definition — minWidth based on actual button sizes:
+    // Toolbar Groups — single source of truth for measurement & rendering
     // icon-only button = 34px + gap 4px = 38px per button
-    // basic: 6 buttons = 6*38 - 4 = 224px
-    // format: 5 buttons = 5*38 - 4 = 186px
-    // align: 4 buttons = 4*38 - 4 = 148px
-    // inserts: 3 buttons = 3*38 - 4 = 110px
-    // media: 2 buttons = 2*38 - 4 = 72px
-    // advanced: 6 buttons = 6*38 - 4 = 224px
+    // style: 6 buttons = 6*38 - 4 = 224px
+    // history: 2 buttons = 2*38 - 4 = 72px
     // smiles: 1 button = 34px
-    // hotkeys: 1 button = 34px
-    const groups = [
-      { id: 'basic', minWidth: 224 },
-      { id: 'format', minWidth: 186 },
-      { id: 'align', minWidth: 148 },
-      { id: 'inserts', minWidth: 110 },
-      { id: 'media', minWidth: 72 },
-      { id: 'advanced', minWidth: 224 },
+    // links: 1 button = 34px
+    // typography: 2 pickers (each ~38px) = 72px
+    // align: 3 buttons = 3*38 - 4 = 110px
+    // inserts: 5 buttons = 5*38 - 4 = 186px
+    // media: 2 buttons = 2*38 - 4 = 72px
+    // advanced: 5 buttons = 5*38 - 4 = 186px
+    const TOOLBAR_GROUPS = [
+      { id: 'style', minWidth: 224 },
+      { id: 'history', minWidth: 72 },
       { id: 'smiles', minWidth: 34 },
-      { id: 'hotkeys', minWidth: 34 }
+      { id: 'links', minWidth: 34 },
+      { id: 'typography', minWidth: 72 },
+      { id: 'align', minWidth: 110 },
+      { id: 'inserts', minWidth: 186 },
+      { id: 'media', minWidth: 72 },
+      { id: 'advanced', minWidth: 186 }
     ];
-    const groupOrder = ['style', 'history', 'smiles', 'links', 'typography', 'align', 'inserts', 'media', 'advanced'];
+    const TOOLBAR_GROUP_ORDER = ['style', 'history', 'smiles', 'links', 'typography', 'align', 'inserts', 'media', 'advanced'];
 
-    // Always reserve space for: size picker (38px) + color picker (38px) + divider (2px*2=4px) + overflow toggle (38px) = ~118px
-    // Plus container padding (0.5rem*2 = 16px) and gap between items
-    const fixedReserved = 118;
+    // Reserve space for: overflow toggle (38px) + divider (2px) + container padding (16px) = ~56px
+    const fixedReserved = 56;
     let availableWidth = editorWidth - fixedReserved;
     const visible = [];
     const overflow = [];
-    for (const groupId of groupOrder) {
-      const group = groups.find(g => g.id === groupId);
-      if (!group) continue;
+    for (const groupId of TOOLBAR_GROUP_ORDER) {
+      const group = TOOLBAR_GROUPS.find(g => g.id === groupId);
+      if (!group) {
+        // This should never happen — groups and order must stay in sync
+        console.error('[RichEditor] Group not found in TOOLBAR_GROUPS:', groupId);
+        continue;
+      }
       if (availableWidth >= group.minWidth) {
         visible.push(groupId);
         availableWidth -= group.minWidth;
@@ -344,22 +354,22 @@ const RichEditor = forwardRef(({
         }
         return (
           <div className="editor-toolbar-group">
-            <Button variant="ghost" iconOnly onClick={() => insertText('[b]', '[/b]')} title={t('editor.bold')}>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[b]', '[/b]')} title={t('editor.bold')}>
               <Bold size={16} />
             </Button>
-            <Button variant="ghost" iconOnly onClick={() => insertText('[i]', '[/i]')} title={t('editor.italic')}>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[i]', '[/i]')} title={t('editor.italic')}>
               <Italic size={16} />
             </Button>
-            <Button variant="ghost" iconOnly onClick={() => insertText('[u]', '[/u]')} title={t('editor.underline')}>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[u]', '[/u]')} title={t('editor.underline')}>
               <Underline size={16} />
             </Button>
-            <Button variant="ghost" iconOnly onClick={() => insertText('[s]', '[/s]')} title={t('editor.strikethrough')}>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[s]', '[/s]')} title={t('editor.strikethrough')}>
               <Strikethrough size={16} />
             </Button>
-            <Button variant="ghost" iconOnly onClick={() => insertText('[sup]', '[/sup]')} title={t('editor.superscript')}>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[sup]', '[/sup]')} title={t('editor.superscript')}>
               <Superscript size={16} />
             </Button>
-            <Button variant="ghost" iconOnly onClick={() => insertText('[sub]', '[/sub]')} title={t('editor.subscript')}>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[sub]', '[/sub]')} title={t('editor.subscript')}>
               <Subscript size={16} />
             </Button>
           </div>
@@ -380,10 +390,10 @@ const RichEditor = forwardRef(({
         }
         return (
           <div className="editor-toolbar-group">
-            <Button variant="ghost" iconOnly onClick={() => insertText('', '', -1)} title={t('editor.undo') + ' (Ctrl+Z)'}>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('', '', -1)} title={t('editor.undo') + ' (Ctrl+Z)'}>
               <Undo size={16} />
             </Button>
-            <Button variant="ghost" iconOnly onClick={() => insertText('', '', -2)} title={t('editor.redo') + ' (Ctrl+Y)'}>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('', '', -2)} title={t('editor.redo') + ' (Ctrl+Y)'}>
               <Redo size={16} />
             </Button>
           </div>
@@ -399,7 +409,7 @@ const RichEditor = forwardRef(({
         }
         return (
           <div className="editor-toolbar-group">
-            <Button variant="ghost" iconOnly onClick={() => setShowSmilesModal(true)} title={t('editor.smiles')}>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => setShowSmilesModal(true)} title={t('editor.smiles')}>
               <Smile size={18} />
             </Button>
           </div>
@@ -415,7 +425,7 @@ const RichEditor = forwardRef(({
         }
         return (
           <div className="editor-toolbar-group">
-            <Button variant="ghost" iconOnly onClick={() => setShowLinkModal(true)} title={t('editor.link')}>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => setShowLinkModal(true)} title={t('editor.link')}>
               <LinkIcon size={16} />
             </Button>
           </div>
@@ -598,13 +608,13 @@ const RichEditor = forwardRef(({
         }
         return (
           <div className="editor-toolbar-group">
-            <Button variant="ghost" iconOnly onClick={() => insertText('[align=left]', '[/align]')} title={t('editor.align_left')}>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[align=left]', '[/align]')} title={t('editor.align_left')}>
               <AlignLeft size={16} />
             </Button>
-            <Button variant="ghost" iconOnly onClick={() => insertText('[align=center]', '[/align]')} title={t('editor.align_center')}>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[align=center]', '[/align]')} title={t('editor.align_center')}>
               <AlignCenter size={16} />
             </Button>
-            <Button variant="ghost" iconOnly onClick={() => insertText('[align=right]', '[/align]')} title={t('editor.align_right')}>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[align=right]', '[/align]')} title={t('editor.align_right')}>
               <AlignRight size={16} />
             </Button>
           </div>
@@ -634,19 +644,19 @@ const RichEditor = forwardRef(({
         }
         return (
           <div className="editor-toolbar-group">
-            <Button variant="ghost" iconOnly onClick={() => insertText('[quote]', '[/quote]')} title={t('editor.quote')}>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[quote]', '[/quote]')} title={t('editor.quote')}>
               <Quote size={16} />
             </Button>
-            <Button variant="ghost" iconOnly onClick={() => insertText('[spoiler]', '[/spoiler]')} title={t('editor.spoiler')}>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[spoiler]', '[/spoiler]')} title={t('editor.spoiler')}>
               <Clapperboard size={16} />
             </Button>
-            <Button variant="ghost" iconOnly onClick={openAbbrModal} title={t('editor.abbreviation')}>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={openAbbrModal} title={t('editor.abbreviation')}>
               <HelpCircle size={16} />
             </Button>
-            <Button variant="ghost" iconOnly onClick={() => insertText('[code]', '[/code]')} title={t('editor.code_block')}>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[code]', '[/code]')} title={t('editor.code_block')}>
               <Code size={16} />
             </Button>
-            <Button variant="ghost" iconOnly onClick={() => insertText('[html]', '[/html]')} title="HTML">
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[html]', '[/html]')} title="HTML">
               <CodeXml size={16} />
             </Button>
           </div>
@@ -667,10 +677,10 @@ const RichEditor = forwardRef(({
         }
         return (
           <div className="editor-toolbar-group">
-            <Button variant="ghost" iconOnly onClick={() => setShowImageModal(true)} title={t('editor.image')}>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => setShowImageModal(true)} title={t('editor.image')}>
               <ImageIcon size={16} />
             </Button>
-            <Button variant="ghost" iconOnly onClick={() => insertText('[video]', '[/video]')} title={t('editor.video')}>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[video]', '[/video]')} title={t('editor.video')}>
               <Youtube size={16} />
             </Button>
           </div>
@@ -704,23 +714,23 @@ const RichEditor = forwardRef(({
         }
         return (
           <div className="editor-toolbar-group">
-            <Button variant="ghost" iconOnly onClick={() => setShowColumnsModal(true)} title={t('editor.columns')}>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => setShowColumnsModal(true)} title={t('editor.columns')}>
               <Columns size={16} />
             </Button>
-            <Button variant="ghost" iconOnly onClick={openTableModal} title={t('editor.table')}>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={openTableModal} title={t('editor.table')}>
               <TableIcon size={16} />
             </Button>
             {showHide && (
-              <Button variant="ghost" iconOnly onClick={openHideModal} title={t('editor.hide')}>
+              <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={openHideModal} title={t('editor.hide')}>
                 <EyeOff size={16} />
               </Button>
             )}
             {showDice && !isEdit && (
-              <Button variant="ghost" iconOnly onClick={() => setShowDiceModal(true)} title={t('editor.roll_dice')}>
+              <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => setShowDiceModal(true)} title={t('editor.roll_dice')}>
                 <Dices size={16} />
               </Button>
             )}
-            <Button variant="ghost" iconOnly onClick={() => insertText('[hr]', '')} title={t('editor.hr')}>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[hr]', '')} title={t('editor.hr')}>
               <Minus size={16} />
             </Button>
           </div>
@@ -812,17 +822,27 @@ const RichEditor = forwardRef(({
                 <MoreHorizontal size={18} />
               </Button>
             ) : (
-              <div className="editor-picker" ref={sizePickerRef}>
+              <div className="editor-picker" ref={desktopOverflowRef}>
                 <button
                   type="button"
                   className="editor-overflow-toggle"
-                  onClick={() => setShowMoreToolsModal(true)}
+                  onClick={() => setShowDesktopOverflow(!showDesktopOverflow)}
                   aria-haspopup="listbox"
-                  aria-expanded={showMoreToolsModal}
+                  aria-expanded={showDesktopOverflow}
                   title={t('editor.additional_formatting_title')}
                 >
                   <MoreHorizontal size={18} />
                 </button>
+                {showDesktopOverflow && (
+                  <div className="editor-overflow-menu" role="listbox">
+                    {overflowGroupIds.map(groupId => (
+                      <React.Fragment key={groupId}>
+                        {renderGroup(groupId, true)}
+                        <div className="editor-overflow-group" />
+                      </React.Fragment>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </>
