@@ -16,7 +16,7 @@ import Button from './Button';
 const RichEditor = forwardRef(({
   value, onChange, placeholder, rows = 6, minHeight, maxHeight, id = 'rich-editor',
   maxLength, autoFocus, showDice = false, isEdit = false, hideDiceType = false,
-  showHide = true, _smilesDropDirection = "up", _smilesFullWidth = true, _onSubmit,
+  showHide = true, _smilesDropDirection = "up", _smilesFullWidth = true, onSubmit,
   _hideHotkeysButton = false, hideFooter = false, autoResize = false
 }, ref) => {
   const { t } = useI18n();
@@ -214,10 +214,9 @@ const RichEditor = forwardRef(({
         }
       }
     }
-    /* eslint-disable react-hooks/set-state-in-effect */
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the measurement effect derives visible/overflow groups from the toolbar width; there is no external system to sync with
     setVisibleGroupIds(_ => visible);
     setOverflowGroupIds(_ => overflow);
-    /* eslint-enable react-hooks/set-state-in-effect */
   }, [editorWidth, isMobile]);
 
   // Modal helpers
@@ -225,6 +224,48 @@ const RichEditor = forwardRef(({
     setter(false);
     textareaRef.current?.focus();
   }, []);
+
+  // Edit history for Undo/Redo (restored from main — the Sprint G migration
+  // dropped the whole mechanism, so the history buttons called
+  // insertText('', '', -1/-2), which inserts nothing).
+  const [history, setHistory] = useState([value]);
+  const [historyIndex, setHistoryIndex] = useState(0);
+  const lastHistoryPushTime = useRef(0);
+
+  const addToHistory = useCallback((newValue, forceNewSnapshot = true) => {
+    let newHistory = history.slice(0, historyIndex + 1);
+    const now = Date.now();
+
+    if (!forceNewSnapshot && newHistory.length > 1 && (now - lastHistoryPushTime.current < 1500)) {
+      newHistory[newHistory.length - 1] = newValue;
+      setHistory(newHistory);
+      return;
+    }
+
+    if (newHistory[newHistory.length - 1] !== newValue) {
+      newHistory.push(newValue);
+      if (newHistory.length > 50) newHistory = newHistory.slice(newHistory.length - 50);
+      setHistory(newHistory);
+      setHistoryIndex(newHistory.length - 1);
+      lastHistoryPushTime.current = now;
+    }
+  }, [history, historyIndex]);
+
+  const handleUndo = useCallback(() => {
+    if (historyIndex > 0) {
+      const prevValue = history[historyIndex - 1];
+      setHistoryIndex(historyIndex - 1);
+      onChange(prevValue);
+    }
+  }, [history, historyIndex, onChange]);
+
+  const handleRedo = useCallback(() => {
+    if (historyIndex < history.length - 1) {
+      const nextValue = history[historyIndex + 1];
+      setHistoryIndex(historyIndex + 1);
+      onChange(nextValue);
+    }
+  }, [history, historyIndex, onChange]);
 
   const insertText = useCallback((openTag, closeTag, cursorOffset = null) => {
     if (!textareaRef.current) return;
@@ -239,6 +280,7 @@ const RichEditor = forwardRef(({
       newText = openTag + closeTag;
     }
     const newValue = value.substring(0, start) + newText + value.substring(end);
+    addToHistory(newValue);
     onChange(newValue);
     el.focus();
     if (cursorOffset !== null && !selectedText) {
@@ -246,7 +288,89 @@ const RichEditor = forwardRef(({
         el.selectionStart = el.selectionEnd = start + openTag.length + cursorOffset;
       }, 0);
     }
-  }, [value, onChange]);
+  }, [value, onChange, addToHistory]);
+
+  const handleTextChange = (e) => {
+    const newValue = e.target.value;
+    addToHistory(newValue, false);
+    onChange(newValue);
+  };
+
+  // Keyboard shortcuts (restored from main — the Sprint G migration dropped
+  // the whole handler, so Ctrl+B etc. did nothing while the hotkeys modal
+  // still listed them).
+  const handleKeyDown = (e) => {
+    const isCtrl = e.ctrlKey || e.metaKey;
+    const isAlt = e.altKey;
+    const isShift = e.shiftKey;
+
+    if (isCtrl && e.code === 'KeyZ') {
+      e.preventDefault();
+      if (isShift) handleRedo(); else handleUndo();
+      return;
+    }
+    if (isCtrl && e.code === 'KeyY') {
+      e.preventDefault();
+      handleRedo();
+      return;
+    }
+    if (isCtrl && e.code === 'Enter' && onSubmit) {
+      e.preventDefault();
+      onSubmit();
+      return;
+    }
+    if (isCtrl && (e.code === 'Slash' || e.key === '/' || e.key === '?')) {
+      e.preventDefault();
+      setShowHotkeysModal(true);
+      return;
+    }
+
+    if (isCtrl && !isAlt && !isShift) {
+      switch (e.code) {
+        case 'KeyB': e.preventDefault(); insertText('[b]', '[/b]'); break;
+        case 'KeyI': e.preventDefault(); insertText('[i]', '[/i]'); break;
+        case 'KeyU': e.preventDefault(); insertText('[u]', '[/u]'); break;
+        case 'KeyS': e.preventDefault(); insertText('[s]', '[/s]'); break;
+        case 'KeyL': e.preventDefault(); insertText('[align=left]', '[/align]'); break;
+        case 'KeyR': e.preventDefault(); insertText('[align=right]', '[/align]'); break;
+        case 'KeyE': e.preventDefault(); insertText('[align=center]', '[/align]'); break;
+        case 'KeyJ': e.preventDefault(); insertText('[align=justify]', '[/align]'); break;
+        case 'KeyK': e.preventDefault(); setShowLinkModal(true); break;
+        case 'KeyG': e.preventDefault(); insertText('[spoiler]', '[/spoiler]'); break;
+        case 'KeyH': e.preventDefault(); openHideModal(); break;
+        case 'KeyQ': e.preventDefault(); insertText('[quote]', '[/quote]'); break;
+        case 'BracketLeft': e.preventDefault(); insertText('[code]', '[/code]'); break;
+        case 'BracketRight': e.preventDefault(); insertText('[html]', '[/html]'); break;
+        default: break;
+      }
+    }
+
+    if (isAlt && !isCtrl && !isShift) {
+      switch (e.code) {
+        case 'KeyV': e.preventDefault(); insertText('[video]', '[/video]'); break;
+        case 'KeyI': e.preventDefault(); setShowImageModal(true); break;
+        case 'KeyH': e.preventDefault(); insertText('[hr]', ''); break;
+        case 'KeyT': e.preventDefault(); openTableModal(); break;
+        case 'KeyL': e.preventDefault(); insertText('[left]', '[/left]'); break;
+        case 'KeyR': e.preventDefault(); insertText('[right]', '[/right]'); break;
+        default: break;
+      }
+    }
+
+    if (isCtrl && isShift) {
+      switch (e.code) {
+        case 'KeyD': e.preventDefault(); insertText('[added]', '[/added]'); break;
+        case 'KeyA': e.preventDefault(); insertText('[info]', '[/info]'); break;
+        case 'KeyM': e.preventDefault(); insertText('[list]\n[*] ', '\n[/list]'); break;
+        default: break;
+      }
+    }
+
+    if (isShift && e.key === 'Tab') {
+      e.preventDefault();
+      insertText('    ', '');
+    }
+  };
 
   // BBCode modal handlers
   const handleLinkSubmit = (e) => {
@@ -403,10 +527,10 @@ const RichEditor = forwardRef(({
         if (isOverflow) {
           return (
             <>
-              <button type="button" className="editor-overflow-item" onClick={() => insertText('', '', -1)} title={t('editor.undo') + ' (Ctrl+Z)'}>
+              <button type="button" className="editor-overflow-item" onClick={() => handleUndo()} title={t('editor.undo') + ' (Ctrl+Z)'}>
                 <Undo size={16} /> {t('editor.undo')}
               </button>
-              <button type="button" className="editor-overflow-item" onClick={() => insertText('', '', -2)} title={t('editor.redo') + ' (Ctrl+Y)'}>
+              <button type="button" className="editor-overflow-item" onClick={() => handleRedo()} title={t('editor.redo') + ' (Ctrl+Y)'}>
                 <Redo size={16} /> {t('editor.redo')}
               </button>
             </>
@@ -414,10 +538,10 @@ const RichEditor = forwardRef(({
         }
         return (
           <div className="editor-toolbar-group">
-            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('', '', -1)} title={t('editor.undo') + ' (Ctrl+Z)'}>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => handleUndo()} title={t('editor.undo') + ' (Ctrl+Z)'}>
               <Undo size={16} />
             </Button>
-            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('', '', -2)} title={t('editor.redo') + ' (Ctrl+Y)'}>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => handleRedo()} title={t('editor.redo') + ' (Ctrl+Y)'}>
               <Redo size={16} />
             </Button>
           </div>
@@ -492,6 +616,7 @@ const RichEditor = forwardRef(({
                   title={t('editor.font_size')}
                 >
                   <ALargeSmall size={16} />
+                  <span className="editor-picker__toggle-label">{t('editor.large_text')}</span>
                 </button>
                 {showSizePicker && (
                   <div className="editor-picker__menu editor-picker__menu--right" role="listbox">
@@ -512,7 +637,7 @@ const RichEditor = forwardRef(({
                   </div>
                 )}
               </div>
-              <div className="editor-picker" ref={sizePickerRef}>
+              <div className="editor-picker" ref={colorPickerRef}>
                 <button
                   type="button"
                   className="editor-picker__toggle"
@@ -522,6 +647,7 @@ const RichEditor = forwardRef(({
                   title={t('editor.font_color')}
                 >
                   <Palette size={16} />
+                  <span className="editor-picker__toggle-label">{t('editor.text_color')}</span>
                 </button>
                 {showColorPicker && (
                   <div className="editor-picker__menu editor-picker__menu--right" role="listbox">
@@ -548,7 +674,7 @@ const RichEditor = forwardRef(({
         }
         return (
           <div className="editor-toolbar-group">
-            <div className="editor-picker">
+            <div className="editor-picker" ref={sizePickerRef}>
               <button
                 type="button"
                 className="editor-picker__toggle"
@@ -578,7 +704,7 @@ const RichEditor = forwardRef(({
                 </div>
               )}
             </div>
-            <div className="editor-picker">
+            <div className="editor-picker" ref={colorPickerRef}>
               <button
                 type="button"
                 className="editor-picker__toggle"
@@ -763,54 +889,68 @@ const RichEditor = forwardRef(({
       default:
         return null;
     }
-  }, [t, insertText, showHide, showDice, isEdit, openAbbrModal, openTableModal, openHideModal, showSizePicker, showColorPicker]);
-  // Hotkey groups for the hotkeys modal
+  }, [t, insertText, handleUndo, handleRedo, showHide, showDice, isEdit, openAbbrModal, openTableModal, openHideModal, showSizePicker, showColorPicker]);
+  // Hotkey groups for the hotkeys modal (restored from main: the migration
+  // renamed the group titles to keys that do not exist in the dictionary,
+  // dropped the spaces from the key labels and listed bindings that do not
+  // match the handler).
   const hotkeyGroups = [
     {
-      title: t('editor.hotkeys_text'),
+      title: t('editor.formatting'),
       items: [
-        { keys: 'Ctrl+B', desc: t('editor.bold') },
-        { keys: 'Ctrl+I', desc: t('editor.italic') },
-        { keys: 'Ctrl+U', desc: t('editor.underline') },
-        { keys: 'Ctrl+Shift+S', desc: t('editor.strikethrough') },
-        { keys: 'Ctrl+Shift+.', desc: t('editor.superscript') },
-        { keys: 'Ctrl+Shift+,', desc: t('editor.subscript') },
+        { keys: 'Ctrl + B', desc: t('editor.bold') },
+        { keys: 'Ctrl + I', desc: t('editor.italic') },
+        { keys: 'Ctrl + U', desc: t('editor.underline') },
+        { keys: 'Ctrl + S', desc: t('editor.strikethrough') },
       ],
     },
     {
-      title: t('editor.hotkeys_blocks'),
+      title: t('editor.alignment'),
       items: [
-        { keys: 'Ctrl+Q', desc: t('editor.quote') },
-        { keys: 'Ctrl+Shift+Q', desc: t('editor.spoiler') },
-        { keys: 'Ctrl+Shift+C', desc: t('editor.code_block') },
-        { keys: 'Ctrl+Shift+H', desc: t('editor.html') },
-        { keys: 'Ctrl+Shift+X', desc: t('editor.hr') },
+        { keys: 'Ctrl + L', desc: t('editor.align_left') },
+        { keys: 'Ctrl + E', desc: t('editor.align_center') },
+        { keys: 'Ctrl + R', desc: t('editor.align_right') },
+        { keys: 'Ctrl + J', desc: t('editor.justify') },
       ],
     },
     {
-      title: t('editor.hotkeys_align'),
+      title: t('editor.inserts'),
       items: [
-        { keys: 'Ctrl+Shift+L', desc: t('editor.align_left') },
-        { keys: 'Ctrl+Shift+E', desc: t('editor.align_center') },
-        { keys: 'Ctrl+Shift+R', desc: t('editor.align_right') },
-        { keys: 'Ctrl+J', desc: t('editor.align_justify') },
+        { keys: 'Ctrl + K', desc: t('editor.link') },
+        { keys: 'Ctrl + G', desc: t('editor.spoiler') },
+        { keys: 'Ctrl + H', desc: t('editor.hide') },
+        { keys: 'Ctrl + Q', desc: t('editor.quote') },
+        { keys: 'Ctrl + [', desc: t('editor.code_block') },
+        { keys: 'Ctrl + ]', desc: t('editor.html_block') },
       ],
     },
     {
-      title: t('editor.hotkeys_media'),
+      title: t('editor.media_structure'),
       items: [
-        { keys: 'Ctrl+Shift+I', desc: t('editor.image') },
-        { keys: 'Ctrl+Shift+V', desc: t('editor.video') },
-        { keys: 'Ctrl+K', desc: t('editor.link') },
+        { keys: 'Alt + V', desc: t('editor.video') },
+        { keys: 'Alt + I', desc: t('editor.image') },
+        { keys: 'Alt + H', desc: t('editor.horizontal_rule') },
+        { keys: 'Alt + T', desc: t('editor.table') },
+        { keys: 'Alt + L', desc: t('editor.float_left') },
+        { keys: 'Alt + R', desc: t('editor.float_right') },
       ],
     },
     {
-      title: t('editor.hotkeys_advanced'),
+      title: t('editor.special_blocks'),
       items: [
-        { keys: 'Ctrl+Z', desc: t('editor.undo') },
-        { keys: 'Ctrl+Y', desc: t('editor.redo') },
-        { keys: 'Ctrl+Shift+D', desc: t('editor.dice_roll_btn') },
-        { keys: 'Ctrl+Shift+K', desc: t('editor.hide') },
+        { keys: 'Ctrl + Shift + D', desc: t('editor.added_block') },
+        { keys: 'Ctrl + Shift + A', desc: t('editor.info_block') },
+        { keys: 'Ctrl + Shift + M', desc: t('editor.bullet_list') },
+      ],
+    },
+    {
+      title: t('editor.system'),
+      items: [
+        { keys: 'Ctrl + Z', desc: t('editor.undo') },
+        { keys: 'Ctrl + Y / Ctrl + Shift + Z', desc: t('editor.redo') },
+        { keys: 'Ctrl + Enter', desc: t('editor.submit') },
+        { keys: 'Shift + Tab', desc: t('editor.indent') },
+        { keys: 'Ctrl + /', desc: t('editor.show_manual') },
       ],
     },
   ];
@@ -890,7 +1030,8 @@ const RichEditor = forwardRef(({
         id={id}
         className="editor-textarea"
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={handleTextChange}
+        onKeyDown={handleKeyDown}
         placeholder={placeholder}
         rows={rows}
         style={{ minHeight: minHeight }}
@@ -1391,10 +1532,10 @@ const RichEditor = forwardRef(({
             <h6 className="editor-hotkeys-group-title">{group.title}</h6>
             <div className="editor-hotkeys-list">
               {group.items.map((item) => (
-                <React.Fragment key={item.keys}>
+                <div key={item.keys} className="editor-hotkeys-row">
                   <kbd className="editor-hotkeys-key">{item.keys}</kbd>
                   <span className="editor-hotkeys-desc">{item.desc}</span>
-                </React.Fragment>
+                </div>
               ))}
             </div>
           </div>
@@ -1424,7 +1565,10 @@ const RichEditor = forwardRef(({
         size="md"
       >
         <div className="editor-more-tools-modal" onClick={(e) => {
-          if (e.target.closest('.editor-overflow-item, button')) {
+          // Close after choosing a formatting action or a picker value.
+          // Picker toggles are not matched, so opening a size/color picker
+          // does not close the modal.
+          if (e.target.closest('.editor-overflow-item, .editor-picker__item')) {
             setShowMoreToolsModal(false);
           }
         }}>

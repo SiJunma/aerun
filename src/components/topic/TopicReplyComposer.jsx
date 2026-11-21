@@ -134,12 +134,13 @@ export const TopicReplyComposer = React.forwardRef(({
                 type="button"
                 variant="ghost"
                 size="sm"
+                className="topic-btn--hotkeys topic-reply__help-btn"
                 onClick={() => replyEditorRef.current?.openHotkeysModal()}
                 title={t('forum.hotkeys')}
                 aria-label={t('forum.hotkeys')}
+                leftIcon={<Keyboard size={18} />}
               >
-                <Keyboard size={18} />
-                <span className="d-none d-md-inline ms-1">{t('forum.help') || 'Help'}</span>
+                {t('forum.help') || 'Help'}
               </Button>
             </div>
 

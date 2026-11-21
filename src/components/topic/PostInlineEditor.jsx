@@ -111,12 +111,13 @@ export const PostInlineEditor = ({
             type="button"
             variant="ghost"
             size="sm"
+            className="topic-btn--hotkeys topic-reply__help-btn"
             onClick={() => editorRef.current?.openHotkeysModal()}
             title={t('forum.hotkeys')}
             aria-label={t('forum.hotkeys')}
+            leftIcon={<Keyboard size={16} />}
           >
-            <Keyboard size={16} />
-            <span className="d-none d-md-inline ms-1">{t('forum.help') || 'Help'}</span>
+            {t('forum.help') || 'Help'}
           </Button>
         </div>
 
