@@ -119,31 +119,55 @@ const RichEditor = forwardRef(({
     if (autoResize) adjustTextareaHeight();
   }, [value, autoResize, adjustTextareaHeight]);
 
-  // Responsive toolbar logic
+  // Responsive toolbar logic with ResizeObserver
   useEffect(() => {
-    if (!toolbarContainerRef.current) return;
-    const containerWidth = toolbarContainerRef.current.offsetWidth;
-    setEditorWidth(containerWidth);
+    const container = toolbarContainerRef.current;
+    if (!container) return;
+
+    const updateWidth = () => {
+      setEditorWidth(container.offsetWidth);
+    };
+
+    // Initial measurement
+    updateWidth();
+
+    // Observe resize
+    const resizeObserver = new ResizeObserver(updateWidth);
+    resizeObserver.observe(container);
+
+    return () => resizeObserver.disconnect();
   }, []);
 
-  // Groups definition
-  const groups = [
-    { id: 'basic', minWidth: 200 },
-    { id: 'format', minWidth: 160 },
-    { id: 'align', minWidth: 140 },
-    { id: 'inserts', minWidth: 120 },
-    { id: 'media', minWidth: 100 },
-    { id: 'advanced', minWidth: 200 },
-    { id: 'smiles', minWidth: 60 },
-    { id: 'hotkeys', minWidth: 60 }
-  ];
-
-  const groupOrder = ['basic', 'format', 'align', 'inserts', 'media', 'advanced', 'smiles', 'hotkeys'];
-
-  // eslint-disable-next-line react-hooks/set-state-in-effect
+  // Calculate visible/overflow groups
   useEffect(() => {
     if (editorWidth === 0) return;
-    let availableWidth = editorWidth - 32;
+
+    // Groups definition — minWidth based on actual button sizes:
+    // icon-only button = 34px + gap 4px = 38px per button
+    // basic: 6 buttons = 6*38 - 4 = 224px
+    // format: 5 buttons = 5*38 - 4 = 186px
+    // align: 4 buttons = 4*38 - 4 = 148px
+    // inserts: 3 buttons = 3*38 - 4 = 110px
+    // media: 2 buttons = 2*38 - 4 = 72px
+    // advanced: 6 buttons = 6*38 - 4 = 224px
+    // smiles: 1 button = 34px
+    // hotkeys: 1 button = 34px
+    const groups = [
+      { id: 'basic', minWidth: 224 },
+      { id: 'format', minWidth: 186 },
+      { id: 'align', minWidth: 148 },
+      { id: 'inserts', minWidth: 110 },
+      { id: 'media', minWidth: 72 },
+      { id: 'advanced', minWidth: 224 },
+      { id: 'smiles', minWidth: 34 },
+      { id: 'hotkeys', minWidth: 34 }
+    ];
+    const groupOrder = ['basic', 'format', 'align', 'inserts', 'media', 'advanced', 'smiles', 'hotkeys'];
+
+    // Always reserve space for: size picker (38px) + color picker (38px) + divider (2px*2=4px) + overflow toggle (38px) = ~118px
+    // Plus container padding (0.5rem*2 = 16px) and gap between items
+    const fixedReserved = 118;
+    let availableWidth = editorWidth - fixedReserved;
     const visible = [];
     const overflow = [];
     for (const groupId of groupOrder) {
@@ -156,9 +180,11 @@ const RichEditor = forwardRef(({
         overflow.push(groupId);
       }
     }
+    /* eslint-disable react-hooks/set-state-in-effect */
     setVisibleGroupIds(_ => visible);
     setOverflowGroupIds(_ => overflow);
-  }, [editorWidth, isMobile, groupOrder, groups]);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [editorWidth, isMobile]);
 
   // Modal helpers
   const closeModalWithFocus = useCallback((setter) => {

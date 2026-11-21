@@ -1066,6 +1066,23 @@
   }
 }
 
+/* Icon-only button (square, for toolbar) */
+.topic-btn--icon-only {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  gap: 0;
+}
+
+.topic-btn--icon-only .topic-btn__icon {
+  margin-right: 0;
+}
+
+.topic-btn--icon-only svg {
+  width: 16px;
+  height: 16px;
+}
+
 .topic-badge {
   display: inline-flex;
   align-items: center;
@@ -1117,13 +1134,14 @@
 .editor-toolbar {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.25rem;
   padding: 0.5rem;
   border-radius: var(--topic-reply-card-radius);
   background-color: var(--topic-reply-card-bg);
   border: 1px solid var(--topic-reply-card-border);
   min-height: 46px;
+  overflow-x: hidden;
 }
 
 .editor-toolbar-group {
@@ -1134,8 +1152,9 @@
 
 .editor-toolbar-divider {
   width: 1px;
-  height: 1.5rem;
-  background-color: var(--topic-reply-card-border);
+  align-self: stretch;
+  margin: 0 0.25rem;
+  background-color: currentColor;
   opacity: 0.25;
 }
 
@@ -1442,8 +1461,8 @@
   justify-content: space-between;
   align-items: center;
   margin-top: 0.5rem;
-  padding: 0.25rem 0.5rem;
-  font-size: 0.75rem;
+  padding: 0 0.25rem;
+  font-size: 0.875rem;
 }
 
 .editor-footer__hint {
