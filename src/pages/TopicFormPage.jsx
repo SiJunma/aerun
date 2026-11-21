@@ -12,6 +12,7 @@ import { createInFlight } from '../utils/inflight';
 import { useToast } from '../contexts/ToastProvider';
 import { usePageTitle } from '../contexts/TitleProvider';
 import { makeStorageKey } from '../utils/storageScope';
+import { resolveField } from '../utils/text';
 import MaskPicker from '../components/topic/MaskPicker';
 import Button from '../components/common/Button';
 
@@ -238,7 +239,7 @@ const TopicFormPage = () => {
     <div className="topic-form-page">
       <ForumBreadcrumbs
         items={[
-          { label: category?.title || '', to: `/category/${categoryId}` },
+          { label: category ? resolveField(category.title, lang) : '', to: `/category/${categoryId}` },
           { label: t('forum.create_topic'), active: true }
         ]}
       />
