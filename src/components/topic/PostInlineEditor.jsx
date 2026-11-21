@@ -111,12 +111,13 @@ export const PostInlineEditor = ({
             type="button"
             variant="ghost"
             size="sm"
-            iconOnly
             onClick={() => editorRef.current?.openHotkeysModal()}
             title={t('forum.hotkeys')}
-            leftIcon={<Keyboard size={16} />}
             aria-label={t('forum.hotkeys')}
-          />
+          >
+            <Keyboard size={16} />
+            <span className="d-none d-md-inline ms-1">{t('forum.help') || 'Help'}</span>
+          </Button>
         </div>
 
         <RichEditor

@@ -1083,6 +1083,31 @@
   height: 16px;
 }
 
+/* Toolbar icon-only buttons — light chips with border */
+.editor-toolbar .topic-btn--icon-only {
+  background: var(--topic-reply-card-bg);
+  border: 1px solid var(--topic-post-footer-border);
+  border-radius: 0.375rem;
+  color: var(--text-color);
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.editor-toolbar .topic-btn--icon-only:hover:not(:disabled),
+.editor-toolbar .topic-btn--icon-only:focus:not(:disabled) {
+  background-color: var(--topic-post-footer-bg);
+  border-color: var(--secondary-color);
+  color: var(--text-color);
+}
+
+.editor-toolbar .topic-btn--icon-only:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.editor-toolbar .topic-btn--icon-only svg {
+  color: var(--text-color);
+}
+
 .topic-badge {
   display: inline-flex;
   align-items: center;
@@ -1142,6 +1167,7 @@
   border: 1px solid var(--topic-reply-card-border);
   min-height: 46px;
   overflow-x: hidden;
+  margin-bottom: 0.5rem;
 }
 
 .editor-toolbar-group {
@@ -1158,70 +1184,35 @@
   opacity: 0.25;
 }
 
-/* Toolbar buttons — icon-only ghost variant */
-.editor-toolbar-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: 0.375rem;
-  background: transparent;
-  color: var(--text-color);
-  cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-}
 
-.editor-toolbar-btn:hover:not(:disabled),
-.editor-toolbar-btn:focus:not(:disabled) {
-  background-color: rgba(var(--primary-rgb), 0.1);
-  color: var(--primary-color);
-  border-color: rgba(var(--primary-rgb), 0.2);
-}
-
-.editor-toolbar-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.editor-toolbar-btn--active {
-  background-color: rgba(var(--primary-rgb), 0.15);
-  color: var(--primary-color);
-  border-color: rgba(var(--primary-rgb), 0.3);
-}
-
-.editor-toolbar-btn svg {
-  width: 16px;
-  height: 16px;
-}
 
 /* Mobile more-tools button */
 .editor-more-tools-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   padding: 0;
-  border: 1px solid transparent;
+  border: 1px solid var(--topic-post-footer-border);
   border-radius: 0.375rem;
-  background: transparent;
+  background: var(--topic-reply-card-bg);
   color: var(--text-color);
   cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
 .editor-more-tools-btn:hover:not(:disabled),
 .editor-more-tools-btn:focus:not(:disabled) {
-  background-color: rgba(var(--primary-rgb), 0.1);
-  color: var(--primary-color);
-  border-color: rgba(var(--primary-rgb), 0.2);
+  background-color: var(--topic-post-footer-bg);
+  border-color: var(--secondary-color);
+  color: var(--text-color);
 }
 
 .editor-more-tools-btn svg {
   width: 18px;
   height: 18px;
+  color: var(--text-color);
 }
 
 .min-h-60px {
@@ -1241,22 +1232,22 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   padding: 0;
-  border: 1px solid transparent;
+  border: 1px solid var(--topic-post-footer-border);
   border-radius: 0.375rem;
-  background: transparent;
+  background: var(--topic-reply-card-bg);
   color: var(--text-color);
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
 .editor-picker__toggle:hover:not(:disabled),
 .editor-picker__toggle:focus:not(:disabled) {
-  background-color: rgba(var(--primary-rgb), 0.1);
-  color: var(--primary-color);
-  border-color: rgba(var(--primary-rgb), 0.2);
+  background-color: var(--topic-post-footer-bg);
+  border-color: var(--secondary-color);
+  color: var(--text-color);
 }
 
 .editor-picker__toggle:disabled {
@@ -1267,6 +1258,7 @@
 .editor-picker__toggle svg {
   width: 16px;
   height: 16px;
+  color: var(--text-color);
 }
 
 .editor-picker__menu {
@@ -1341,22 +1333,22 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   padding: 0;
-  border: 1px solid transparent;
+  border: 1px solid var(--topic-post-footer-border);
   border-radius: 0.375rem;
-  background: transparent;
+  background: var(--topic-reply-card-bg);
   color: var(--text-color);
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
 .editor-overflow-toggle:hover:not(:disabled),
 .editor-overflow-toggle:focus:not(:disabled) {
-  background-color: rgba(var(--primary-rgb), 0.1);
-  color: var(--primary-color);
-  border-color: rgba(var(--primary-rgb), 0.2);
+  background-color: var(--topic-post-footer-bg);
+  border-color: var(--secondary-color);
+  color: var(--text-color);
 }
 
 .editor-overflow-toggle:disabled {
@@ -1367,6 +1359,7 @@
 .editor-overflow-toggle svg {
   width: 18px;
   height: 18px;
+  color: var(--text-color);
 }
 
 .editor-overflow-menu {
@@ -1402,7 +1395,7 @@
 
 .editor-overflow-item:hover,
 .editor-overflow-item:focus {
-  background-color: rgba(var(--primary-rgb), 0.1);
+  background-color: var(--topic-post-footer-bg);
   outline: none;
 }
 
@@ -1413,16 +1406,16 @@
   color: var(--secondary-color);
 }
 
+/* Icon stays dark on hover */
 .editor-overflow-item:hover svg,
 .editor-overflow-item:focus svg {
-  color: var(--primary-color);
+  color: var(--secondary-color);
 }
 
 .editor-overflow-group {
   margin-top: 0.25rem;
   padding-top: 0.25rem;
   border-top: 1px solid var(--topic-reply-card-border);
-  opacity: 0.25;
 }
 
 .editor-overflow-group:first-child {

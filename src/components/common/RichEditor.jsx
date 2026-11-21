@@ -17,7 +17,7 @@ const RichEditor = forwardRef(({
   value, onChange, placeholder, rows = 6, minHeight, maxHeight, id = 'rich-editor',
   maxLength, autoFocus, showDice = false, isEdit = false, hideDiceType = false,
   showHide = true, _smilesDropDirection = "up", _smilesFullWidth = true, _onSubmit,
-  hideHotkeysButton = false, hideFooter = false, autoResize = false
+  _hideHotkeysButton = false, hideFooter = false, autoResize = false
 }, ref) => {
   const { t } = useI18n();
 
@@ -162,7 +162,7 @@ const RichEditor = forwardRef(({
       { id: 'smiles', minWidth: 34 },
       { id: 'hotkeys', minWidth: 34 }
     ];
-    const groupOrder = ['basic', 'format', 'align', 'inserts', 'media', 'advanced', 'smiles', 'hotkeys'];
+    const groupOrder = ['style', 'history', 'smiles', 'links', 'typography', 'align', 'inserts', 'media', 'advanced'];
 
     // Always reserve space for: size picker (38px) + color picker (38px) + divider (2px*2=4px) + overflow toggle (38px) = ~118px
     // Plus container padding (0.5rem*2 = 16px) and gap between items
@@ -317,51 +317,27 @@ const RichEditor = forwardRef(({
   // Toolbar group rendering
   const renderGroup = useCallback((groupId, isOverflow = false) => {
     switch (groupId) {
-      case 'basic':
+      case 'style':
         if (isOverflow) {
           return (
             <>
-              <button
-                type="button"
-                className="editor-overflow-item"
-                onClick={() => insertText('[b]', '[/b]')}
-              >
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[b]', '[/b]')}>
                 <Bold size={16} /> {t('editor.bold')}
               </button>
-              <button
-                type="button"
-                className="editor-overflow-item"
-                onClick={() => insertText('[i]', '[/i]')}
-              >
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[i]', '[/i]')}>
                 <Italic size={16} /> {t('editor.italic')}
               </button>
-              <button
-                type="button"
-                className="editor-overflow-item"
-                onClick={() => insertText('[u]', '[/u]')}
-              >
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[u]', '[/u]')}>
                 <Underline size={16} /> {t('editor.underline')}
               </button>
-              <button
-                type="button"
-                className="editor-overflow-item"
-                onClick={() => insertText('[s]', '[/s]')}
-              >
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[s]', '[/s]')}>
                 <Strikethrough size={16} /> {t('editor.strikethrough')}
               </button>
-              <button
-                type="button"
-                className="editor-overflow-item"
-                onClick={() => setShowLinkModal(true)}
-              >
-                <LinkIcon size={16} /> {t('editor.link')}
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[sup]', '[/sup]')}>
+                <Superscript size={16} /> {t('editor.superscript')}
               </button>
-              <button
-                type="button"
-                className="editor-overflow-item"
-                onClick={() => setShowImageModal(true)}
-              >
-                <ImageIcon size={16} /> {t('editor.image')}
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[sub]', '[/sub]')}>
+                <Subscript size={16} /> {t('editor.subscript')}
               </button>
             </>
           );
@@ -380,52 +356,277 @@ const RichEditor = forwardRef(({
             <Button variant="ghost" iconOnly onClick={() => insertText('[s]', '[/s]')} title={t('editor.strikethrough')}>
               <Strikethrough size={16} />
             </Button>
-            <Button variant="ghost" iconOnly onClick={() => setShowLinkModal(true)} title={t('editor.link')}>
-              <LinkIcon size={16} />
+            <Button variant="ghost" iconOnly onClick={() => insertText('[sup]', '[/sup]')} title={t('editor.superscript')}>
+              <Superscript size={16} />
             </Button>
-            <Button variant="ghost" iconOnly onClick={() => setShowImageModal(true)} title={t('editor.image')}>
-              <ImageIcon size={16} />
+            <Button variant="ghost" iconOnly onClick={() => insertText('[sub]', '[/sub]')} title={t('editor.subscript')}>
+              <Subscript size={16} />
             </Button>
           </div>
         );
 
-      case 'format':
+      case 'history':
         if (isOverflow) {
           return (
             <>
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('', '', -1)} title={t('editor.undo') + ' (Ctrl+Z)'}>
+                <Undo size={16} /> {t('editor.undo')}
+              </button>
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('', '', -2)} title={t('editor.redo') + ' (Ctrl+Y)'}>
+                <Redo size={16} /> {t('editor.redo')}
+              </button>
+            </>
+          );
+        }
+        return (
+          <div className="editor-toolbar-group">
+            <Button variant="ghost" iconOnly onClick={() => insertText('', '', -1)} title={t('editor.undo') + ' (Ctrl+Z)'}>
+              <Undo size={16} />
+            </Button>
+            <Button variant="ghost" iconOnly onClick={() => insertText('', '', -2)} title={t('editor.redo') + ' (Ctrl+Y)'}>
+              <Redo size={16} />
+            </Button>
+          </div>
+        );
+
+      case 'smiles':
+        if (isOverflow) {
+          return (
+            <button type="button" className="editor-overflow-item" onClick={() => setShowSmilesModal(true)}>
+              <Smile size={16} /> {t('editor.smiles')}
+            </button>
+          );
+        }
+        return (
+          <div className="editor-toolbar-group">
+            <Button variant="ghost" iconOnly onClick={() => setShowSmilesModal(true)} title={t('editor.smiles')}>
+              <Smile size={18} />
+            </Button>
+          </div>
+        );
+
+      case 'links':
+        if (isOverflow) {
+          return (
+            <button type="button" className="editor-overflow-item" onClick={() => setShowLinkModal(true)}>
+              <LinkIcon size={16} /> {t('editor.link')}
+            </button>
+          );
+        }
+        return (
+          <div className="editor-toolbar-group">
+            <Button variant="ghost" iconOnly onClick={() => setShowLinkModal(true)} title={t('editor.link')}>
+              <LinkIcon size={16} />
+            </Button>
+          </div>
+        );
+
+      case 'typography': {
+        // Size picker options (defined here to avoid useCallback dependency issues)
+        const sizeOptions = [
+          { value: 'xx-small', label: t('editor.size_xx_small') },
+          { value: 'x-small', label: t('editor.size_x_small') },
+          { value: 'small', label: t('editor.size_small') },
+          { value: 'medium', label: t('editor.size_medium') },
+          { value: 'large', label: t('editor.size_large') },
+          { value: 'x-large', label: t('editor.size_x_large') },
+          { value: 'xx-large', label: t('editor.size_xx_large') }
+        ];
+        // Color picker options
+        const colorOptions = [
+          { value: '#e03e3e', label: t('editor.color_red') },
+          { value: '#dd6b20', label: t('editor.color_orange') },
+          { value: '#f6ad55', label: t('editor.color_yellow') },
+          { value: '#38a169', label: t('editor.color_green') },
+          { value: '#3182ce', label: t('editor.color_blue') },
+          { value: '#805ad5', label: t('editor.color_purple') },
+          { value: '#d53f8c', label: t('editor.color_pink') },
+          { value: '#1a202c', label: t('editor.color_black') },
+          { value: '#718096', label: t('editor.color_gray') },
+          { value: '#ffffff', label: t('editor.color_white') }
+        ];
+        if (isOverflow) {
+          return (
+            <>
+              <div className="editor-picker" ref={sizePickerRef}>
+                <button
+                  type="button"
+                  className="editor-picker__toggle"
+                  onClick={() => setShowSizePicker(!showSizePicker)}
+                  aria-haspopup="listbox"
+                  aria-expanded={showSizePicker}
+                  title={t('editor.font_size')}
+                >
+                  <ALargeSmall size={16} />
+                </button>
+                {showSizePicker && (
+                  <div className="editor-picker__menu editor-picker__menu--right" role="listbox">
+                    {sizeOptions.map(opt => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        className="editor-picker__item"
+                        role="option"
+                        onClick={() => {
+                          insertText(`[size=${opt.value}]`, '[/size]');
+                          setShowSizePicker(false);
+                        }}
+                      >
+                        <span style={{ fontSize: opt.value }}>{opt.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="editor-picker" ref={sizePickerRef}>
+                <button
+                  type="button"
+                  className="editor-picker__toggle"
+                  onClick={() => setShowColorPicker(!showColorPicker)}
+                  aria-haspopup="listbox"
+                  aria-expanded={showColorPicker}
+                  title={t('editor.font_color')}
+                >
+                  <Palette size={16} />
+                </button>
+                {showColorPicker && (
+                  <div className="editor-picker__menu editor-picker__menu--right" role="listbox">
+                    {colorOptions.map(opt => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        className="editor-picker__item"
+                        role="option"
+                        onClick={() => {
+                          insertText(`[color=${opt.value}]`, '[/color]');
+                          setShowColorPicker(false);
+                        }}
+                      >
+                        <span className="editor-color-swatch" style={{ backgroundColor: opt.value }}></span>
+                        <span>{opt.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          );
+        }
+        return (
+          <div className="editor-toolbar-group">
+            <div className="editor-picker">
               <button
                 type="button"
-                className="editor-overflow-item"
-                onClick={() => insertText('[quote]', '[/quote]')}
+                className="editor-picker__toggle"
+                onClick={() => setShowSizePicker(!showSizePicker)}
+                aria-haspopup="listbox"
+                aria-expanded={showSizePicker}
+                title={t('editor.font_size')}
               >
+                <ALargeSmall size={16} />
+              </button>
+              {showSizePicker && (
+                <div className="editor-picker__menu editor-picker__menu--right" role="listbox">
+                  {sizeOptions.map(opt => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      className="editor-picker__item"
+                      role="option"
+                      onClick={() => {
+                        insertText(`[size=${opt.value}]`, '[/size]');
+                        setShowSizePicker(false);
+                      }}
+                    >
+                      <span style={{ fontSize: opt.value }}>{opt.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="editor-picker">
+              <button
+                type="button"
+                className="editor-picker__toggle"
+                onClick={() => setShowColorPicker(!showColorPicker)}
+                aria-haspopup="listbox"
+                aria-expanded={showColorPicker}
+                title={t('editor.font_color')}
+              >
+                <Palette size={16} />
+              </button>
+              {showColorPicker && (
+                <div className="editor-picker__menu editor-picker__menu--right" role="listbox">
+                  {colorOptions.map(opt => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      className="editor-picker__item"
+                      role="option"
+                      onClick={() => {
+                        insertText(`[color=${opt.value}]`, '[/color]');
+                        setShowColorPicker(false);
+                      }}
+                    >
+                      <span className="editor-color-swatch" style={{ backgroundColor: opt.value }}></span>
+                      <span>{opt.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+
+      } // end case 'typography'
+
+      case 'align':
+        if (isOverflow) {
+          return (
+            <>
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[align=left]', '[/align]')}>
+                <AlignLeft size={16} /> {t('editor.align_left')}
+              </button>
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[align=center]', '[/align]')}>
+                <AlignCenter size={16} /> {t('editor.align_center')}
+              </button>
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[align=right]', '[/align]')}>
+                <AlignRight size={16} /> {t('editor.align_right')}
+              </button>
+            </>
+          );
+        }
+        return (
+          <div className="editor-toolbar-group">
+            <Button variant="ghost" iconOnly onClick={() => insertText('[align=left]', '[/align]')} title={t('editor.align_left')}>
+              <AlignLeft size={16} />
+            </Button>
+            <Button variant="ghost" iconOnly onClick={() => insertText('[align=center]', '[/align]')} title={t('editor.align_center')}>
+              <AlignCenter size={16} />
+            </Button>
+            <Button variant="ghost" iconOnly onClick={() => insertText('[align=right]', '[/align]')} title={t('editor.align_right')}>
+              <AlignRight size={16} />
+            </Button>
+          </div>
+        );
+
+      case 'inserts':
+        if (isOverflow) {
+          return (
+            <>
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[quote]', '[/quote]')}>
                 <Quote size={16} /> {t('editor.quote')}
               </button>
-              <button
-                type="button"
-                className="editor-overflow-item"
-                onClick={() => insertText('[spoiler]', '[/spoiler]')}
-              >
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[spoiler]', '[/spoiler]')}>
                 <Clapperboard size={16} /> {t('editor.spoiler')}
               </button>
-              <button
-                type="button"
-                className="editor-overflow-item"
-                onClick={openAbbrModal}
-              >
+              <button type="button" className="editor-overflow-item" onClick={openAbbrModal}>
                 <HelpCircle size={16} /> {t('editor.abbreviation')}
               </button>
-              <button
-                type="button"
-                className="editor-overflow-item"
-                onClick={() => insertText('[code]', '[/code]')}
-              >
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[code]', '[/code]')}>
                 <Code size={16} /> {t('editor.code_block')}
               </button>
-              <button
-                type="button"
-                className="editor-overflow-item"
-                onClick={() => insertText('[html]', '[/html]')}
-              >
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[html]', '[/html]')}>
                 <CodeXml size={16} /> HTML
               </button>
             </>
@@ -451,116 +652,14 @@ const RichEditor = forwardRef(({
           </div>
         );
 
-      case 'align':
-        if (isOverflow) {
-          return (
-            <>
-              <button
-                type="button"
-                className="editor-overflow-item"
-                onClick={() => insertText('[align=left]', '[/align]')}
-              >
-                <AlignLeft size={16} /> {t('editor.align_left')}
-              </button>
-              <button
-                type="button"
-                className="editor-overflow-item"
-                onClick={() => insertText('[align=center]', '[/align]')}
-              >
-                <AlignCenter size={16} /> {t('editor.align_center')}
-              </button>
-              <button
-                type="button"
-                className="editor-overflow-item"
-                onClick={() => insertText('[align=right]', '[/align]')}
-              >
-                <AlignRight size={16} /> {t('editor.align_right')}
-              </button>
-              <button
-                type="button"
-                className="editor-overflow-item"
-                onClick={() => insertText('[align=justify]', '[/align]')}
-              >
-                <AlignJustify size={16} /> {t('editor.align_justify')}
-              </button>
-            </>
-          );
-        }
-        return (
-          <div className="editor-toolbar-group">
-            <Button variant="ghost" iconOnly onClick={() => insertText('[align=left]', '[/align]')} title={t('editor.align_left')}>
-              <AlignLeft size={16} />
-            </Button>
-            <Button variant="ghost" iconOnly onClick={() => insertText('[align=center]', '[/align]')} title={t('editor.align_center')}>
-              <AlignCenter size={16} />
-            </Button>
-            <Button variant="ghost" iconOnly onClick={() => insertText('[align=right]', '[/align]')} title={t('editor.align_right')}>
-              <AlignRight size={16} />
-            </Button>
-            <Button variant="ghost" iconOnly onClick={() => insertText('[align=justify]', '[/align]')} title={t('editor.align_justify')}>
-              <AlignJustify size={16} />
-            </Button>
-          </div>
-        );
-
-      case 'inserts':
-        if (isOverflow) {
-          return (
-            <>
-              <button
-                type="button"
-                className="editor-overflow-item"
-                onClick={() => insertText('[sup]', '[/sup]')}
-              >
-                <Superscript size={16} /> {t('editor.superscript')}
-              </button>
-              <button
-                type="button"
-                className="editor-overflow-item"
-                onClick={() => insertText('[sub]', '[/sub]')}
-              >
-                <Subscript size={16} /> {t('editor.subscript')}
-              </button>
-              <button
-                type="button"
-                className="editor-overflow-item"
-                onClick={() => insertText('[hr]', '')}
-              >
-                <Minus size={16} /> {t('editor.hr')}
-              </button>
-            </>
-          );
-        }
-        return (
-          <div className="editor-toolbar-group">
-            <Button variant="ghost" iconOnly onClick={() => insertText('[sup]', '[/sup]')} title={t('editor.superscript')}>
-              <Superscript size={16} />
-            </Button>
-            <Button variant="ghost" iconOnly onClick={() => insertText('[sub]', '[/sub]')} title={t('editor.subscript')}>
-              <Subscript size={16} />
-            </Button>
-            <Button variant="ghost" iconOnly onClick={() => insertText('[hr]', '')} title={t('editor.hr')}>
-              <Minus size={16} />
-            </Button>
-          </div>
-        );
-
       case 'media':
         if (isOverflow) {
           return (
             <>
-              <button
-                type="button"
-                className="editor-overflow-item"
-                onClick={() => setShowImageModal(true)}
-              >
+              <button type="button" className="editor-overflow-item" onClick={() => setShowImageModal(true)}>
                 <ImageIcon size={16} /> {t('editor.image')}
               </button>
-              <button
-                type="button"
-                className="editor-overflow-item"
-                onClick={() => insertText('[video]', '[/video]')}
-              >
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[video]', '[/video]')}>
                 <Youtube size={16} /> {t('editor.video')}
               </button>
             </>
@@ -581,43 +680,23 @@ const RichEditor = forwardRef(({
         if (isOverflow) {
           return (
             <>
-              <button
-                type="button"
-                className="editor-overflow-item"
-                onClick={() => setShowColumnsModal(true)}
-              >
+              <button type="button" className="editor-overflow-item" onClick={() => setShowColumnsModal(true)}>
                 <Columns size={16} /> {t('editor.columns')}
               </button>
-              <button
-                type="button"
-                className="editor-overflow-item"
-                onClick={openTableModal}
-              >
+              <button type="button" className="editor-overflow-item" onClick={openTableModal}>
                 <TableIcon size={16} /> {t('editor.table')}
               </button>
               {showHide && (
-                <button
-                  type="button"
-                  className="editor-overflow-item"
-                  onClick={openHideModal}
-                >
+                <button type="button" className="editor-overflow-item" onClick={openHideModal}>
                   <EyeOff size={16} /> {t('editor.hide')}
                 </button>
               )}
               {showDice && !isEdit && (
-                <button
-                  type="button"
-                  className="editor-overflow-item"
-                  onClick={() => setShowDiceModal(true)}
-                >
+                <button type="button" className="editor-overflow-item" onClick={() => setShowDiceModal(true)}>
                   <Dices size={16} /> {t('editor.dice_roll_btn')}
                 </button>
               )}
-              <button
-                type="button"
-                className="editor-overflow-item"
-                onClick={() => insertText('[hr]', '')}
-              >
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[hr]', '')}>
                 <Minus size={16} /> {t('editor.hr')}
               </button>
             </>
@@ -647,132 +726,62 @@ const RichEditor = forwardRef(({
           </div>
         );
 
-      case 'smiles':
-        if (isOverflow) {
-          return (
-            <button
-              type="button"
-              className="editor-overflow-item"
-              onClick={() => setShowSmilesModal(true)}
-            >
-              <Smile size={16} /> {t('editor.smiles')}
-            </button>
-          );
-        }
-        return (
-          <div className="editor-toolbar-group">
-            <Button
-              variant="ghost"
-              iconOnly
-              onClick={() => setShowSmilesModal(true)}
-              title={t('editor.smiles')}
-            >
-              <Smile size={18} />
-            </Button>
-          </div>
-        );
-
-      case 'hotkeys':
-        if (isOverflow || hideHotkeysButton) return null;
-        return (
-          <div className="editor-toolbar-group">
-            <Button variant="ghost" iconOnly onClick={() => setShowHotkeysModal(true)} title={t('editor.hotkeys')}>
-              <Keyboard size={16} />
-            </Button>
-          </div>
-        );
-
       default:
         return null;
     }
-  }, [t, insertText, showHide, showDice, isEdit, hideHotkeysButton, openAbbrModal, openTableModal, openHideModal]);
-
-  // Size picker options
-  const sizeOptions = [
-    { value: 'xx-small', label: t('editor.size_xx_small') },
-    { value: 'x-small', label: t('editor.size_x_small') },
-    { value: 'small', label: t('editor.size_small') },
-    { value: 'medium', label: t('editor.size_medium') },
-    { value: 'large', label: t('editor.size_large') },
-    { value: 'x-large', label: t('editor.size_x_large') },
-    { value: 'xx-large', label: t('editor.size_xx_large') }
-  ];
-
-  // Color picker options
-  const colorOptions = [
-    { value: '#e03e3e', label: t('editor.color_red') },
-    { value: '#dd6b20', label: t('editor.color_orange') },
-    { value: '#d69e2e', label: t('editor.color_yellow') },
-    { value: '#38a169', label: t('editor.color_green') },
-    { value: '#3182ce', label: t('editor.color_blue') },
-    { value: '#805ad5', label: t('editor.color_purple') },
-    { value: '#d53f8c', label: t('editor.color_pink') },
-    { value: '#4a5568', label: t('editor.color_gray') },
-    { value: '#000000', label: t('editor.color_black') },
-    { value: '#ffffff', label: t('editor.color_white') }
-  ];
-
+  }, [t, insertText, showHide, showDice, isEdit, openAbbrModal, openTableModal, openHideModal, showSizePicker, showColorPicker]);
   // Hotkey groups for the hotkeys modal
   const hotkeyGroups = [
     {
-      title: t('editor.formatting'),
+      title: t('editor.hotkeys_text'),
       items: [
-        { keys: 'Ctrl + B', desc: t('editor.bold') },
-        { keys: 'Ctrl + I', desc: t('editor.italic') },
-        { keys: 'Ctrl + U', desc: t('editor.underline') },
-        { keys: 'Ctrl + S', desc: t('editor.strikethrough') },
+        { keys: 'Ctrl+B', desc: t('editor.bold') },
+        { keys: 'Ctrl+I', desc: t('editor.italic') },
+        { keys: 'Ctrl+U', desc: t('editor.underline') },
+        { keys: 'Ctrl+Shift+S', desc: t('editor.strikethrough') },
+        { keys: 'Ctrl+Shift+.', desc: t('editor.superscript') },
+        { keys: 'Ctrl+Shift+,', desc: t('editor.subscript') },
       ],
     },
     {
-      title: t('editor.alignment'),
+      title: t('editor.hotkeys_blocks'),
       items: [
-        { keys: 'Ctrl + L', desc: t('editor.align_left') },
-        { keys: 'Ctrl + E', desc: t('editor.align_center') },
-        { keys: 'Ctrl + R', desc: t('editor.align_right') },
-        { keys: 'Ctrl + J', desc: t('editor.justify') },
+        { keys: 'Ctrl+Q', desc: t('editor.quote') },
+        { keys: 'Ctrl+Shift+Q', desc: t('editor.spoiler') },
+        { keys: 'Ctrl+Shift+C', desc: t('editor.code_block') },
+        { keys: 'Ctrl+Shift+H', desc: t('editor.html') },
+        { keys: 'Ctrl+Shift+X', desc: t('editor.hr') },
       ],
     },
     {
-      title: t('editor.inserts'),
+      title: t('editor.hotkeys_align'),
       items: [
-        { keys: 'Ctrl + K', desc: t('editor.link') },
-        { keys: 'Ctrl + G', desc: t('editor.spoiler') },
-        { keys: 'Ctrl + H', desc: t('editor.hide') },
-        { keys: 'Ctrl + Q', desc: t('editor.quote') },
-        { keys: 'Ctrl + [', desc: t('editor.code_block') },
-        { keys: 'Ctrl + ]', desc: t('editor.html_block') },
+        { keys: 'Ctrl+Shift+L', desc: t('editor.align_left') },
+        { keys: 'Ctrl+Shift+E', desc: t('editor.align_center') },
+        { keys: 'Ctrl+Shift+R', desc: t('editor.align_right') },
+        { keys: 'Ctrl+J', desc: t('editor.align_justify') },
       ],
     },
     {
-      title: t('editor.media_structure'),
+      title: t('editor.hotkeys_media'),
       items: [
-        { keys: 'Alt + V', desc: t('editor.video') },
-        { keys: 'Alt + I', desc: t('editor.image') },
-        { keys: 'Alt + H', desc: t('editor.horizontal_rule') },
-        { keys: 'Alt + T', desc: t('editor.table') },
-        { keys: 'Alt + L', desc: t('editor.float_left') },
-        { keys: 'Alt + R', desc: t('editor.float_right') },
+        { keys: 'Ctrl+Shift+I', desc: t('editor.image') },
+        { keys: 'Ctrl+Shift+V', desc: t('editor.video') },
+        { keys: 'Ctrl+K', desc: t('editor.link') },
       ],
     },
     {
-      title: t('editor.special_blocks'),
+      title: t('editor.hotkeys_advanced'),
       items: [
-        { keys: 'Ctrl + Shift + D', desc: t('editor.added_block') },
-        { keys: 'Ctrl + Shift + A', desc: t('editor.info_block') },
-        { keys: 'Ctrl + Shift + M', desc: t('editor.bullet_list') },
-      ],
-    },
-    {
-      title: t('editor.system'),
-      items: [
-        { keys: 'Ctrl + Z', desc: t('editor.undo') },
-        { keys: 'Ctrl + Y / Ctrl + Shift + Z', desc: t('editor.redo') },
-        { keys: 'Ctrl + Enter', desc: t('editor.submit') },
-        { keys: 'Shift + Tab', desc: t('editor.indent') },
-        { keys: 'Ctrl + /', desc: t('editor.show_manual') },
+        { keys: 'Ctrl+Z', desc: t('editor.undo') },
+        { keys: 'Ctrl+Y', desc: t('editor.redo') },
+        { keys: 'Ctrl+Shift+D', desc: t('editor.dice_roll_btn') },
+        { keys: 'Ctrl+Shift+K', desc: t('editor.hide') },
       ],
     },
   ];
+
+
 
   return (
     <div className="rich-editor-container" ref={containerRef}>
@@ -787,75 +796,6 @@ const RichEditor = forwardRef(({
             {idx < visibleGroupIds.length - 1 && <div className="editor-toolbar-divider"></div>}
           </React.Fragment>
         ))}
-
-        {/* Size Picker */}
-        <div className="editor-picker" ref={sizePickerRef}>
-          <button
-            type="button"
-            className="editor-picker__toggle"
-            onClick={() => setShowSizePicker(!showSizePicker)}
-            aria-haspopup="listbox"
-            aria-expanded={showSizePicker}
-            title={t('editor.font_size')}
-          >
-            <ALargeSmall size={16} />
-          </button>
-          {showSizePicker && (
-            <div className="editor-picker__menu editor-picker__menu--right" role="listbox">
-              {sizeOptions.map(opt => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  className="editor-picker__item"
-                  role="option"
-                  onClick={() => {
-                    insertText(`[size=${opt.value}]`, '[/size]');
-                    setShowSizePicker(false);
-                  }}
-                >
-                  <span style={{ fontSize: opt.value }}>{opt.label}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="editor-toolbar-divider"></div>
-
-        {/* Color Picker */}
-        <div className="editor-picker" ref={colorPickerRef}>
-          <button
-            type="button"
-            className="editor-picker__toggle"
-            onClick={() => setShowColorPicker(!showColorPicker)}
-            aria-haspopup="listbox"
-            aria-expanded={showColorPicker}
-            title={t('editor.font_color')}
-          >
-            <Palette size={16} />
-          </button>
-          {showColorPicker && (
-            <div className="editor-picker__menu editor-picker__menu--right" role="listbox">
-              {colorOptions.map(opt => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  className="editor-picker__item"
-                  role="option"
-                  onClick={() => {
-                    insertText(`[color=${opt.value}]`, '[/color]');
-                    setShowColorPicker(false);
-                  }}
-                >
-                  <span className="editor-color-swatch" style={{ backgroundColor: opt.value }}></span>
-                  <span>{opt.label}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="editor-toolbar-divider"></div>
 
         {/* Render Overflow Menu */}
         {overflowGroupIds.length > 0 && (
@@ -872,7 +812,7 @@ const RichEditor = forwardRef(({
                 <MoreHorizontal size={18} />
               </Button>
             ) : (
-              <div className="editor-picker">
+              <div className="editor-picker" ref={sizePickerRef}>
                 <button
                   type="button"
                   className="editor-overflow-toggle"
