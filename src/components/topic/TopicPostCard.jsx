@@ -517,7 +517,7 @@ export const TopicPostCard = ({
                     className="footer-link footer-link--publication footer-link--icon"
                     onClick={() => onPublishDraft?.(post.id)}
                   >
-                    <Send size={12} />
+                    <Send size={16} />
                     <span className="footer-link__label">{t('forum.publish_action')}</span>
                   </button>
                 ) : canReply && onQuote && (

@@ -248,13 +248,12 @@
   border: 1px solid var(--topic-post-card-border);
   border-radius: var(--topic-post-card-radius);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-  /* overflow: clip, а не hidden: визуально то же самое (скруглённые углы
-     обрезают фон шапки поста и pinned-полоски), но clip НЕ создаёт
-     скролл-контейнер — а hidden создаёт, и браузер тогда не может выбрать
-     якорь внутри постов: scroll anchoring на странице топика мёртв, и пост
-     после поздней подгрузки статусов/подписей (maskStats, F-07) уезжает
-     вниз без компенсации. С clip анкоринг снова держит цель прыжка. */
-  overflow: clip;
+  /* No overflow here: the "…" dropdown menu is absolutely positioned
+     inside this card and must drop down past the card's bottom edge.
+     overflow: clip trapped it inside the card. Trade-off: the rounded
+     corners no longer clip the post header background and the pinned
+     strips, and scroll anchoring after late maskStats/signature loads
+     (F-07) may be looser — accepted, the menu has to work. */
   scroll-margin-top: 85px;
 }
 
@@ -434,6 +433,7 @@
   flex-direction: column;
   flex-grow: 1;
   min-height: 100%;
+  min-width: 0;
 }
 
 .post-content {
@@ -453,6 +453,7 @@
    bottom margin — but it needs air under the header. */
 .post-editor {
   flex-grow: 1;
+  min-width: 0;
   padding-right: 1.5rem;
   padding-left: 1.5rem;
   padding-top: .5rem;
@@ -624,6 +625,12 @@
   display: none;
 }
 
+/* The Publish action keeps its icon on desktop too (everywhere else the
+   footer icons are mobile-only): the Send icon marks the action out. */
+.footer-link--publication .lucide {
+  display: inline-block;
+}
+
 .post-author__contact .footer-link {
   font-weight: 400;
 }
@@ -656,7 +663,7 @@
   align-items: center;
   gap: var(--topic-meta-gap);
   padding: 0.5rem 1rem;
-  border-radius: .75rem !important;
+  border-radius: 0.375rem;
   border: 1px solid var(--primary-color);
   background-color: transparent;
   color: var(--primary-color);
@@ -676,6 +683,7 @@
 .topic-actions-subscription:focus {
   background-color: var(--forum-view-btn-ghost-hover-bg);
   color: var(--forum-view-btn-ghost-hover-text);
+  border-color: var(--forum-view-btn-ghost-hover-bg);
 }
 
 #topic-actions-bottom .topic-actions-subscription.is-subscribed {
@@ -723,12 +731,17 @@
   border: 1px solid var(--topic-reply-card-border);
   border-radius: var(--topic-reply-card-radius);
   box-shadow: var(--topic-reply-card-shadow);
-  overflow: hidden;
+  /* No overflow here: the "…" dropdown menu is absolutely positioned
+     inside this card and must drop down past the card's bottom edge.
+     overflow: hidden trapped it inside the card (same fix as .topic-post
+     in round 3). The header carries its own top radius below so its dark
+     background does not stick out of the card's rounded corners. */
 }
 
 .topic-reply__header {
   padding: var(--topic-reply-header-padding-y) var(--topic-reply-header-padding-x);
   background-color: var(--topic-reply-header-bg);
+  border-radius: var(--topic-reply-card-radius) var(--topic-reply-card-radius) 0 0;
   color: var(--topic-reply-header-text);
 }
 
@@ -744,6 +757,9 @@
 }
 
 .topic-reply__field {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
   margin-bottom: var(--topic-reply-field-margin-bottom);
 }
 
@@ -753,6 +769,34 @@
   color: var(--text-color);
   font-size: var(--topic-reply-label-size);
   font-weight: var(--topic-reply-label-weight);
+}
+
+.topic-reply__mask-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.topic-reply__mask-select {
+  width: 100%;
+  max-width: var(--topic-reply-mask-toggle-max-width);
+  padding: 0.375rem 2rem 0.375rem 0.75rem;
+  font-size: var(--topic-reply-label-size);
+  line-height: 1.5;
+  color: var(--text-color);
+  background-color: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 0.375rem;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23343a40' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M2 5l6 6 6-6'/%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 0.5rem center;
+  background-size: 16px 12px;
+}
+
+.topic-reply__mask-select:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 0.25rem rgba(var(--primary-rgb), 0.25);
 }
 
 .topic-reply__mask-row {
@@ -810,6 +854,10 @@
   color: var(--secondary-color);
 }
 
+.topic-reply-notice__icon--danger {
+  color: var(--role-banned);
+}
+
 .topic-reply-notice__title {
   margin: 0;
   color: var(--text-color);
@@ -825,6 +873,9 @@
 }
 
 .topic-post-editor {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
   padding-bottom: var(--topic-post-editor-margin-bottom);
 }
 
@@ -849,23 +900,90 @@
   font-size: var(--topic-reply-label-size);
 }
 
-.topic-post-editor__mask-row {
+/* PostInlineEditor — field rows (label + input/select) */
+.topic-post-editor__field-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 0.5rem;
   margin-bottom: var(--topic-post-editor-mask-row-margin-bottom);
+  flex-wrap: wrap;
 }
 
-.topic-post-editor__mask-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* Mask row variant — space-between to push hotkeys button to right */
+.topic-post-editor__field-row--mask {
+  justify-content: space-between;
+}
+
+.topic-post-editor__field-row>label {
+  flex: 0 0 auto;
   white-space: nowrap;
-  max-width: var(--topic-post-editor-mask-text-max-width);
 }
 
+.topic-post-editor__field-row>input,
+.topic-post-editor__field-row>select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Input — mirrors .topic-reply__input */
+.topic-post-editor__input {
+  width: 100%;
+  padding: 0.375rem 0.75rem;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--text-color);
+  background-color: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 0.375rem;
+  transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+.topic-post-editor__input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 0.25rem rgba(var(--primary-rgb), 0.25);
+}
+
+/* Mask select — mirrors .topic-reply__mask-select */
+.topic-post-editor__mask-select {
+  width: 100%;
+  max-width: var(--topic-reply-mask-toggle-max-width);
+  padding: 0.375rem 2rem 0.375rem 0.75rem;
+  font-size: var(--topic-reply-label-size);
+  line-height: 1.5;
+  color: var(--text-color);
+  background-color: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 0.375rem;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23343a40' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M2 5l6 6 6-6'/%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 0.5rem center;
+  background-size: 16px 12px;
+}
+
+/* Mask wrap — prevents collapsing */
+.topic-post-editor__mask-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Checkbox */
 .topic-post-editor__actions {
   display: flex;
   gap: var(--topic-post-editor-actions-gap);
+}
+
+/* Spacing variant for PostInlineEditor root */
+.topic-post-editor--with-spacing {
+  padding-bottom: 1rem;
+}
+
+/* RichEditor container — ensure it can shrink within flex parent */
+.rich-editor-container {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
 }
 
 .topic-btn {
@@ -892,12 +1010,12 @@
 .topic-btn--primary {
   background-color: var(--primary-color);
   border-color: var(--primary-color);
-  color: var(--topic-reply-header-text);
+  color: var(--topic-btn-primary-text);
 }
 
 .topic-btn--primary:hover:not(:disabled),
 .topic-btn--primary:focus {
-  color: var(--topic-reply-header-text);
+  color: var(--topic-btn-primary-text);
   opacity: 0.9;
 }
 
@@ -923,6 +1041,724 @@
 .topic-btn--accent:focus {
   background-color: var(--primary-color);
   color: var(--topic-reply-header-text);
+}
+
+.topic-btn--link {
+  background: transparent;
+  border-color: transparent;
+  color: var(--link-color);
+  padding: 0;
+  text-decoration: underline;
+}
+
+.topic-btn--link:hover:not(:disabled),
+.topic-btn--link:focus {
+  color: var(--link-hover-color);
+  text-decoration: underline;
+}
+
+.topic-btn-sm {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+}
+
+.topic-btn__icon {
+  margin-right: 0.5rem;
+}
+
+/* Hotkeys button — hidden on mobile (keyboard shortcuts not applicable) */
+.topic-btn--hotkeys {
+  display: inline-flex;
+}
+
+@media (max-width: 767.98px) {
+  .topic-btn--hotkeys {
+    display: none;
+  }
+}
+
+/* Help button in the mask row: a borderless chip like the toolbar buttons.
+   The extra .topic-btn scope beats .topic-btn--ghost (same specificity,
+   later in this file): without it the ghost hover paints the "Help" text
+   white and the button disappears on hover. */
+.topic-btn.topic-reply__help-btn {
+  background-color: var(--topic-reply-card-bg);
+  border: 1px solid transparent;
+  color: var(--text-color);
+}
+
+.topic-btn.topic-reply__help-btn:hover:not(:disabled),
+.topic-btn.topic-reply__help-btn:focus:not(:disabled) {
+  background-color: rgba(var(--primary-rgb), 0.1);
+  border-color: transparent;
+  color: var(--text-color);
+  text-decoration: none;
+}
+
+.topic-btn.topic-reply__help-btn svg {
+  color: var(--text-color);
+}
+
+/* Icon-only button (square, for toolbar) */
+.topic-btn--icon-only {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  gap: 0;
+}
+
+.topic-btn--icon-only .topic-btn__icon {
+  margin-right: 0;
+}
+
+.topic-btn--icon-only svg {
+  width: 16px;
+  height: 16px;
+}
+
+.topic-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1;
+  border-radius: 0.25rem;
+  white-space: nowrap;
+}
+
+.topic-badge--success {
+  background-color: var(--success-bg);
+  color: var(--success-text);
+  border: 1px solid var(--success-border);
+}
+
+.topic-badge--danger {
+  background-color: var(--danger-bg);
+  color: var(--danger-text);
+  border: 1px solid var(--danger-border);
+}
+
+.topic-textarea {
+  width: 100%;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--text-color);
+  background-color: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 0.375rem;
+  transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+  resize: vertical;
+  min-height: 60px;
+}
+
+.topic-textarea:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 0.25rem rgba(var(--primary-rgb), 0.25);
+}
+
+/* ============================================================
+   Editor Toolbar — semantic classes (replacing Bootstrap)
+   ============================================================ */
+
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 0.25rem;
+  padding: 0.5rem;
+  border-radius: var(--topic-reply-card-radius);
+  background-color: var(--editor-toolbar-bg);
+  border: 1px solid var(--topic-reply-card-border);
+  min-height: 46px;
+  /* No overflow here: the "…" dropdown menu is absolutely positioned
+     inside this toolbar and must drop down over the textarea. Clipping it
+     (overflow-x: hidden) trapped the menu inside the toolbar box and even
+     showed a scrollbar on the toolbar. The measurement effect guarantees
+     the toolbar content fits, so nothing needs clipping. */
+  margin-bottom: 0.5rem;
+}
+
+/* Toolbar buttons — borderless chips on the panel background.
+   Scoped under .editor-toolbar so these rules beat .topic-btn--ghost
+   (same specificity, later in this file): the toolbar buttons are ghost
+   Buttons, and without the extra scope the ghost background/border
+   (transparent) and the ghost hover (white icon) win. */
+.editor-toolbar .editor-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--text-color);
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.editor-toolbar .editor-toolbar-btn:hover:not(:disabled),
+.editor-toolbar .editor-toolbar-btn:focus:not(:disabled) {
+  background-color: rgba(var(--primary-rgb), 0.1);
+  border-color: transparent;
+  color: var(--text-color);
+}
+
+.editor-toolbar .editor-toolbar-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.editor-toolbar .editor-toolbar-btn svg {
+  width: 16px;
+  height: 16px;
+  color: var(--text-color);
+}
+
+.editor-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.editor-toolbar-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 0 0.25rem;
+  background-color: var(--editor-divider-color);
+}
+
+
+
+/* Mobile more-tools button.
+   Same scoping as .editor-toolbar-btn: this is a ghost Button, and without
+   the .editor-toolbar scope the later .topic-btn--ghost rules win. */
+.editor-toolbar .editor-more-tools-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--text-color);
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.editor-toolbar .editor-more-tools-btn:hover:not(:disabled),
+.editor-toolbar .editor-more-tools-btn:focus:not(:disabled) {
+  background-color: rgba(var(--primary-rgb), 0.1);
+  border-color: transparent;
+  color: var(--text-color);
+}
+
+.editor-toolbar .editor-more-tools-btn svg {
+  width: 18px;
+  height: 18px;
+  color: var(--text-color);
+}
+
+.min-h-60px {
+  min-height: 60px;
+}
+
+/* /* ============================================================
+   Custom Dropdown Pickers (Size, Color) — like MaskPicker
+   ============================================================ */
+
+.editor-picker {
+  position: relative;
+  display: inline-flex;
+}
+
+.editor-picker__toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--text-color);
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.editor-picker__toggle:hover:not(:disabled),
+.editor-picker__toggle:focus:not(:disabled) {
+  background-color: rgba(var(--primary-rgb), 0.1);
+  border-color: transparent;
+  color: var(--text-color);
+}
+
+.editor-picker__toggle:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.editor-picker__toggle svg {
+  width: 16px;
+  height: 16px;
+  color: var(--text-color);
+}
+
+.editor-picker__menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 1050;
+  min-width: 180px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 0.25rem;
+  background-color: var(--topic-reply-card-bg);
+  border: 1px solid var(--topic-reply-card-border);
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.editor-picker__menu--right {
+  left: auto;
+  right: 0;
+}
+
+.editor-picker__item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.375rem 0.5rem;
+  border: none;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: var(--text-color);
+  font-size: 0.875rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+
+.editor-picker__item:hover,
+.editor-picker__item:focus {
+  background-color: rgba(var(--primary-rgb), 0.1);
+  outline: none;
+}
+
+.editor-picker__item--active {
+  background-color: rgba(var(--primary-rgb), 0.15);
+  color: var(--primary-color);
+}
+
+.editor-picker__divider {
+  height: 1px;
+  margin: 0.25rem 0;
+  background-color: var(--topic-reply-card-border);
+  opacity: 0.25;
+}
+
+/* Color picker swatches */
+.editor-color-swatch {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 0.25rem;
+  border: 1px solid var(--topic-reply-card-border);
+  flex-shrink: 0;
+}
+
+/* ============================================================
+   Overflow Menu (More Tools "...")
+   ============================================================ */
+
+.editor-overflow-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--text-color);
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.editor-overflow-toggle:hover:not(:disabled),
+.editor-overflow-toggle:focus:not(:disabled) {
+  background-color: rgba(var(--primary-rgb), 0.1);
+  border-color: transparent;
+  color: var(--text-color);
+}
+
+.editor-overflow-toggle:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.editor-overflow-toggle svg {
+  width: 18px;
+  height: 18px;
+  color: var(--text-color);
+}
+
+.editor-overflow-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 1050;
+  min-width: 220px;
+  max-height: 400px;
+  overflow-y: auto;
+  padding: 0.25rem;
+  background-color: var(--topic-reply-card-bg);
+  border: 1px solid var(--topic-reply-card-border);
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.editor-overflow-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: none;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--text-color);
+  font-size: 0.875rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+
+.editor-overflow-item:hover,
+.editor-overflow-item:focus {
+  background-color: rgba(var(--primary-rgb), 0.08);
+  outline: none;
+}
+
+.editor-overflow-item svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--secondary-color);
+}
+
+/* Icon stays dark on hover */
+.editor-overflow-item:hover svg,
+.editor-overflow-item:focus svg {
+  color: var(--secondary-color);
+}
+
+.editor-overflow-group {
+  margin-top: 0.25rem;
+  padding-top: 0.25rem;
+  border-top: 1px solid var(--editor-divider-color);
+}
+
+.editor-overflow-group:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+/* ============================================================
+   Editor Textarea & Footer
+   ============================================================ */
+
+.editor-textarea {
+  width: 100%;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--text-color);
+  background-color: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 0.375rem;
+  transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+  resize: vertical;
+  min-height: 60px;
+  font-family: inherit;
+}
+
+.editor-textarea:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 0.25rem rgba(var(--primary-rgb), 0.225);
+}
+
+.editor-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 0.5rem;
+  padding: 0 0.25rem;
+  font-size: 0.875rem;
+}
+
+.editor-footer__hint {
+  color: var(--secondary-color);
+}
+
+.editor-footer__counter {
+  font-weight: 600;
+  color: var(--secondary-color);
+}
+
+.editor-footer__counter--danger {
+  color: var(--danger-text);
+}
+
+/* ============================================================
+   Hotkeys Modal — dl/grid instead of Table
+   ============================================================ */
+
+.editor-hotkeys-hint {
+  margin-bottom: 0.75rem;
+  font-size: 0.875rem;
+  color: var(--secondary-color);
+}
+
+.editor-hotkeys-group {
+  margin-bottom: 1rem;
+}
+
+.editor-hotkeys-group-title {
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--text-color);
+}
+
+.editor-hotkeys-list {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.9rem;
+}
+
+.editor-hotkeys-row {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.8rem 0;
+  border-bottom: 1px solid var(--editor-divider-color);
+}
+
+.editor-hotkeys-row:last-child {
+  border-bottom: none;
+}
+
+.editor-hotkeys-key {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem 0.375rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 1rem;
+  background-color: var(--topic-reply-card-bg);
+  border: 1px solid var(--topic-reply-card-border);
+  border-radius: 0.25rem;
+  white-space: nowrap;
+}
+
+.editor-hotkeys-desc {
+  color: var(--text-color);
+}
+
+/* ============================================================
+   Mentions Dropdown & Additional Formatting Modal
+   ============================================================ */
+
+.editor-mentions-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 1050;
+  width: 100%;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 0.25rem;
+  background-color: var(--topic-reply-card-bg);
+  border: 1px solid var(--topic-reply-card-border);
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.editor-mentions-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.375rem 0.5rem;
+  border: none;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: var(--text-color);
+  font-size: 0.875rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+
+.editor-mentions-item:hover,
+.editor-mentions-item:focus {
+  background-color: rgba(var(--primary-rgb), 0.1);
+  outline: none;
+}
+
+.editor-mentions-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.editor-mentions-avatar-placeholder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background-color: var(--primary-color);
+  color: var(--topic-reply-header-text);
+  font-size: 0.75rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+/* "Additional Formatting" modal: a two-column grid of bordered chip
+   buttons, one cell per formatting action. */
+.editor-more-tools-modal {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  padding: 0.25rem;
+}
+
+.editor-more-tools-modal .editor-overflow-item {
+  border: 1px solid var(--topic-reply-card-border);
+  background-color: var(--topic-reply-card-bg);
+}
+
+/* Typography pickers in the modal: full-width labelled buttons
+   ("Large Text" / "Text Color") instead of the 34px icon toggles. */
+.editor-more-tools-modal .editor-picker {
+  width: 100%;
+}
+
+.editor-more-tools-modal .editor-picker__toggle {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--topic-reply-card-border);
+  background-color: var(--topic-reply-card-bg);
+}
+
+/* Picker toggle labels are shown only in the modal; in the toolbar and
+   the desktop menu the toggles stay icon-only. */
+.editor-picker__toggle-label {
+  display: none;
+}
+
+.editor-more-tools-modal .editor-picker__toggle-label {
+  display: inline;
+}
+
+.topic-flex-between-start {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.topic-flex-end {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.topic-text-bold {
+  font-weight: 700;
+}
+
+.topic-text-sm {
+  font-size: 0.875rem;
+}
+
+.topic-text-muted {
+  color: var(--secondary-color);
+}
+
+.topic-text-center {
+  text-align: center;
+}
+
+.topic-gap-2 {
+  gap: 0.5rem;
+}
+
+.topic-gap-1 {
+  gap: 0.25rem;
+}
+
+.topic-mb-1 {
+  margin-bottom: 0.25rem;
+}
+
+.topic-mb-2 {
+  margin-bottom: 0.5rem;
+}
+
+.topic-mb-3 {
+  margin-bottom: 1rem;
+}
+
+.topic-mt-1 {
+  margin-top: 0.25rem;
+}
+
+.topic-mt-2 {
+  margin-top: 0.5rem;
+}
+
+.topic-opacity-50 {
+  opacity: 0.5;
+}
+
+.topic-opacity-75 {
+  opacity: 0.75;
+}
+
+.topic-italic {
+  font-style: italic;
+}
+
+/* Modal inner card — replaces Bootstrap p-3/border-start/border-4/border-accent */
+.modal-inner-card {
+  padding: 1rem;
+  border-left: 4px solid var(--primary-color);
+}
+
+.modal-section-themed {
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 0.375rem;
+  padding: 1rem;
 }
 
 @media (min-width: 768px) {
@@ -1102,6 +1938,131 @@
 }
 
 .topic-reply__mask-divider {
+  margin: 0.25rem 0;
+  border: 0;
+  border-top: 1px solid var(--topic-post-footer-border);
+}
+
+/* ===== MaskPicker component (replaces native select) ===== */
+.topic-mask-picker {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+}
+
+.topic-mask-picker__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--text-color);
+  background-color: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 0.375rem;
+  cursor: pointer;
+  min-width: 200px;
+  max-width: var(--topic-reply-mask-toggle-max-width, 320px);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+.topic-mask-picker__toggle:hover:not(:disabled) {
+  border-color: var(--primary-color);
+}
+
+.topic-mask-picker__toggle:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 0.25rem rgba(var(--primary-rgb), 0.25);
+}
+
+.topic-mask-picker__toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.topic-mask-picker__icon {
+  flex: 0 0 auto;
+  color: var(--secondary-color);
+}
+
+.topic-mask-picker__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topic-mask-picker__chevron {
+  flex: 0 0 auto;
+  color: var(--secondary-color);
+  transition: transform 0.15s ease;
+}
+
+.topic-mask-picker__chevron--open {
+  transform: rotate(180deg);
+}
+
+.topic-mask-picker__menu {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  right: 0;
+  z-index: 1050;
+  background-color: var(--topic-reply-card-bg);
+  border: 1px solid var(--topic-reply-card-border);
+  border-radius: 0.375rem;
+  box-shadow: var(--topic-post-card-shadow);
+  overflow: hidden;
+  min-width: var(--topic-reply-mask-toggle-min-width, 200px);
+  max-width: var(--topic-reply-mask-toggle-max-width, 320px);
+}
+
+.topic-mask-picker__item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.375rem 0.75rem;
+  border: 0;
+  background: transparent;
+  color: var(--text-color);
+  text-align: left;
+  font-size: 0.875rem;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topic-mask-picker__item:hover,
+.topic-mask-picker__item:focus,
+.topic-mask-picker__item--active {
+  background-color: rgba(var(--primary-rgb), 0.1);
+  color: var(--primary-color);
+}
+
+.topic-mask-picker__item-icon {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--secondary-color);
+}
+
+.topic-mask-picker__item--active .topic-mask-picker__item-icon {
+  color: var(--primary-color);
+}
+
+.topic-mask-picker__divider {
   margin: 0.25rem 0;
   border: 0;
   border-top: 1px solid var(--topic-post-footer-border);
@@ -1435,4 +2396,579 @@
     height: 18px;
     color: var(--topic-post-muted-color);
   }
+}
+
+/* ===== TopicFormPage (create topic) ===== */
+.topic-form-page {
+  margin: 0 auto;
+}
+
+.topic-form-card {
+  background-color: var(--topic-reply-card-bg);
+  border: 1px solid var(--topic-reply-card-border);
+  border-radius: 0.5rem;
+  box-shadow: var(--topic-post-card-shadow);
+  overflow: hidden;
+}
+
+.topic-form-header {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--topic-reply-card-border);
+  background-color: var(--topic-reply-header-bg);
+}
+
+.topic-form-title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--topic-reply-header-text);
+}
+
+.topic-form {
+  padding: 1.5rem;
+}
+
+.topic-form-field {
+  margin-bottom: 1.5rem;
+}
+
+.topic-form-label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  color: var(--text-color);
+  font-size: 0.875rem;
+}
+
+.topic-form-required {
+  color: var(--topic-locked-color);
+  margin-left: 0.25rem;
+}
+
+.topic-form-input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--text-color);
+  background-color: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 0.375rem;
+  transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+.topic-form-input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 0.25rem rgba(var(--primary-rgb), 0.25);
+}
+
+.topic-form-input--auto {
+  width: auto;
+  min-width: 200px;
+}
+
+.topic-form-feedback {
+  margin-top: 0.375rem;
+  font-size: 0.8125rem;
+}
+
+.topic-form-feedback--error {
+  color: var(--topic-locked-color);
+}
+
+.topic-form-field--checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+
+
+.topic-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+}
+
+/* Loading state */
+.topic-form-loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 300px;
+}
+
+.topic-form-loading .spinner {
+  width: 3rem;
+  height: 3rem;
+  border: 3px solid var(--border-color);
+  border-top-color: var(--primary-color);
+  border-radius: 50%;
+  animation: topic-spin 1s linear infinite;
+}
+
+@keyframes topic-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Access denied state */
+.topic-form-access-denied {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+  text-align: center;
+  padding: 2rem;
+}
+
+.topic-form-access-denied__title {
+  margin: 0 0 0.5rem;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-color);
+}
+
+.topic-form-access-denied__text {
+  margin: 0 0 1.5rem;
+  color: var(--secondary-color);
+  max-width: 400px;
+}
+
+/* ===== Button component ===== */
+.topic-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 0.375rem;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-color);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  white-space: nowrap;
+}
+
+.topic-btn:disabled,
+.topic-btn--loading {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.topic-btn:focus {
+  outline: none;
+  box-shadow: 0 0 0 0.25rem rgba(var(--primary-rgb), 0.25);
+}
+
+/* Variants */
+.topic-btn--primary {
+  background-color: var(--primary-color);
+  border-color: var(--primary-color);
+  color: var(--topic-btn-primary-text);
+}
+
+.topic-btn--primary:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.topic-btn--secondary {
+  background-color: var(--topic-reply-card-bg);
+  border-color: var(--secondary-color);
+  color: var(--secondary-color);
+}
+
+.topic-btn--secondary:hover:not(:disabled) {
+  color: var(--text-color);
+  border-color: var(--text-color);
+}
+
+.topic-btn--filled {
+  background-color: var(--secondary-color);
+  border-color: var(--secondary-color);
+  color: var(--topic-reply-header-text);
+}
+
+.topic-btn--filled:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.topic-btn--ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--link-color);
+  padding: 0;
+}
+
+.topic-btn--ghost:hover:not(:disabled) {
+  color: var(--link-hover-color);
+  text-decoration: underline;
+}
+
+.topic-btn--danger {
+  background-color: var(--danger-bg);
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+}
+
+.topic-btn--danger:hover:not(:disabled) {
+  background-color: var(--danger-border);
+  color: var(--danger-text);
+}
+
+/* Sizes */
+.topic-btn-sm {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+}
+
+.topic-btn-lg {
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+}
+
+/* Full width */
+.topic-btn--block {
+  width: 100%;
+}
+
+/* Icon only (square) */
+.topic-btn--icon-only {
+  padding: 0.5rem;
+  border-radius: 0.375rem;
+}
+
+.topic-btn-sm.topic-btn--icon-only {
+  padding: 0.25rem;
+}
+
+/* Icon positioning */
+.topic-btn__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.topic-btn__icon--left {
+  margin-right: 0.25rem;
+}
+
+.topic-btn__icon--right {
+  margin-left: 0.25rem;
+}
+
+/* Loading state */
+.topic-btn--loading {
+  position: relative;
+  color: transparent !important;
+  pointer-events: none;
+}
+
+.topic-btn__spinner {
+  position: absolute;
+  width: 1em;
+  height: 1em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: topic-btn-spin 0.6s linear infinite;
+}
+
+.topic-btn--primary .topic-btn__spinner {
+  color: var(--topic-btn-primary-text);
+}
+
+.topic-btn--filled .topic-btn__spinner,
+.topic-btn--danger .topic-btn__spinner {
+  color: var(--topic-reply-header-text);
+}
+
+.topic-btn__loading-text {
+  position: absolute;
+  white-space: nowrap;
+}
+
+@keyframes topic-btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Form actions layout */
+.topic-post-editor__actions {
+  display: flex;
+  gap: var(--topic-post-editor-actions-gap);
+  justify-content: flex-end;
+}
+
+.topic-reply__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+/* ===== SmilesPicker ===== */
+.smiles-picker-container {
+  max-height: 350px;
+  overflow-y: auto;
+  width: 100%;
+  background-color: var(--card-bg);
+  color: var(--text-color);
+  border-radius: 8px;
+  overscroll-behavior: contain;
+  padding: 0.5rem;
+}
+
+.smiles-tabs {
+  border-bottom: 1px solid var(--border-color);
+}
+
+.smiles-tabs .nav-link {
+  padding: 0.4rem 0.8rem;
+  font-size: 0.85rem;
+  color: var(--secondary-color);
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.smiles-tabs .nav-link.active {
+  background: transparent;
+  color: var(--primary-color);
+  border-bottom-color: var(--primary-color);
+  font-weight: 600;
+}
+
+.smiles-tab {
+  padding: 0.5rem 0;
+}
+
+.smiles-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.smile-item {
+  border-radius: 0.375rem;
+  padding: 0.25rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: transform 0.1s ease, background-color 0.15s ease;
+}
+
+.smile-item:hover {
+  background-color: rgba(var(--primary-rgb), 0.15);
+  transform: scale(1.05);
+}
+
+.smile-image {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 64px;
+  object-fit: contain;
+  display: block;
+}
+
+.smiles-picker-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.smiles-picker-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.smiles-picker-container::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 10px;
+}
+
+/* Generic modal body for editor modals */
+.editor-modal-body {
+  min-height: 300px;
+}
+
+/* ===== Editor Modal Fields ===== */
+.editor-modal-field {
+  margin-bottom: 1rem;
+}
+
+.editor-modal-field--indented {
+  margin-left: 1.5rem;
+}
+
+.editor-modal-field--relative {
+  position: relative;
+}
+
+.editor-modal-field--checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.editor-modal-label {
+  display: block;
+  font-weight: 500;
+  color: var(--text-color);
+  font-size: 0.875rem;
+  margin-bottom: 0.375rem;
+}
+
+.editor-modal-input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  color: var(--text-color);
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 0.375rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.editor-modal-input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 0.25rem rgba(var(--primary-rgb), 0.25);
+}
+
+.editor-modal-input--small {
+  width: auto;
+  max-width: 120px;
+}
+
+.editor-modal-select {
+  width: 100%;
+  padding: 0.5rem 2rem 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  color: var(--text-color);
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 0.375rem;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%236c757d' stroke-width='2'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E");
+  background-position: right 0.5rem center;
+  background-size: 1rem;
+  background-repeat: no-repeat;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.editor-modal-select:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 0.25rem rgba(var(--primary-rgb), 0.25);
+}
+
+.editor-modal-hint {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--secondary-color);
+  margin-top: 0.25rem;
+}
+
+.editor-modal-hint--success {
+  color: #198754;
+}
+
+.editor-modal-notice {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  color: var(--text-color);
+  background-color: rgba(var(--primary-rgb), 0.1);
+  border: 1px solid var(--primary-color);
+  border-radius: 0.375rem;
+  margin-bottom: 1rem;
+}
+
+.editor-modal-card {
+  padding: 1rem;
+  background-color: rgba(var(--primary-rgb), 0.05);
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.editor-modal-radio {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  color: var(--text-color);
+  cursor: pointer;
+  margin-bottom: 0.5rem;
+}
+
+.editor-modal-radio input[type="radio"] {
+  accent-color: var(--primary-color);
+  width: 1rem;
+  height: 1rem;
+}
+
+.editor-modal-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  max-height: 200px;
+  overflow-y: auto;
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 0.375rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  margin-top: 0.25rem;
+}
+
+.editor-modal-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: none;
+  border: none;
+  text-align: left;
+  color: var(--text-color);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.editor-modal-dropdown-item:hover {
+  background-color: rgba(var(--primary-rgb), 0.15);
+}
+
+.editor-modal-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  overflow: hidden;
+  background-color: var(--secondary-color);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.editor-modal-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }

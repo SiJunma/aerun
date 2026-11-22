@@ -616,7 +616,7 @@ func TestPurgeSettlesThePostReputationOfSurvivingPosts(t *testing.T) {
 		t.Fatalf("fixture: post reputation = %d, want 5", got)
 	}
 
-	if err := purgeUserContent(app, fixPlayerID); err != nil {
+	if err := purgeUserContent(app, fixPlayerID, fixAdminID); err != nil {
 		t.Fatalf("purge: %v", err)
 	}
 

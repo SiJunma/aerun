@@ -611,7 +611,7 @@ func adminDeleteUserHandler(e *core.RequestEvent) error {
 		targetNickname := targetUser.GetString("nickname")
 
 		if deletePosts {
-			if err := purgeUserContent(txApp, userID); err != nil {
+			if err := purgeUserContent(txApp, userID, e.Auth.Id); err != nil {
 				return 0, nil, err
 			}
 		}
@@ -1065,7 +1065,7 @@ func adminBulkDeleteUsersHandler(e *core.RequestEvent) error {
 			}
 
 			if deletePosts {
-				if err := purgeUserContent(txApp, id); err != nil {
+				if err := purgeUserContent(txApp, id, e.Auth.Id); err != nil {
 					return 0, nil, err
 				}
 			}

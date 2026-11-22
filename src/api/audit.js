@@ -1,5 +1,4 @@
 import { sendApi } from './pocketbase';
-import { sharedPoll } from './shared-poll';
 
 /**
  * Logs an administrative or moderative action.
@@ -30,6 +29,7 @@ const normalizeAuditLog = (item) => ({
   performerId: item.performer_id,
   performer_id: item.performer_id,
   performerNickname: item.performer_nickname,
+  targetNickname: item.target_nickname,
   details: item.details || {},
   created_at: item.created,
   // NaN-safe: an unparseable date sorts as 0 instead of poisoning the comparator,
@@ -39,37 +39,30 @@ const normalizeAuditLog = (item) => ({
 });
 
 /**
- * Subscribes to the latest audit logs.
+ * Fetches offset-paginated audit logs with search and filter.
+ *
+ * @param {Object} [options]
+ * @param {number} [options.page=1] - 1-based page index
+ * @param {number} [options.limit=50] - Number of records per page
+ * @param {string} [options.action_type] - Optional action type filter
+ * @param {string} [options.performer_id] - Optional performer user id filter
+ * @param {string} [options.q] - Optional server search term
+ * @returns {Promise<{ items: Array, total: number, page: number, totalPages: number, requestId?: string }>}
  */
-export const subscribeToAuditLogs = (limitCount = 50, callback) => {
-  // Staff-only and single-consumer today, but keyed like everything else so
-  // opening the audit tab from two places cannot double the read.
-  const poll = sharedPoll(`audit-logs:${limitCount}`, {
-    fetch: async () => {
-      const res = await sendApi(`/api/aerun/admin/audit-logs?limit=${limitCount}`);
-      return (res?.items || []).map(normalizeAuditLog);
-    },
-    intervalMs: 15000,
-    initialValue: [],
-    onError: (err) => console.warn('[subscribeToAuditLogs err]', err),
-  });
+export const getAuditLogs = async ({ page = 1, limit = 50, action_type, performer_id, q } = {}) => {
+  const params = new URLSearchParams();
+  if (page) params.set('page', String(page));
+  if (limit) params.set('limit', String(limit));
+  if (action_type && action_type !== 'all') params.set('action_type', action_type);
+  if (performer_id) params.set('performer_id', performer_id);
+  if (q && q.trim()) params.set('q', q.trim());
 
-  return poll.subscribe((logs) => callback(logs));
-};
-
-/**
- * Fetch more logs for pagination.
- */
-export const getMoreAuditLogs = async (lastDoc, limitCount = 50) => {
-  try {
-    const cursor = lastDoc?.nextCursor || '';
-    const res = await sendApi(`/api/aerun/admin/audit-logs?limit=${limitCount}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
-    return {
-      logs: (res?.items || []).map(normalizeAuditLog),
-      lastDoc: res?.next_cursor ? { nextCursor: res.next_cursor } : null
-    };
-  } catch (err) {
-    console.error('[getMoreAuditLogs err]', err);
-    return { logs: [], lastDoc: null };
-  }
+  const res = await sendApi(`/api/aerun/admin/audit-logs?${params.toString()}`);
+  return {
+    items: (res?.items || []).map(normalizeAuditLog),
+    total: res?.total ?? 0,
+    page: res?.page ?? page,
+    totalPages: res?.total_pages ?? res?.totalPages ?? 1,
+    requestId: res?.request_id
+  };
 };

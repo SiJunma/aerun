@@ -503,14 +503,20 @@ func updateCharacterHandler(e *core.RequestEvent) error {
 			return 0, nil, err
 		}
 
+		oldName := rec.GetString("name")
+		oldStatusLine := rec.GetString("status_line")
+		oldSignature := rec.GetString("signature")
+
 		// An omitted field is left alone: this is a PATCH, and "name omitted"
 		// must not blank the name.
+		var newName, newStatusLine, newSignature string
 		if form.Name != "" {
 			name := strings.TrimSpace(form.Name)
 			if len(name) > characterNameMaxLen {
 				return 0, nil, validationError("character name must not exceed 64 characters")
 			}
 			rec.Set("name", name)
+			newName = name
 		}
 		if form.StatusLine != "" {
 			statusLine := strings.TrimSpace(form.StatusLine)
@@ -518,6 +524,7 @@ func updateCharacterHandler(e *core.RequestEvent) error {
 				return 0, nil, validationError("status_line must not exceed 256 characters")
 			}
 			rec.Set("status_line", statusLine)
+			newStatusLine = statusLine
 		}
 		if form.Signature != "" {
 			signature := strings.TrimSpace(form.Signature)
@@ -525,18 +532,35 @@ func updateCharacterHandler(e *core.RequestEvent) error {
 				return 0, nil, validationError("signature must not exceed 1024 characters")
 			}
 			rec.Set("signature", signature)
+			newSignature = signature
 		}
 
 		if err := txApp.Save(rec); err != nil {
 			return 0, nil, internalError("failed to update character", err)
 		}
 
-		if err := recordAuditLog(txApp, "character_updated", e.Auth.Id, map[string]any{
-			"target_id": rec.Id,
-			"owner_id":  rec.GetString("owner_id"),
-			"name":      rec.GetString("name"),
-		}); err != nil {
-			return 0, nil, err
+		// Rule §4 (SPEC_REFACTOR_AUDIT_LOGS.md): Only moderation of someone else's mask is logged.
+		// Self-edits are player self-service and are not audit events.
+		if e.Auth.Id != rec.GetString("owner_id") {
+			changes := map[string]any{}
+			if form.Name != "" && newName != oldName {
+				changes["name"] = map[string]any{"from": oldName, "to": newName}
+			}
+			if form.StatusLine != "" && newStatusLine != oldStatusLine {
+				changes["status_line"] = map[string]any{"from": oldStatusLine, "to": newStatusLine}
+			}
+			if form.Signature != "" && newSignature != oldSignature {
+				changes["signature"] = map[string]any{"from": oldSignature, "to": newSignature}
+			}
+
+			if err := recordAuditLog(txApp, "character_updated", e.Auth.Id, map[string]any{
+				"target_id": rec.Id,
+				"owner_id":  rec.GetString("owner_id"),
+				"name":      rec.GetString("name"),
+				"changes":   changes,
+			}); err != nil {
+				return 0, nil, err
+			}
 		}
 
 		return http.StatusOK, characterPayload(rec), nil
@@ -684,11 +708,17 @@ func uploadCharacterAvatarHandler(e *core.RequestEvent) error {
 	// whole body read. The audit row is therefore best-effort and logged: the
 	// file is already stored, so failing the request would report a broken
 	// upload that actually succeeded.
-	if err := recordAuditLog(e.App, "character_avatar_changed", e.Auth.Id, map[string]any{
-		"target_id": rec.Id,
-		"owner_id":  rec.GetString("owner_id"),
-	}); err != nil {
-		e.App.Logger().Warn("character_avatar_changed audit row failed", "error", err, "character", rec.Id)
+	// Rule §4 (SPEC_REFACTOR_AUDIT_LOGS.md): Only moderation of someone else's mask is logged.
+	// Self-edits are player self-service and are not audit events.
+	if e.Auth.Id != rec.GetString("owner_id") {
+		if err := recordAuditLog(e.App, "character_avatar_changed", e.Auth.Id, map[string]any{
+			"target_id":      rec.Id,
+			"owner_id":       rec.GetString("owner_id"),
+			"name":           rec.GetString("name"),
+			"avatar_updated": true,
+		}); err != nil {
+			e.App.Logger().Warn("character_avatar_changed audit row failed", "error", err, "character", rec.Id)
+		}
 	}
 
 	return e.JSON(http.StatusOK, map[string]any{

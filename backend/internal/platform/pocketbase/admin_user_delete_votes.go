@@ -10,7 +10,8 @@ import (
 // half of deletePostHandler (vote payback, author counter, audit text, vote
 // rows, topic projection rebuild) without its permission checks — the caller
 // is the admin delete command, not the post's author.
-func purgeSinglePostForUserDeletion(txApp core.App, post *core.Record) error {
+// The active admin who initiated the deletion is passed as adminPerformerID.
+func purgeSinglePostForUserDeletion(txApp core.App, post *core.Record, adminPerformerID string) error {
 	authorID := post.GetString("author_id")
 
 	var voteSum struct {
@@ -34,17 +35,33 @@ func purgeSinglePostForUserDeletion(txApp core.App, post *core.Record) error {
 	}
 
 	var topicTitle string
+	var categoryID string
+	var categoryTitle string
 	var topic *core.Record
 	if topicID := post.GetString("topic_id"); topicID != "" {
 		if t, err := txApp.FindRecordById(topicsCollectionName, topicID); err == nil && t != nil {
 			topic = t
 			topicTitle = t.GetString("title")
+			categoryID = t.GetString("category_id")
+			if categoryID != "" {
+				if cat, err := txApp.FindRecordById(categoriesCollectionName, categoryID); err == nil && cat != nil {
+					categoryTitle = cat.GetString("name")
+				}
+			}
 		}
 	}
-	if err := recordAuditLog(txApp, "post_delete", authorID, map[string]any{
+
+	performer := adminPerformerID
+	if performer == "" {
+		performer = authorID
+	}
+
+	if err := recordAuditLog(txApp, "post_delete", performer, map[string]any{
 		"post_id":            post.Id,
 		"topic_id":           post.GetString("topic_id"),
 		"topic_title":        topicTitle,
+		"category_id":        categoryID,
+		"category_title":     categoryTitle,
 		"author_id":          authorID,
 		"author_kind":        post.GetString(authorKindField),
 		"guest_display_name": post.GetString(guestDisplayNameField),

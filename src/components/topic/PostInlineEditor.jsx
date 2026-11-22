@@ -1,7 +1,8 @@
 import React, { useRef } from 'react';
-import { Form, Button, Dropdown } from 'react-bootstrap';
 import { User, Keyboard } from 'lucide-react';
 import RichEditor from '../common/RichEditor';
+import MaskPicker from './MaskPicker';
+import Button from '../common/Button';
 
 /**
  * PostInlineEditor: Inline editor for editing existing posts and drafts.
@@ -39,94 +40,84 @@ export const PostInlineEditor = ({
   const canUseDice = hasPermission?.(PERMISSIONS.USE_DICE, { category });
 
   return (
-    <div className="pb-3">
+    <div className="topic-post-editor topic-post-editor--with-spacing">
       {isFirstPost && !isDraft && (
-        <div className="mb-3">
-          <Form.Group className="mb-2">
-            <Form.Label className="fw-semibold small">
+        <div className="topic-post-editor__field">
+          <div className="topic-post-editor__field-row">
+            <label className="topic-post-editor__label" htmlFor="editTopicTitle">
               {t('forum.topic_title_label')}
-            </Form.Label>
-            <Form.Control
+            </label>
+            <input
               type="text"
+              id="editTopicTitle"
+              className="topic-post-editor__input"
               value={editTopicTitle}
               onChange={(e) => setEditTopicTitle?.(e.target.value)}
               maxLength={100}
               required
             />
-          </Form.Group>
-          <Form.Group className="mb-2">
-            <Form.Label className="fw-semibold small">
+          </div>
+          <div className="topic-post-editor__field-row">
+            <label className="topic-post-editor__label" htmlFor="editTopicDescription">
               {t('forum.topic_description_label')}
-            </Form.Label>
-            <Form.Control
+            </label>
+            <input
               type="text"
+              id="editTopicDescription"
+              className="topic-post-editor__input"
               value={editTopicDescription}
               onChange={(e) => setEditTopicDescription?.(e.target.value)}
               maxLength={200}
               placeholder={t('forum.short_description_placeholder')}
             />
-          </Form.Group>
+          </div>
           {setEditPinFirstPost && (
-            <Form.Check
-              type="checkbox"
-              id="editPinFirstPost"
-              label={t('forum.pin_first_post')}
-              checked={editPinFirstPost}
-              onChange={(e) => setEditPinFirstPost(e.target.checked)}
-              className="mt-2"
-            />
+            <div className="topic-post-editor__pin">
+              <input
+                type="checkbox"
+                id="editPinFirstPost"
+                className="topic-select-input"
+                checked={editPinFirstPost}
+                onChange={(e) => setEditPinFirstPost(e.target.checked)}
+              />
+              <label htmlFor="editPinFirstPost">
+                {t('forum.pin_first_post')}
+              </label>
+            </div>
           )}
         </div>
       )}
 
-      <div className="mb-2">
-        <div className="d-flex align-items-center justify-content-between mb-2">
+      <div className="topic-post-editor__field">
+        <div className="topic-post-editor__field-row topic-post-editor__field-row--mask">
           {/* Mask re-filing is the AUTHOR's decision: the server ignores the
               character_id of a non-author edit, so the picker is hidden for
               moderated edits of other members' posts. */}
           {canUseMasks && canChangeMask && (
-            <Dropdown className="w-auto">
-              <Dropdown.Toggle
-                variant="outline-management"
-                size="sm"
-                className="d-flex align-items-center gap-2 custom-select-toggle"
-              >
-                <User size={14} />
-                <span className="text-truncate" style={{ maxWidth: '200px' }}>
-                  {editCharacterId
-                    ? `${t('forum.post_as_character')}: ${characters.find((c) => c.id === editCharacterId)?.name || '...'}`
-                    : `${t('forum.post_as_user')}: ${profile?.nickname || profile?.email?.split('@')[0] || 'User'}`}
-                </span>
-              </Dropdown.Toggle>
-              <Dropdown.Menu className="shadow-sm border-0 custom-select-menu">
-                <Dropdown.Item
-                  active={editCharacterId === ''}
-                  onClick={() => setEditCharacterId?.('')}
-                >
-                  {t('forum.post_as_user')}: {profile?.nickname || profile?.email?.split('@')[0] || 'User'}
-                </Dropdown.Item>
-                {characters.length > 0 && <Dropdown.Divider />}
-                {characters.map((char) => (
-                  <Dropdown.Item
-                    key={char.id}
-                    active={editCharacterId === char.id}
-                    onClick={() => setEditCharacterId?.(char.id)}
-                  >
-                    {t('forum.post_as_character')}: {char.name}
-                  </Dropdown.Item>
-                ))}
-              </Dropdown.Menu>
-            </Dropdown>
+            <MaskPicker
+              value={editCharacterId}
+              onChange={setEditCharacterId}
+              characters={characters}
+              profile={profile}
+              user={user}
+              setLastSelectedMask={null} // Not available in inline editor context
+              t={t}
+              className="topic-mask-picker--inline"
+              aria-label={t('forum.post_as')}
+            />
           )}
 
           <Button
-            variant="outline-management"
+            type="button"
+            variant="ghost"
             size="sm"
-            className="ms-auto d-none d-md-flex align-items-center"
+            className="topic-btn--hotkeys topic-reply__help-btn"
             onClick={() => editorRef.current?.openHotkeysModal()}
             title={t('forum.hotkeys')}
+            aria-label={t('forum.hotkeys')}
+            leftIcon={<Keyboard size={16} />}
           >
-            <Keyboard size={16} />
+            {t('forum.help') || 'Help'}
           </Button>
         </div>
 
@@ -146,10 +137,10 @@ export const PostInlineEditor = ({
         />
       </div>
 
-      <div className="d-flex gap-2">
+      <div className="topic-post-editor__actions">
         <Button
-          size="sm"
-          variant={isDraft ? 'outline-secondary' : 'primary'}
+          type="button"
+          variant="primary"
           onClick={onSave}
           disabled={isSaving}
         >
@@ -160,8 +151,8 @@ export const PostInlineEditor = ({
             : t('common.save')}
         </Button>
         <Button
-          size="sm"
-          variant="outline-secondary"
+          type="button"
+          variant="secondary"
           onClick={onCancel}
           disabled={isSaving}
         >

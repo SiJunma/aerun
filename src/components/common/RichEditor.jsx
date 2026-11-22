@@ -1,22 +1,23 @@
 import React, { useState, useRef, useEffect, forwardRef, useImperativeHandle, useCallback } from 'react';
-import { Button, Form, Dropdown, Table } from 'react-bootstrap';
 import ForumModal from './ForumModal';
 import {
   Bold, Italic, Underline, Strikethrough, Link as LinkIcon, Image as ImageIcon,
   Quote, Undo, Redo, Palette, ALargeSmall, Columns, Dices, Clapperboard,
   Youtube, EyeOff, Minus, Smile, AlignLeft, AlignCenter, AlignRight,
-  AlignJustify, Keyboard, MoreHorizontal, Superscript, Subscript, HelpCircle, Code, CodeXml, Table as TableIcon
+  AlignJustify, Keyboard, MoreHorizontal, Superscript, Subscript, HelpCircle, Code, CodeXml, Table as TableIcon,
+  ChevronDown
 } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
 import SmilesPicker from './SmilesPicker';
 import { sendApi } from '../../api/pocketbase';
 import { resolveAvatarUrl } from '../../api/avatars';
+import Button from './Button';
 
 const RichEditor = forwardRef(({
   value, onChange, placeholder, rows = 6, minHeight, maxHeight, id = 'rich-editor',
   maxLength, autoFocus, showDice = false, isEdit = false, hideDiceType = false,
-  showHide = true, smilesDropDirection = "up", smilesFullWidth = true, onSubmit,
-  hideHotkeysButton = false, hideFooter = false, autoResize = false
+  showHide = true, _smilesDropDirection = "up", _smilesFullWidth = true, onSubmit,
+  _hideHotkeysButton = false, hideFooter = false, autoResize = false
 }, ref) => {
   const { t } = useI18n();
 
@@ -49,12 +50,49 @@ const RichEditor = forwardRef(({
   const [showAbbrModal, setShowAbbrModal] = useState(false);
   const [abbrData, setAbbrData] = useState({ text: '', title: '' });
   const [showMoreToolsModal, setShowMoreToolsModal] = useState(false);
+  const [showDesktopOverflow, setShowDesktopOverflow] = useState(false);
+  const desktopOverflowRef = useRef(null);
   const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 992);
+
+  // Custom pickers state
+  const [showSizePicker, setShowSizePicker] = useState(false);
+  const [showColorPicker, setShowColorPicker] = useState(false);
+  const sizePickerRef = useRef(null);
+  const colorPickerRef = useRef(null);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 992);
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Click outside handler for pickers and desktop overflow
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (sizePickerRef.current && !sizePickerRef.current.contains(event.target)) {
+        setShowSizePicker(false);
+      }
+      if (colorPickerRef.current && !colorPickerRef.current.contains(event.target)) {
+        setShowColorPicker(false);
+      }
+      if (desktopOverflowRef.current && !desktopOverflowRef.current.contains(event.target)) {
+        setShowDesktopOverflow(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Escape key handler for pickers
+  useEffect(() => {
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') {
+        setShowSizePicker(false);
+        setShowColorPicker(false);
+      }
+    };
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
   }, []);
 
   useImperativeHandle(ref, () => ({
@@ -66,11 +104,12 @@ const RichEditor = forwardRef(({
     if (!autoResize || !textareaRef.current) return;
     const el = textareaRef.current;
     el.style.height = 'auto';
-    const maxHeightPx = typeof maxHeight === 'number'
-      ? maxHeight
-      : (typeof maxHeight === 'string' && maxHeight.endsWith('px')
-          ? parseInt(maxHeight, 10)
-          : window.innerHeight * 0.3);
+    const maxHeightPx =
+      typeof maxHeight === 'number'
+        ? maxHeight
+        : (typeof maxHeight === 'string' && maxHeight.endsWith('px')
+            ? parseInt(maxHeight, 10)
+            : window.innerHeight * 0.3);
     const scrollH = el.scrollHeight;
     if (scrollH > maxHeightPx) {
       el.style.height = `${maxHeightPx}px`;
@@ -82,68 +121,123 @@ const RichEditor = forwardRef(({
   }, [autoResize, maxHeight]);
 
   useEffect(() => {
-    adjustTextareaHeight();
-  }, [value, adjustTextareaHeight]);
+    if (autoResize) adjustTextareaHeight();
+  }, [value, autoResize, adjustTextareaHeight]);
 
-  // Undo/Redo history
-  const [history, setHistory] = useState([value || '']);
-  const [historyIndex, setHistoryIndex] = useState(0);
-
-  const latestValueRef = useRef(value || '');
+  // Responsive toolbar logic with ResizeObserver
   useEffect(() => {
-    latestValueRef.current = value || '';
-  }, [value]);
-
-  const lastHistoryPushTime = useRef(0);
-  const isInternalUpdate = useRef(false);
-
-  useEffect(() => {
-    if (value === undefined || value === null) return;
-
-    if (isInternalUpdate.current) {
-      isInternalUpdate.current = false;
-      return;
-    }
-
-    const currentTip = history[historyIndex] || '';
-    if (value !== currentTip) {
-      setHistory([value]);
-      setHistoryIndex(0);
-      lastHistoryPushTime.current = Date.now();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
-
-  useEffect(() => {
-    if (autoFocus && textareaRef.current) {
-      const textarea = textareaRef.current;
-      textarea.focus();
-      const length = textarea.value.length;
-      textarea.setSelectionRange(length, length);
-
-      setTimeout(() => {
-        textarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }, 100);
-    }
+    const container = toolbarContainerRef.current;
+    if (!container) return;
 
     const updateWidth = () => {
-      if (containerRef.current) {
-        setEditorWidth(containerRef.current.offsetWidth);
-      }
+      setEditorWidth(container.offsetWidth);
     };
 
+    // Initial measurement
     updateWidth();
-    window.addEventListener('resize', updateWidth);
-    const observer = new ResizeObserver(updateWidth);
-    if (containerRef.current) observer.observe(containerRef.current);
 
-    return () => {
-      window.removeEventListener('resize', updateWidth);
-      observer.disconnect();
+    // Observe resize
+    const resizeObserver = new ResizeObserver(updateWidth);
+    resizeObserver.observe(container);
+
+    return () => resizeObserver.disconnect();
+  }, []);
+
+  // Calculate visible/overflow groups
+  useEffect(() => {
+    if (editorWidth === 0) return;
+
+    // Toolbar Groups — single source of truth for measurement & rendering
+    // icon-only button = 34px + gap 4px = 38px per button
+    // style: 6 buttons = 6*38 - 4 = 224px
+    // history: 2 buttons = 2*38 - 4 = 72px
+    // smiles: 1 button = 34px
+    // links: 1 button = 34px
+    // typography: 2 pickers (each ~38px) = 72px
+    // align: 3 buttons = 3*38 - 4 = 110px
+    // inserts: 5 buttons = 5*38 - 4 = 186px
+    // media: 2 buttons = 2*38 - 4 = 72px
+    // advanced: 5 buttons = 5*38 - 4 = 186px
+    const TOOLBAR_GROUPS = [
+      { id: 'style', minWidth: 224 },
+      { id: 'history', minWidth: 72 },
+      { id: 'smiles', minWidth: 34 },
+      { id: 'links', minWidth: 34 },
+      { id: 'typography', minWidth: 72 },
+      { id: 'align', minWidth: 110 },
+      { id: 'inserts', minWidth: 186 },
+      { id: 'media', minWidth: 72 },
+      { id: 'advanced', minWidth: 186 }
+    ];
+    const TOOLBAR_GROUP_ORDER = ['style', 'history', 'smiles', 'links', 'typography', 'align', 'inserts', 'media', 'advanced'];
+
+    // Exact width budget (px). Every constant is taken from topic-view.css —
+    // the previous estimate (editorWidth - 56, groups only) ignored the
+    // dividers, the toolbar gaps and the toolbar padding, admitted one group
+    // too many, and the toolbar overflowed the card: the tail groups and the
+    // "…" toggle were clipped off-screen by overflow-x: hidden.
+    // - toolbar chrome: padding 0.5rem*2 (16) + border 1px*2 (2) = 18;
+    //   offsetWidth includes both, so the flex content box is editorWidth - 18
+    // - boundary between two visible groups: toolbar gap 4 + divider
+    //   (1px wide + margins 0.25rem*2 = 9) + gap 4 = 17
+    // - overflow toggle section: gap 4 + divider 9 + gap 4 + toggle 34 = 51
+    const TOOLBAR_CHROME = 18;
+    const GROUP_BOUNDARY = 17;
+    const TOGGLE_SECTION = 51;
+    const contentWidth = editorWidth - TOOLBAR_CHROME;
+    const widthOf = (groupId) => {
+      const group = TOOLBAR_GROUPS.find(g => g.id === groupId);
+      if (!group) {
+        // This should never happen — groups and order must stay in sync
+        console.error('[RichEditor] Group not found in TOOLBAR_GROUPS:', groupId);
+        return 0;
+      }
+      return group.minWidth;
     };
-  }, [autoFocus]);
 
-  const addToHistory = (newValue, forceNewSnapshot = true) => {
+    const visible = [];
+    const overflow = [];
+    const allGroupsWidth = TOOLBAR_GROUPS.reduce((sum, g) => sum + g.minWidth, 0)
+      + (TOOLBAR_GROUPS.length - 1) * GROUP_BOUNDARY;
+    if (allGroupsWidth <= contentWidth) {
+      // Everything fits — no overflow toggle needed.
+      visible.push(...TOOLBAR_GROUP_ORDER);
+    } else {
+      let used = 0;
+      for (const groupId of TOOLBAR_GROUP_ORDER) {
+        const add = visible.length === 0 ? widthOf(groupId) : GROUP_BOUNDARY + widthOf(groupId);
+        if (used + add + TOGGLE_SECTION <= contentWidth) {
+          visible.push(groupId);
+          used += add;
+        } else {
+          overflow.push(groupId);
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the measurement effect derives visible/overflow groups from the toolbar width; there is no external system to sync with
+    setVisibleGroupIds(_ => visible);
+    setOverflowGroupIds(_ => overflow);
+  }, [editorWidth, isMobile]);
+
+  // Modal helpers
+  const closeModalWithFocus = useCallback((setter) => {
+    setter(false);
+    textareaRef.current?.focus();
+  }, []);
+
+  // Edit history for Undo/Redo (restored from main — the Sprint G migration
+  // dropped the whole mechanism, so the history buttons called
+  // insertText('', '', -1/-2), which inserts nothing).
+  const [history, setHistory] = useState([value]);
+  const [historyIndex, setHistoryIndex] = useState(0);
+  const lastHistoryPushTime = useRef(0);
+
+  // onChange contract (as on main): every parent passes an event-style
+  // handler ((e) => setX(e.target.value)), so value changes are delivered
+  // as a synthetic event { target: { value } }, never as a bare string.
+  // The Sprint G migration passed bare strings, and every editor action
+  // (typing, buttons, shortcuts, undo) threw in the parent instead.
+  const addToHistory = useCallback((newValue, forceNewSnapshot = true) => {
     let newHistory = history.slice(0, historyIndex + 1);
     const now = Date.now();
 
@@ -160,182 +254,56 @@ const RichEditor = forwardRef(({
       setHistoryIndex(newHistory.length - 1);
       lastHistoryPushTime.current = now;
     }
-  };
+  }, [history, historyIndex]);
 
-  const handleUndo = () => {
+  const handleUndo = useCallback(() => {
     if (historyIndex > 0) {
       const prevValue = history[historyIndex - 1];
       setHistoryIndex(historyIndex - 1);
       onChange({ target: { value: prevValue } });
     }
-  };
+  }, [history, historyIndex, onChange]);
 
-  const handleRedo = () => {
+  const handleRedo = useCallback(() => {
     if (historyIndex < history.length - 1) {
       const nextValue = history[historyIndex + 1];
       setHistoryIndex(historyIndex + 1);
       onChange({ target: { value: nextValue } });
     }
-  };
+  }, [history, historyIndex, onChange]);
 
-  const insertText = (before, after = '', type = '') => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const text = textarea.value;
-    const currentScrollTop = textarea.scrollTop;
-    const selected = text.substring(start, end);
-
-    let replacement = '';
-    
-    // Auto-populate tags for common block types if they aren't provided
-    if (type === 'quote' && !before) {
-      before = '[quote]';
-      after = '[/quote]';
-    } else if (type === 'spoiler' && !before) {
-      const defaultTitle = t('editor.spoiler_default');
-      before = `[spoiler="${defaultTitle}"]`;
-      after = '[/spoiler]';
-    } else if (type === 'bullet' && !before) {
-      before = '[list]\n[*] ';
-      after = '\n[/list]';
-    }
-    
-    const blockTags = ['quote', 'spoiler', 'bullet', 'columns', 'code', 'list', 'hr', 'table'];
-    const isBlock = blockTags.includes(type) || (before.startsWith('[code]') || before.startsWith('[html]') || before.startsWith('[table]') || before.startsWith('[list]'));
-
-    let preText = text.substring(0, start);
-    let postText = text.substring(end);
-
-    if (isBlock) {
-      if (start > 0) {
-        let i = start - 1;
-        while (i >= 0 && (text[i] === ' ' || text[i] === '\t')) i--;
-        
-        let newStart = i + 1;
-        
-        // Count trailing newlines
-        let nlCount = 0;
-        let j = newStart - 1;
-        while (j >= 0 && (text[j] === '\n' || text[j] === '\r')) {
-          nlCount++;
-          j--;
-        }
-        
-        if (nlCount === 0) {
-          replacement = '\n' + before + (selected || '') + after;
-        } else {
-          replacement = before + (selected || '') + after;
-        }
-      } else {
-        replacement = before + (selected || '') + after;
-      }
-    } else if (type === 'size') {
-      replacement = `[size=${before}]${selected || t('editor.size_placeholder')}[/size]`;
-    } else if (type === 'color') {
-      replacement = `[color=${before}]${selected || t('editor.color_placeholder')}[/color]`;
+  const insertText = useCallback((openTag, closeTag, cursorOffset = null) => {
+    if (!textareaRef.current) return;
+    const el = textareaRef.current;
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const selectedText = value.substring(start, end);
+    let newText;
+    if (cursorOffset !== null && selectedText) {
+      newText = openTag + selectedText + closeTag;
     } else {
-      replacement = before + selected + after;
+      newText = openTag + closeTag;
     }
-
-    const newValue = preText + replacement + postText;
-
-    let newHistory = history.slice(0, historyIndex + 1);
-    if (newHistory[newHistory.length - 1] !== text) newHistory.push(text);
-    if (newHistory.length > 50) newHistory = newHistory.slice(newHistory.length - 50);
-    newHistory.push(newValue);
-    setHistory(newHistory);
-    setHistoryIndex(newHistory.length - 1);
-    lastHistoryPushTime.current = Date.now();
-
+    const newValue = value.substring(0, start) + newText + value.substring(end);
+    addToHistory(newValue);
     onChange({ target: { value: newValue } });
-
-    setTimeout(() => {
-      textarea.focus();
-      let cursorStart, cursorEnd;
-
-      if (selected.length === 0) {
-        if (type === 'bullet') {
-          cursorStart = preText.length + (replacement.includes('\n[list]') ? 1 : 0) + '[list]\n[*] '.length;
-          cursorEnd = cursorStart;
-        } else if (type === 'quote') {
-          cursorStart = preText.length + (replacement.startsWith('\n') ? 1 : 0) + '[quote]'.length;
-          cursorEnd = cursorStart;
-        } else if (type === 'spoiler') {
-          const defaultTitle = t('editor.spoiler_default');
-          cursorStart = preText.length + (replacement.startsWith('\n') ? 1 : 0) + `[spoiler="${defaultTitle}"]`.length;
-          cursorEnd = cursorStart;
-        } else if (before && after) {
-          cursorStart = preText.length + (replacement.startsWith('\n') ? 1 : 0) + before.length;
-          cursorEnd = cursorStart;
-        } else {
-          cursorStart = preText.length + replacement.length;
-          cursorEnd = cursorStart;
-        }
-      } else {
-        cursorStart = preText.length + replacement.length;
-        cursorEnd = cursorStart;
-      }
-
-      textarea.setSelectionRange(cursorStart, cursorEnd);
-      textarea.scrollTop = currentScrollTop;
-    }, 0);
-  };
-
-  const closeModalWithFocus = (setModalFn) => {
-    setModalFn(false);
-    setTimeout(() => {
-      textareaRef.current?.focus();
-    }, 10);
-  };
-
-  // Responsive logic for toolbar overflow
-  useEffect(() => {
-    const groups = [
-      { id: 'style', priority: 1, width: 215 },
-      { id: 'history', priority: 2, width: 85 },
-      { id: 'smiles', priority: 3, width: 45 },
-      { id: 'links', priority: 4, width: 45 },
-      { id: 'typography', priority: 5, width: 100 },
-      { id: 'align', priority: 6, width: 145 },
-      { id: 'inserts', priority: 7, width: 205 },
-      { id: 'media', priority: 8, width: 85 },
-      { id: 'advanced', priority: 9, width: (showHide ? 45 : 0) + (showDice && !isEdit ? 45 : 0) + 75 }
-    ];
-
-    const manualButtonWidth = 45;
-    const moreButtonWidth = 50;
-    const padding = 16; // Toolbar padding
-    
-    let availableWidth = editorWidth - manualButtonWidth - padding;
-    if (availableWidth < 0) availableWidth = 0;
-
-    const totalNeeded = groups.reduce((acc, g) => acc + g.width, 0);
-    
-    if (totalNeeded <= availableWidth) {
-      setVisibleGroupIds(groups.map(g => g.id));
-      setOverflowGroupIds([]);
-    } else {
-      availableWidth -= moreButtonWidth;
-      let visible = [];
-      let overflow = [];
-      let currentWidth = 0;
-      
-      for (const group of groups) {
-        if (currentWidth + group.width <= availableWidth) {
-          visible.push(group.id);
-          currentWidth += group.width;
-        } else {
-          overflow.push(group.id);
-        }
-      }
-      setVisibleGroupIds(visible);
-      setOverflowGroupIds(overflow);
+    el.focus();
+    if (cursorOffset !== null && !selectedText) {
+      setTimeout(() => {
+        el.selectionStart = el.selectionEnd = start + openTag.length + cursorOffset;
+      }, 0);
     }
-  }, [editorWidth, isEdit, showDice, showHide]);
+  }, [value, onChange, addToHistory]);
 
+  const handleTextChange = (e) => {
+    const newValue = e.target.value;
+    addToHistory(newValue, false);
+    onChange({ target: { value: newValue } });
+  };
+
+  // Keyboard shortcuts (restored from main — the Sprint G migration dropped
+  // the whole handler, so Ctrl+B etc. did nothing while the hotkeys modal
+  // still listed them).
   const handleKeyDown = (e) => {
     const isCtrl = e.ctrlKey || e.metaKey;
     const isAlt = e.altKey;
@@ -372,12 +340,12 @@ const RichEditor = forwardRef(({
         case 'KeyR': e.preventDefault(); insertText('[align=right]', '[/align]'); break;
         case 'KeyE': e.preventDefault(); insertText('[align=center]', '[/align]'); break;
         case 'KeyJ': e.preventDefault(); insertText('[align=justify]', '[/align]'); break;
-        case 'KeyK': e.preventDefault(); openLinkModal(); break;
-        case 'KeyG': e.preventDefault(); insertText('', '', 'spoiler'); break;
+        case 'KeyK': e.preventDefault(); setShowLinkModal(true); break;
+        case 'KeyG': e.preventDefault(); insertText('[spoiler]', '[/spoiler]'); break;
         case 'KeyH': e.preventDefault(); openHideModal(); break;
-        case 'KeyQ': e.preventDefault(); insertText('', '', 'quote'); break;
-        case 'BracketLeft': e.preventDefault(); insertText('[code]', '[/code]', 'code'); break;
-        case 'BracketRight': e.preventDefault(); insertText('[html]', '[/html]', 'html'); break;
+        case 'KeyQ': e.preventDefault(); insertText('[quote]', '[/quote]'); break;
+        case 'BracketLeft': e.preventDefault(); insertText('[code]', '[/code]'); break;
+        case 'BracketRight': e.preventDefault(); insertText('[html]', '[/html]'); break;
         default: break;
       }
     }
@@ -386,8 +354,8 @@ const RichEditor = forwardRef(({
       switch (e.code) {
         case 'KeyV': e.preventDefault(); insertText('[video]', '[/video]'); break;
         case 'KeyI': e.preventDefault(); setShowImageModal(true); break;
-        case 'KeyH': e.preventDefault(); insertText('[hr]', '', 'hr'); break;
-        case 'KeyT': e.preventDefault(); insertText('[table]\n[tr][td]', '[/td][/tr]\n[/table]', 'table'); break;
+        case 'KeyH': e.preventDefault(); insertText('[hr]', ''); break;
+        case 'KeyT': e.preventDefault(); openTableModal(); break;
         case 'KeyL': e.preventDefault(); insertText('[left]', '[/left]'); break;
         case 'KeyR': e.preventDefault(); insertText('[right]', '[/right]'); break;
         default: break;
@@ -398,7 +366,7 @@ const RichEditor = forwardRef(({
       switch (e.code) {
         case 'KeyD': e.preventDefault(); insertText('[added]', '[/added]'); break;
         case 'KeyA': e.preventDefault(); insertText('[info]', '[/info]'); break;
-        case 'KeyM': e.preventDefault(); insertText('', '', 'bullet'); break;
+        case 'KeyM': e.preventDefault(); insertText('[list]\n[*] ', '\n[/list]'); break;
         default: break;
       }
     }
@@ -409,282 +377,74 @@ const RichEditor = forwardRef(({
     }
   };
 
-  const handleTextChange = (e) => {
-    const newValue = e.target.value;
-    onChange(e);
-    addToHistory(newValue, false);
-  };
-
-  const [savedLinkSelection, setSavedLinkSelection] = useState({ start: 0, end: 0, text: '' });
-
-  const openLinkModal = () => {
-    const textarea = textareaRef.current;
-    const start = textarea ? textarea.selectionStart : 0;
-    const end = textarea ? textarea.selectionEnd : 0;
-    const selected = textarea ? textarea.value.substring(start, end) : '';
-    setSavedLinkSelection({ start, end, text: selected });
-    setLinkData({ text: selected, url: 'https://' });
-    setShowLinkModal(true);
-  };
-
+  // BBCode modal handlers
   const handleLinkSubmit = (e) => {
     e.preventDefault();
-    const capturedLinkData = { ...linkData };
-    const { start, end, text: selected } = savedLinkSelection;
+    insertText(`[url=${linkData.url}]${linkData.text || linkData.url}[/url]`, '');
     setShowLinkModal(false);
     setLinkData({ text: '', url: 'https://' });
-    setTimeout(() => {
-      const textarea = textareaRef.current;
-      if (!textarea) return;
-      const text = latestValueRef.current;
-      const currentScrollTop = textarea.scrollTop;
-      let { url, text: linkText } = capturedLinkData;
-      if (!url || !url.trim()) return;
-      url = url.trim();
-      
-      const displayContent = linkText?.trim() || selected || url;
-      const replacement = `[url=${url}]${displayContent}[/url]`;
-      const safeStart = Math.min(start, text.length);
-      const safeEnd = Math.min(end, text.length);
-      const newValue = text.substring(0, safeStart) + replacement + text.substring(safeEnd);
-
-      let newHistory = history.slice(0, historyIndex + 1);
-      if (newHistory[newHistory.length - 1] !== text) newHistory.push(text);
-      newHistory.push(newValue);
-      if (newHistory.length > 50) newHistory = newHistory.slice(newHistory.length - 50);
-      
-      setHistory(newHistory);
-      setHistoryIndex(newHistory.length - 1);
-      lastHistoryPushTime.current = Date.now();
-
-      isInternalUpdate.current = true;
-      onChange({ target: { value: newValue } });
-
-      textarea.focus();
-      const newCursorPos = safeStart + replacement.length;
-      textarea.setSelectionRange(newCursorPos, newCursorPos);
-      textarea.scrollTop = currentScrollTop;
-    }, 0);
-  };
-
-  const openAbbrModal = () => {
-    const textarea = textareaRef.current;
-    const selected = textarea ? textarea.value.substring(textarea.selectionStart, textarea.selectionEnd) : '';
-    setAbbrData({ text: selected, title: '' });
-    setShowAbbrModal(true);
   };
 
   const handleAbbrSubmit = (e) => {
     e.preventDefault();
-    const capturedAbbrData = { ...abbrData };
+    insertText(`[abbr=${abbrData.title}]${abbrData.text}[/abbr]`, '');
     setShowAbbrModal(false);
     setAbbrData({ text: '', title: '' });
-    setTimeout(() => {
-      const textarea = textareaRef.current;
-      if (!textarea) return;
-      const start = textarea.selectionStart;
-      const end = textarea.selectionEnd;
-      const text = latestValueRef.current;
-      const currentScrollTop = textarea.scrollTop;
-      const selected = text.substring(start, end);
-      const { title, text: abbrText } = capturedAbbrData;
-      if (!title) return;
-      
-      const replacement = `[abbr="${title}"]${abbrText || selected || 'text'}[/abbr]`;
-      const newValue = text.substring(0, start) + replacement + text.substring(end);
-
-      let newHistory = history.slice(0, historyIndex + 1);
-      if (newHistory[newHistory.length - 1] !== text) newHistory.push(text);
-      newHistory.push(newValue);
-      if (newHistory.length > 50) newHistory = newHistory.slice(newHistory.length - 50);
-      
-      setHistory(newHistory);
-      setHistoryIndex(newHistory.length - 1);
-      lastHistoryPushTime.current = Date.now();
-
-      isInternalUpdate.current = true;
-      onChange({ target: { value: newValue } });
-
-      textarea.focus();
-      const newCursorPos = start + replacement.length;
-      textarea.setSelectionRange(newCursorPos, newCursorPos);
-      textarea.scrollTop = currentScrollTop;
-    }, 0);
   };
 
   const handleImageSubmit = (e) => {
     e.preventDefault();
-    const capturedImageData = { ...imageData };
+    let bbcode = `[img]${imageData.url}[/img]`;
+    if (imageData.alt) bbcode = `[img=${imageData.alt}]${imageData.url}[/img]`;
+    if (imageData.width) bbcode = `[img=${imageData.width}]${imageData.url}[/img]`;
+    if (imageData.alt && imageData.width) bbcode = `[img=${imageData.alt},${imageData.width}]${imageData.url}[/img]`;
+    insertText(bbcode, '');
     setShowImageModal(false);
     setImageData({ alt: '', url: 'https://', width: '' });
-    setTimeout(() => {
-      const textarea = textareaRef.current;
-      if (!textarea) return;
-      const start = textarea.selectionStart;
-      const end = textarea.selectionEnd;
-      const text = latestValueRef.current;
-      const currentScrollTop = textarea.scrollTop;
-      const url = capturedImageData.url;
-      let prefix = '[img';
-      if (capturedImageData.alt.trim() && !capturedImageData.width?.trim()) {
-        prefix += `=${capturedImageData.alt.trim()}]`;
-      } else {
-        if (capturedImageData.alt.trim()) prefix += ` alt="${capturedImageData.alt.trim()}"`;
-        if (capturedImageData.width?.trim()) prefix += ` width="${capturedImageData.width.trim()}"`;
-        prefix += ']';
-      }
-      const replacement = prefix + url + '[/img]';
-      const newValue = text.substring(0, start) + replacement + text.substring(end);
-
-      let newHistory = history.slice(0, historyIndex + 1);
-      if (newHistory[newHistory.length - 1] !== text) newHistory.push(text);
-      newHistory.push(newValue);
-      if (newHistory.length > 50) newHistory = newHistory.slice(newHistory.length - 50);
-      
-      setHistory(newHistory);
-      setHistoryIndex(newHistory.length - 1);
-      lastHistoryPushTime.current = Date.now();
-
-      isInternalUpdate.current = true;
-      onChange({ target: { value: newValue } });
-
-      textarea.focus();
-      const newCursorPos = start + replacement.length;
-      textarea.setSelectionRange(newCursorPos, newCursorPos);
-      textarea.scrollTop = currentScrollTop;
-    }, 0);
   };
 
   const handleDiceSubmit = (e) => {
     e.preventDefault();
-    const capturedDiceData = { ...diceData };
+    const typePrefix = diceData.type === 'master' ? 'mdice' : 'dice';
+    insertText(`[${typePrefix}=${diceData.sides}]`, `[/${typePrefix}]`);
     setShowDiceModal(false);
-    setTimeout(() => {
-      const textarea = textareaRef.current;
-      if (!textarea) return;
-      const start = textarea.selectionStart;
-      const text = latestValueRef.current;
-      const currentScrollTop = textarea.scrollTop;
-      const { sides, type } = capturedDiceData;
-      const replacement = `[dice=${sides}${type === 'master' ? ' type=master' : ''}]`;
-      const newValue = text.substring(0, start) + replacement + text.substring(start);
-
-      let newHistory = history.slice(0, historyIndex + 1);
-      if (newHistory[newHistory.length - 1] !== text) newHistory.push(text);
-      newHistory.push(newValue);
-      if (newHistory.length > 50) newHistory = newHistory.slice(newHistory.length - 50);
-      
-      setHistory(newHistory);
-      setHistoryIndex(newHistory.length - 1);
-      lastHistoryPushTime.current = Date.now();
-
-      isInternalUpdate.current = true;
-      onChange({ target: { value: newValue } });
-
-      textarea.focus();
-      const newCursorPos = start + replacement.length;
-      textarea.setSelectionRange(newCursorPos, newCursorPos);
-      textarea.scrollTop = currentScrollTop;
-    }, 0);
   };
 
   const handleHideSubmit = (e) => {
     e.preventDefault();
-    const capturedHideData = { ...hideData };
-    // Guard: addressed mode requires a selected user
-    if (capturedHideData.type === 'user' && !capturedHideData.uid) return;
-    setShowHideModal(false);
-    setTimeout(() => {
-      const textarea = textareaRef.current;
-      if (!textarea) return;
-      const start = textarea.selectionStart;
-      const end = textarea.selectionEnd;
-      const text = latestValueRef.current;
-      const currentScrollTop = textarea.scrollTop;
-      const selected = text.substring(start, end);
-
-      let val = 'hidden';
-      let extraParams = '';
-      if (capturedHideData.type === 'posts') val = capturedHideData.threshold || '10';
-      else if (capturedHideData.type === 'user' && capturedHideData.uid) {
-        val = `@${capturedHideData.uid}`;
-        if (capturedHideData.username) extraParams = ` nick="${capturedHideData.username}"`;
-      }
-
-      const prefix = `[hide=${val}${extraParams}]`;
-      const suffix = `[/hide]`;
-      const replacement = `${prefix}${selected}${suffix}`;
-      const newValue = text.substring(0, start) + replacement + text.substring(end);
-
-      let newHistory = history.slice(0, historyIndex + 1);
-      if (newHistory[newHistory.length - 1] !== text) newHistory.push(text);
-      newHistory.push(newValue);
-      if (newHistory.length > 50) newHistory = newHistory.slice(newHistory.length - 50);
-      
-      setHistory(newHistory);
-      setHistoryIndex(newHistory.length - 1);
-      lastHistoryPushTime.current = Date.now();
-
-      isInternalUpdate.current = true;
-      onChange({ target: { value: newValue } });
-
-      textarea.focus();
-      const newCursorPos = start + prefix.length + selected.length + suffix.length;
-      const cursorPos = selected.length > 0 ? newCursorPos : start + prefix.length;
-      textarea.setSelectionRange(cursorPos, cursorPos);
-      textarea.scrollTop = currentScrollTop;
-    }, 0);
-  };
-
-  const openHideModal = () => {
-    setHideData({ threshold: '10', type: 'posts', uid: '', username: '' });
-    setUserSearchResults([]);
-    setShowHideModal(true);
-  };
-
-  const handleColumnsSubmit = () => {
-    const { count, stack } = columnsData;
-    let before = `[columns${stack ? ` stack=${stack}` : ''}]\n[col]`;
-    let after = `[/col]\n`;
-    for (let i = 1; i < count; i++) {
-        after += `[col][/col]\n`;
+    let bbcode;
+    if (hideData.type === 'user') {
+      if (!hideData.uid) return;
+      bbcode = `[hide=${hideData.uid}]`;
+    } else if (hideData.type === 'posts') {
+      bbcode = `[hide=${hideData.threshold}]`;
+    } else {
+      bbcode = '[hide]';
     }
-    after += `[/columns]`;
-    insertText(before, after, 'columns');
+    insertText(bbcode, '[/hide]');
+    setShowHideModal(false);
+    setHideData({ threshold: '10', type: 'posts', uid: '', username: '' });
+  };
+
+  const handleColumnsSubmit = (e) => {
+    e.preventDefault();
+    insertText(`[columns=${columnsData.count},${columnsData.stack}]`, '[/columns]');
     setShowColumnsModal(false);
   };
 
-  const openTableModal = () => {
-    setTableData({ rows: 3, cols: 2, layout: 'auto', width: '100%', border: '', noBorders: false });
-    setShowTableModal(true);
-  };
-
-  const handleTableSubmit = () => {
-    const { rows, cols, layout, width, border, noBorders } = tableData;
-    let before = `[table${layout ? ` layout=${layout}` : ''}${width ? ` width=${width}` : ''}${noBorders ? ' border=0' : border ? ` border=${border}` : ''}]\n`;
-    for (let r = 0; r < rows; r++) {
-      before += `[tr]`;
-      for (let c = 0; c < cols; c++) {
-        before += `[td][/td]`;
-      }
-      before += `[/tr]\n`;
-    }
-    before += `[/table]`;
-    insertText(before, '', 'table');
+  const handleTableSubmit = (e) => {
+    e.preventDefault();
+    let attrs = [];
+    if (tableData.layout) attrs.push(tableData.layout);
+    if (tableData.width) attrs.push(tableData.width);
+    if (tableData.border) attrs.push(tableData.border);
+    if (tableData.noBorders) attrs.push('noborders');
+    const attrStr = attrs.length ? `=${attrs.join(',')}` : '';
+    insertText(`[table${attrStr}]`, '[/table]');
     setShowTableModal(false);
   };
 
-  // The mention picker.
-//
-// THIS USED TO BE `pb.collection('users').getList(1, 5, { filter: nickname ~ … })`
-// — one whole auth record per SUGGESTION, per KEYSTROKE. Typing four letters in a
-// reply box handed the typist five strangers' private `settings`. The rows are
-// now a three-column list from GET /api/aerun/users/search: id for the uid the
-// editor stores, nickname for the label, avatar for the chip.
-//
-// The two-character floor is duplicated on the server so the cap cannot be
-// sidestepped by calling the route directly.
-const handleUserSearch = async (queryText) => {
+  const handleUserSearch = async (queryText) => {
     setHideData(prev => ({ ...prev, username: queryText, uid: '' })); // clear uid when typing
     if (!queryText || queryText.length < 2) {
       setUserSearchResults([]);
@@ -702,10 +462,443 @@ const handleUserSearch = async (queryText) => {
   };
 
   const selectUser = (user) => {
-    setHideData(prev => ({ ...prev, username: user.nickname, uid: user.id }));
-    setUserSearchResults([]);
+    setHideData(prev => ({ ...prev, uid: user.id, username: user.nickname }));
   };
 
+  const openAbbrModal = useCallback(() => {
+    setShowAbbrModal(true);
+  }, []);
+
+  const openTableModal = useCallback(() => {
+    setShowTableModal(true);
+  }, []);
+
+  const openHideModal = useCallback(() => {
+    setShowHideModal(true);
+  }, []);
+
+  // Toolbar group rendering
+  const renderGroup = useCallback((groupId, isOverflow = false) => {
+    switch (groupId) {
+      case 'style':
+        if (isOverflow) {
+          return (
+            <>
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[b]', '[/b]')}>
+                <Bold size={16} /> {t('editor.bold')}
+              </button>
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[i]', '[/i]')}>
+                <Italic size={16} /> {t('editor.italic')}
+              </button>
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[u]', '[/u]')}>
+                <Underline size={16} /> {t('editor.underline')}
+              </button>
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[s]', '[/s]')}>
+                <Strikethrough size={16} /> {t('editor.strikethrough')}
+              </button>
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[sup]', '[/sup]')}>
+                <Superscript size={16} /> {t('editor.superscript')}
+              </button>
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[sub]', '[/sub]')}>
+                <Subscript size={16} /> {t('editor.subscript')}
+              </button>
+            </>
+          );
+        }
+        return (
+          <div className="editor-toolbar-group">
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[b]', '[/b]')} title={t('editor.bold')}>
+              <Bold size={16} />
+            </Button>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[i]', '[/i]')} title={t('editor.italic')}>
+              <Italic size={16} />
+            </Button>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[u]', '[/u]')} title={t('editor.underline')}>
+              <Underline size={16} />
+            </Button>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[s]', '[/s]')} title={t('editor.strikethrough')}>
+              <Strikethrough size={16} />
+            </Button>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[sup]', '[/sup]')} title={t('editor.superscript')}>
+              <Superscript size={16} />
+            </Button>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[sub]', '[/sub]')} title={t('editor.subscript')}>
+              <Subscript size={16} />
+            </Button>
+          </div>
+        );
+
+      case 'history':
+        if (isOverflow) {
+          return (
+            <>
+              <button type="button" className="editor-overflow-item" onClick={() => handleUndo()} title={t('editor.undo') + ' (Ctrl+Z)'}>
+                <Undo size={16} /> {t('editor.undo')}
+              </button>
+              <button type="button" className="editor-overflow-item" onClick={() => handleRedo()} title={t('editor.redo') + ' (Ctrl+Y)'}>
+                <Redo size={16} /> {t('editor.redo')}
+              </button>
+            </>
+          );
+        }
+        return (
+          <div className="editor-toolbar-group">
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => handleUndo()} title={t('editor.undo') + ' (Ctrl+Z)'}>
+              <Undo size={16} />
+            </Button>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => handleRedo()} title={t('editor.redo') + ' (Ctrl+Y)'}>
+              <Redo size={16} />
+            </Button>
+          </div>
+        );
+
+      case 'smiles':
+        if (isOverflow) {
+          return (
+            <button type="button" className="editor-overflow-item" onClick={() => setShowSmilesModal(true)}>
+              <Smile size={16} /> {t('editor.smiles')}
+            </button>
+          );
+        }
+        return (
+          <div className="editor-toolbar-group">
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => setShowSmilesModal(true)} title={t('editor.smiles')}>
+              <Smile size={18} />
+            </Button>
+          </div>
+        );
+
+      case 'links':
+        if (isOverflow) {
+          return (
+            <button type="button" className="editor-overflow-item" onClick={() => setShowLinkModal(true)}>
+              <LinkIcon size={16} /> {t('editor.link')}
+            </button>
+          );
+        }
+        return (
+          <div className="editor-toolbar-group">
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => setShowLinkModal(true)} title={t('editor.link')}>
+              <LinkIcon size={16} />
+            </Button>
+          </div>
+        );
+
+      case 'typography': {
+        // Size picker options (defined here to avoid useCallback dependency issues)
+        const sizeOptions = [
+          { value: 'xx-small', label: t('editor.size_xx_small') },
+          { value: 'x-small', label: t('editor.size_x_small') },
+          { value: 'small', label: t('editor.size_small') },
+          { value: 'medium', label: t('editor.size_medium') },
+          { value: 'large', label: t('editor.size_large') },
+          { value: 'x-large', label: t('editor.size_x_large') },
+          { value: 'xx-large', label: t('editor.size_xx_large') }
+        ];
+        // Color picker options
+        const colorOptions = [
+          { value: '#e03e3e', label: t('editor.color_red') },
+          { value: '#dd6b20', label: t('editor.color_orange') },
+          { value: '#f6ad55', label: t('editor.color_yellow') },
+          { value: '#38a169', label: t('editor.color_green') },
+          { value: '#3182ce', label: t('editor.color_blue') },
+          { value: '#805ad5', label: t('editor.color_purple') },
+          { value: '#d53f8c', label: t('editor.color_pink') },
+          { value: '#1a202c', label: t('editor.color_black') },
+          { value: '#718096', label: t('editor.color_gray') },
+          { value: '#ffffff', label: t('editor.color_white') }
+        ];
+        if (isOverflow) {
+          return (
+            <>
+              <div className="editor-picker" ref={sizePickerRef}>
+                <button
+                  type="button"
+                  className="editor-picker__toggle"
+                  onClick={() => setShowSizePicker(!showSizePicker)}
+                  aria-haspopup="listbox"
+                  aria-expanded={showSizePicker}
+                  title={t('editor.font_size')}
+                >
+                  <ALargeSmall size={16} />
+                  <span className="editor-picker__toggle-label">{t('editor.large_text')}</span>
+                </button>
+                {showSizePicker && (
+                  <div className="editor-picker__menu editor-picker__menu--right" role="listbox">
+                    {sizeOptions.map(opt => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        className="editor-picker__item"
+                        role="option"
+                        onClick={() => {
+                          insertText(`[size=${opt.value}]`, '[/size]');
+                          setShowSizePicker(false);
+                        }}
+                      >
+                        <span style={{ fontSize: opt.value }}>{opt.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="editor-picker" ref={colorPickerRef}>
+                <button
+                  type="button"
+                  className="editor-picker__toggle"
+                  onClick={() => setShowColorPicker(!showColorPicker)}
+                  aria-haspopup="listbox"
+                  aria-expanded={showColorPicker}
+                  title={t('editor.font_color')}
+                >
+                  <Palette size={16} />
+                  <span className="editor-picker__toggle-label">{t('editor.text_color')}</span>
+                </button>
+                {showColorPicker && (
+                  <div className="editor-picker__menu editor-picker__menu--right" role="listbox">
+                    {colorOptions.map(opt => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        className="editor-picker__item"
+                        role="option"
+                        onClick={() => {
+                          insertText(`[color=${opt.value}]`, '[/color]');
+                          setShowColorPicker(false);
+                        }}
+                      >
+                        <span className="editor-color-swatch" style={{ backgroundColor: opt.value }}></span>
+                        <span>{opt.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          );
+        }
+        return (
+          <div className="editor-toolbar-group">
+            <div className="editor-picker" ref={sizePickerRef}>
+              <button
+                type="button"
+                className="editor-picker__toggle"
+                onClick={() => setShowSizePicker(!showSizePicker)}
+                aria-haspopup="listbox"
+                aria-expanded={showSizePicker}
+                title={t('editor.font_size')}
+              >
+                <ALargeSmall size={16} />
+              </button>
+              {showSizePicker && (
+                <div className="editor-picker__menu editor-picker__menu--right" role="listbox">
+                  {sizeOptions.map(opt => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      className="editor-picker__item"
+                      role="option"
+                      onClick={() => {
+                        insertText(`[size=${opt.value}]`, '[/size]');
+                        setShowSizePicker(false);
+                      }}
+                    >
+                      <span style={{ fontSize: opt.value }}>{opt.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="editor-picker" ref={colorPickerRef}>
+              <button
+                type="button"
+                className="editor-picker__toggle"
+                onClick={() => setShowColorPicker(!showColorPicker)}
+                aria-haspopup="listbox"
+                aria-expanded={showColorPicker}
+                title={t('editor.font_color')}
+              >
+                <Palette size={16} />
+              </button>
+              {showColorPicker && (
+                <div className="editor-picker__menu editor-picker__menu--right" role="listbox">
+                  {colorOptions.map(opt => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      className="editor-picker__item"
+                      role="option"
+                      onClick={() => {
+                        insertText(`[color=${opt.value}]`, '[/color]');
+                        setShowColorPicker(false);
+                      }}
+                    >
+                      <span className="editor-color-swatch" style={{ backgroundColor: opt.value }}></span>
+                      <span>{opt.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+
+      } // end case 'typography'
+
+      case 'align':
+        if (isOverflow) {
+          return (
+            <>
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[align=left]', '[/align]')}>
+                <AlignLeft size={16} /> {t('editor.align_left')}
+              </button>
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[align=center]', '[/align]')}>
+                <AlignCenter size={16} /> {t('editor.align_center')}
+              </button>
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[align=right]', '[/align]')}>
+                <AlignRight size={16} /> {t('editor.align_right')}
+              </button>
+            </>
+          );
+        }
+        return (
+          <div className="editor-toolbar-group">
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[align=left]', '[/align]')} title={t('editor.align_left')}>
+              <AlignLeft size={16} />
+            </Button>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[align=center]', '[/align]')} title={t('editor.align_center')}>
+              <AlignCenter size={16} />
+            </Button>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[align=right]', '[/align]')} title={t('editor.align_right')}>
+              <AlignRight size={16} />
+            </Button>
+          </div>
+        );
+
+      case 'inserts':
+        if (isOverflow) {
+          return (
+            <>
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[quote]', '[/quote]')}>
+                <Quote size={16} /> {t('editor.quote')}
+              </button>
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[spoiler]', '[/spoiler]')}>
+                <Clapperboard size={16} /> {t('editor.spoiler')}
+              </button>
+              <button type="button" className="editor-overflow-item" onClick={openAbbrModal}>
+                <HelpCircle size={16} /> {t('editor.abbreviation')}
+              </button>
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[code]', '[/code]')}>
+                <Code size={16} /> {t('editor.code_block')}
+              </button>
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[html]', '[/html]')}>
+                <CodeXml size={16} /> HTML
+              </button>
+            </>
+          );
+        }
+        return (
+          <div className="editor-toolbar-group">
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[quote]', '[/quote]')} title={t('editor.quote')}>
+              <Quote size={16} />
+            </Button>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[spoiler]', '[/spoiler]')} title={t('editor.spoiler')}>
+              <Clapperboard size={16} />
+            </Button>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={openAbbrModal} title={t('editor.abbreviation')}>
+              <HelpCircle size={16} />
+            </Button>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[code]', '[/code]')} title={t('editor.code_block')}>
+              <Code size={16} />
+            </Button>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[html]', '[/html]')} title="HTML">
+              <CodeXml size={16} />
+            </Button>
+          </div>
+        );
+
+      case 'media':
+        if (isOverflow) {
+          return (
+            <>
+              <button type="button" className="editor-overflow-item" onClick={() => setShowImageModal(true)}>
+                <ImageIcon size={16} /> {t('editor.image')}
+              </button>
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[video]', '[/video]')}>
+                <Youtube size={16} /> {t('editor.video')}
+              </button>
+            </>
+          );
+        }
+        return (
+          <div className="editor-toolbar-group">
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => setShowImageModal(true)} title={t('editor.image')}>
+              <ImageIcon size={16} />
+            </Button>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[video]', '[/video]')} title={t('editor.video')}>
+              <Youtube size={16} />
+            </Button>
+          </div>
+        );
+
+      case 'advanced':
+        if (isOverflow) {
+          return (
+            <>
+              <button type="button" className="editor-overflow-item" onClick={() => setShowColumnsModal(true)}>
+                <Columns size={16} /> {t('editor.columns')}
+              </button>
+              <button type="button" className="editor-overflow-item" onClick={openTableModal}>
+                <TableIcon size={16} /> {t('editor.table')}
+              </button>
+              {showHide && (
+                <button type="button" className="editor-overflow-item" onClick={openHideModal}>
+                  <EyeOff size={16} /> {t('editor.hide')}
+                </button>
+              )}
+              {showDice && !isEdit && (
+                <button type="button" className="editor-overflow-item" onClick={() => setShowDiceModal(true)}>
+                  <Dices size={16} /> {t('editor.dice_roll_btn')}
+                </button>
+              )}
+              <button type="button" className="editor-overflow-item" onClick={() => insertText('[hr]', '')}>
+                <Minus size={16} /> {t('editor.hr')}
+              </button>
+            </>
+          );
+        }
+        return (
+          <div className="editor-toolbar-group">
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => setShowColumnsModal(true)} title={t('editor.columns')}>
+              <Columns size={16} />
+            </Button>
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={openTableModal} title={t('editor.table')}>
+              <TableIcon size={16} />
+            </Button>
+            {showHide && (
+              <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={openHideModal} title={t('editor.hide')}>
+                <EyeOff size={16} />
+              </Button>
+            )}
+            {showDice && !isEdit && (
+              <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => setShowDiceModal(true)} title={t('editor.roll_dice')}>
+                <Dices size={16} />
+              </Button>
+            )}
+            <Button variant="ghost" iconOnly className="editor-toolbar-btn" onClick={() => insertText('[hr]', '')} title={t('editor.hr')}>
+              <Minus size={16} />
+            </Button>
+          </div>
+        );
+
+      default:
+        return null;
+    }
+  }, [t, insertText, handleUndo, handleRedo, showHide, showDice, isEdit, openAbbrModal, openTableModal, openHideModal, showSizePicker, showColorPicker]);
+  // Hotkey groups for the hotkeys modal (restored from main: the migration
+  // renamed the group titles to keys that do not exist in the dictionary,
+  // dropped the spaces from the key labels and listed bindings that do not
+  // match the handler).
   const hotkeyGroups = [
     {
       title: t('editor.formatting'),
@@ -767,336 +960,112 @@ const handleUserSearch = async (queryText) => {
     },
   ];
 
-  const renderGroup = (groupId, isOverflow = false) => {
-    switch (groupId) {
-      case 'style':
-        return isOverflow ? (
-          <>
-            <Dropdown.Item onClick={() => insertText('[b]', '[/b]')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Bold size={16} /> {t('editor.bold')}
-            </Dropdown.Item>
-            <Dropdown.Item onClick={() => insertText('[i]', '[/i]')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Italic size={16} /> {t('editor.italic')}
-            </Dropdown.Item>
-            <Dropdown.Item onClick={() => insertText('[u]', '[/u]')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Underline size={16} /> {t('editor.underline')}
-            </Dropdown.Item>
-            <Dropdown.Item onClick={() => insertText('[s]', '[/s]')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Strikethrough size={16} /> {t('editor.strikethrough')}
-            </Dropdown.Item>
-            <Dropdown.Item onClick={() => insertText('[sup]', '[/sup]')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Superscript size={16} /> {t('editor.superscript')}
-            </Dropdown.Item>
-            <Dropdown.Item onClick={() => insertText('[sub]', '[/sub]')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Subscript size={16} /> {t('editor.subscript')}
-            </Dropdown.Item>
-            <Dropdown.Divider />
-          </>
-        ) : (
-          <div className="d-flex align-items-center gap-1">
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[b]', '[/b]')} title="Bold (Ctrl+B)"><Bold size={16} /></Button>
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[i]', '[/i]')} title="Italic (Ctrl+I)"><Italic size={16} /></Button>
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[u]', '[/u]')} title="Underline (Ctrl+U)"><Underline size={16} /></Button>
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[s]', '[/s]')} title="Strikethrough (Ctrl+S)"><Strikethrough size={16} /></Button>
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[sup]', '[/sup]')} title="Superscript"><Superscript size={16} /></Button>
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[sub]', '[/sub]')} title="Subscript"><Subscript size={16} /></Button>
-          </div>
-        );
-      case 'history':
-        return isOverflow ? (
-          <>
-            <Dropdown.Item onClick={handleUndo} disabled={historyIndex === 0} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Undo size={16} /> {t('editor.undo_shortcut')}
-            </Dropdown.Item>
-            <Dropdown.Item onClick={handleRedo} disabled={historyIndex >= history.length - 1} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Redo size={16} /> {t('editor.redo_shortcut')}
-            </Dropdown.Item>
-            <Dropdown.Divider />
-          </>
-        ) : (
-          <div className="d-flex align-items-center gap-1">
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={handleUndo} disabled={historyIndex === 0} title="Undo (Ctrl+Z)"><Undo size={16} /></Button>
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={handleRedo} disabled={historyIndex >= history.length - 1} title="Redo (Ctrl+Y)"><Redo size={16} /></Button>
-          </div>
-        );
-      case 'smiles':
-        return isOverflow ? (
-          <Dropdown.Item onClick={() => setShowSmilesModal(true)} className="d-flex align-items-center gap-2 py-2 px-3">
-             <Smile size={16} /> {t('editor.smiles')}
-          </Dropdown.Item>
-        ) : (
-          <Dropdown className="d-inline-block" drop={smilesDropDirection}>
-            <Dropdown.Toggle variant="light" size="sm" className="p-1 px-2 no-caret editor-dropdown-toggle" title="Smiles"><Smile size={16} /></Dropdown.Toggle>
-            <Dropdown.Menu className="smiles-picker-menu p-0 shadow border-0" style={{ width: smilesFullWidth ? `${editorWidth}px` : '320px', zIndex: 3500 }}>
-              <SmilesPicker onSelect={(code) => insertText(code, '')} />
-            </Dropdown.Menu>
-          </Dropdown>
-        );
-      case 'links':
-        return isOverflow ? (
-          <Dropdown.Item onClick={openLinkModal} className="d-flex align-items-center gap-2 py-2 px-3">
-            <LinkIcon size={16} /> {t('editor.link')}
-          </Dropdown.Item>
-        ) : (
-          <Button variant="light" size="sm" className="p-1 px-2" onClick={openLinkModal} title="Link (Ctrl+K)"><LinkIcon size={16} /></Button>
-        );
-      case 'typography':
-        return isOverflow ? (
-          <>
-            <Dropdown.Item onClick={() => insertText('150%', '', 'size')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <ALargeSmall size={16} /> {t('editor.large_text')}
-            </Dropdown.Item>
-            <Dropdown.Item onClick={() => insertText('#ff0000', '', 'color')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Palette size={16} /> {t('editor.text_color')}
-            </Dropdown.Item>
-          </>
-        ) : (
-          <div className="d-flex align-items-center gap-1">
-            <Dropdown className="d-inline-block">
-              <Dropdown.Toggle variant="light" size="sm" className="p-1 px-2 no-caret editor-dropdown-toggle" title="Size"><ALargeSmall size={19} /></Dropdown.Toggle>
-              <Dropdown.Menu className="size-picker-menu shadow-sm border-0" style={{ maxHeight: '250px', overflowY: 'auto' }}>
-                <Dropdown.Header className="px-3 py-1 font-monospace text-uppercase" style={{ fontSize: '0.7rem', opacity: 0.7 }}>
-                  {t('editor.smiles_percent')}
-                </Dropdown.Header>
-                {[{label:'50%',v:'50%'},{label:'85%',v:'85%'},{label:'100%',v:'100%'},{label:'120%',v:'120%'},{label:'150%',v:'150%'},{label:'200%',v:'200%'}].map(s=>(
-                  <Dropdown.Item key={s.v} onClick={()=>insertText(s.v,'','size')} className="small py-1 px-3"><span style={{fontSize:s.v}}>{s.label}</span></Dropdown.Item>
-                ))}
-                <Dropdown.Divider />
-                <Dropdown.Header className="px-3 py-1 font-monospace text-uppercase" style={{ fontSize: '0.7rem', opacity: 0.7 }}>
-                  {t('editor.smiles_pixels')}
-                </Dropdown.Header>
-                {[{label:'9px',v:'9'},{label:'11px',v:'11'},{label:'12px',v:'12'},{label:'14px',v:'14'},{label:'16px',v:'16'},{label:'18px',v:'18'},{label:'20px',v:'20'},{label:'24px',v:'24'}].map(s=>(
-                  <Dropdown.Item key={s.v} onClick={()=>insertText(s.v,'','size')} className="small py-1 px-3"><span style={{fontSize:`${s.v}px`}}>{s.label}</span></Dropdown.Item>
-                ))}
-              </Dropdown.Menu>
-            </Dropdown>
-            <Dropdown className="d-inline-block">
-              <Dropdown.Toggle variant="light" size="sm" className="p-1 px-2 no-caret editor-dropdown-toggle" title="Color"><Palette size={16} /></Dropdown.Toggle>
-              <Dropdown.Menu className="color-picker-menu p-2 shadow-sm border-0" style={{ minWidth: '160px' }}>
-                <div className="d-flex flex-wrap gap-1 justify-content-center">
-                  {['#000000','#ff0000','#00ff00','#0000ff','#ffff00','#ff00ff','#00ffff','#ffffff'].map(c=>(
-                    <button key={c} type="button" className="color-swatch border rounded-circle" style={{backgroundColor:c,width:20,height:20,cursor:'pointer',padding:0}} onClick={()=>insertText(c,'','color')} />
-                  ))}
-                </div>
-              </Dropdown.Menu>
-            </Dropdown>
-          </div>
-        );
-      case 'align':
-        return isOverflow ? (
-          <>
-            <Dropdown.Item onClick={() => insertText('[align=left]', '[/align]')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <AlignLeft size={16} /> {t('editor.align_left')}
-            </Dropdown.Item>
-            <Dropdown.Item onClick={() => insertText('[align=center]', '[/align]')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <AlignCenter size={16} /> {t('editor.align_center')}
-            </Dropdown.Item>
-            <Dropdown.Item onClick={() => insertText('[align=right]', '[/align]')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <AlignRight size={16} /> {t('editor.align_right')}
-            </Dropdown.Item>
-            <Dropdown.Divider />
-          </>
-        ) : (
-          <div className="d-flex align-items-center gap-1">
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[align=left]', '[/align]')} title="Left"><AlignLeft size={16} /></Button>
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[align=center]', '[/align]')} title="Center"><AlignCenter size={16} /></Button>
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[align=right]', '[/align]')} title="Right"><AlignRight size={16} /></Button>
-          </div>
-        );
-      case 'inserts':
-        return isOverflow ? (
-          <>
-            <Dropdown.Item onClick={() => insertText('', '', 'quote')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Quote size={16} /> {t('editor.quote')}
-            </Dropdown.Item>
-            <Dropdown.Item onClick={() => insertText('', '', 'spoiler')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Clapperboard size={16} /> {t('editor.spoiler')}
-            </Dropdown.Item>
-            <Dropdown.Item onClick={openAbbrModal} className="d-flex align-items-center gap-2 py-2 px-3">
-              {t('editor.abbreviation')}
-            </Dropdown.Item>
-            <Dropdown.Item onClick={() => insertText('[code]', '[/code]', 'code')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Code size={16} /> {t('editor.code_block')}
-            </Dropdown.Item>
-            <Dropdown.Item onClick={() => insertText('[html]', '[/html]')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <CodeXml size={16} /> HTML
-            </Dropdown.Item>
-          </>
-        ) : (
-          <div className="d-flex align-items-center gap-1">
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('', '', 'quote')} title="Quote"><Quote size={16} /></Button>
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('', '', 'spoiler')} title="Spoiler"><Clapperboard size={15} /></Button>
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={openAbbrModal} title={t('editor.abbreviation')}><HelpCircle size={16} /></Button>
-            <Button
-              variant="light"
-              size="sm"
-              className="p-1 px-2"
-              onClick={() => insertText('[code]', '[/code]', 'code')}
-              title={t('editor.code_block')}
-            >
-              <Code size={16} />
-            </Button>
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[html]', '[/html]')} title="HTML"><CodeXml size={16} /></Button>
-          </div>
-        );
-      case 'media':
-        return isOverflow ? (
-          <>
-            <Dropdown.Item onClick={() => setShowImageModal(true)} className="d-flex align-items-center gap-2 py-2 px-3">
-              <ImageIcon size={16} /> {t('editor.image')}
-            </Dropdown.Item>
-            <Dropdown.Item onClick={() => insertText('[video]', '[/video]')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Youtube size={16} /> {t('editor.video')}
-            </Dropdown.Item>
-          </>
-        ) : (
-          <div className="d-flex align-items-center gap-1">
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => setShowImageModal(true)} title="Image"><ImageIcon size={16} /></Button>
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[video]', '[/video]')} title="Video"><Youtube size={16} /></Button>
-          </div>
-        );
-      case 'advanced':
-        return isOverflow ? (
-          <>
-            <Dropdown.Item onClick={() => setShowColumnsModal(true)} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Columns size={16} /> {t('editor.columns')}
-            </Dropdown.Item>
-            <Dropdown.Item onClick={openTableModal} className="d-flex align-items-center gap-2 py-2 px-3">
-              <TableIcon size={16} /> {t('editor.table')}
-            </Dropdown.Item>
-            {showHide && (
-              <Dropdown.Item onClick={openHideModal} className="d-flex align-items-center gap-2 py-2 px-3">
-                <EyeOff size={16} /> {t('editor.hide')}
-              </Dropdown.Item>
-            )}
-            {showDice && !isEdit && (
-              <Dropdown.Item onClick={() => setShowDiceModal(true)} className="d-flex align-items-center gap-2 py-2 px-3">
-                <Dices size={16} /> {t('editor.dice_roll_btn')}
-              </Dropdown.Item>
-            )}
-            <Dropdown.Item onClick={() => insertText('[hr]', '')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Minus size={16} /> {t('editor.hr')}
-            </Dropdown.Item>
-          </>
-        ) : (
-          <div className="d-flex align-items-center gap-1">
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => setShowColumnsModal(true)} title={t('editor.columns')}><Columns size={16} /></Button>
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={openTableModal} title={t('editor.table')}> <TableIcon size={16} /></Button>
-            {showHide && (
-              <Button variant="light" size="sm" className="p-1 px-2" onClick={openHideModal} title={t('editor.hide')}><EyeOff size={16} /></Button>
-            )}
-            {showDice && !isEdit && (
-              <Button variant="light" size="sm" className="p-1 px-2" onClick={() => setShowDiceModal(true)} title={t('editor.roll_dice')}><Dices size={16} /></Button>
-            )}
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[hr]', '')} title={t('editor.hr')}><Minus size={16} /></Button>
-          </div>
-        );
-      default: return null;
-    }
-  };
+
 
   return (
     <div className="rich-editor-container" ref={containerRef}>
-      <div 
+      <div
         ref={toolbarContainerRef}
-        className="d-flex align-items-center gap-1 mb-2 p-2 rounded editor-toolbar-themed editor-toolbar" 
-        style={{ minHeight: '46px' }}
+        className="editor-toolbar"
       >
-        
         {/* Render Visible Groups */}
         {visibleGroupIds.map((groupId, idx) => (
           <React.Fragment key={groupId}>
             {renderGroup(groupId)}
-            {idx < visibleGroupIds.length - 1 && <div className="vr mx-1 opacity-25"></div>}
+            {idx < visibleGroupIds.length - 1 && <div className="editor-toolbar-divider"></div>}
           </React.Fragment>
         ))}
 
         {/* Render Overflow Menu */}
         {overflowGroupIds.length > 0 && (
           <>
-            {visibleGroupIds.length > 0 && <div className="vr mx-1 opacity-25"></div>}
+            {visibleGroupIds.length > 0 && <div className="editor-toolbar-divider"></div>}
             {isMobile ? (
               <Button
-                variant="light"
-                size="sm"
-                className="p-1 px-2 editor-more-tools-btn"
+                variant="ghost"
+                iconOnly
+                className="editor-more-tools-btn"
                 onClick={() => setShowMoreToolsModal(true)}
                 title={t('editor.additional_formatting_title')}
               >
                 <MoreHorizontal size={18} />
               </Button>
             ) : (
-              <Dropdown className="d-inline-block">
-                <Dropdown.Toggle variant="light" size="sm" className="p-1 px-2 no-caret editor-dropdown-toggle" title={t('editor.additional_formatting_title')}>
-                  <MoreHorizontal size={18} />
-                </Dropdown.Toggle>
-                <Dropdown.Menu
-                  className="shadow-sm border-0 dropdown-menu-end editor-overflow-dropdown-menu"
-                  style={{
-                    borderRadius: '12px',
-                    minWidth: '220px',
-                    maxHeight: '260px',
-                    overflowY: 'auto'
-                  }}
+              <div className="editor-picker" ref={desktopOverflowRef}>
+                <button
+                  type="button"
+                  className="editor-overflow-toggle"
+                  onClick={() => setShowDesktopOverflow(!showDesktopOverflow)}
+                  aria-haspopup="listbox"
+                  aria-expanded={showDesktopOverflow}
+                  title={t('editor.additional_formatting_title')}
                 >
-                  {overflowGroupIds.map(groupId => (
-                    <React.Fragment key={groupId}>
-                      {renderGroup(groupId, true)}
-                    </React.Fragment>
-                  ))}
-                </Dropdown.Menu>
-              </Dropdown>
+                  <MoreHorizontal size={18} />
+                </button>
+                {showDesktopOverflow && (
+                  <div
+                    className="editor-overflow-menu"
+                    role="listbox"
+                    onClick={(event) => {
+                      // Close after choosing a formatting action. Picker
+                      // toggles inside the menu are not .editor-overflow-item,
+                      // so opening a size/color picker does not close the menu.
+                      if (event.target.closest('.editor-overflow-item')) {
+                        setShowDesktopOverflow(false);
+                      }
+                    }}
+                  >
+                    {overflowGroupIds.map((groupId, index) => (
+                      <React.Fragment key={groupId}>
+                        {renderGroup(groupId, true)}
+                        {index < overflowGroupIds.length - 1 && (
+                          <div className="editor-overflow-group" />
+                        )}
+                      </React.Fragment>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
           </>
         )}
-
-        {/* Far Right: Manual */}
-        {!hideHotkeysButton && (
-          <div className="ms-auto flex-shrink-0">
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => setShowHotkeysModal(true)} title={t('editor.hotkeys')}>
-              <Keyboard size={18} />
-            </Button>
-          </div>
-        )}
       </div>
 
-      <Form.Control
+      {/* Textarea */}
+      <textarea
         ref={textareaRef}
         id={id}
-        as="textarea"
-        rows={rows}
-        placeholder={placeholder}
+        className="editor-textarea"
         value={value}
         onChange={handleTextChange}
         onKeyDown={handleKeyDown}
-        onInput={adjustTextareaHeight}
-        maxLength={maxLength}
+        placeholder={placeholder}
+        rows={rows}
+        style={{ minHeight: minHeight }}
+        maxLength={maxLength > 0 ? maxLength : undefined}
         autoFocus={autoFocus}
-        className="form-control"
-        style={minHeight ? { minHeight } : {}}
       />
 
+      {/* Footer */}
       {!hideFooter && (
-        <div className="d-flex justify-content-between mt-2 px-1">
-          <Form.Text className="text-muted small">
-            {t('forum.bbcode_supported')}
-          </Form.Text>
-          <Form.Text className={`${maxLength && value?.length >= maxLength ? 'text-danger' : 'text-muted'} fw-bold small`}>
+        <div className="editor-footer">
+          <span className="editor-footer__hint">{t('forum.bbcode_supported')}</span>
+          <span className={maxLength > 0 && value?.length >= maxLength ? 'editor-footer__counter editor-footer__counter--danger' : 'editor-footer__counter'}>
             {maxLength > 0
               ? `${value?.length || 0} / ${maxLength}`
-              : `${t('forum.chars')} ${value?.length || 0}`
-            }
-          </Form.Text>
+              : `${t('forum.chars')} ${value?.length || 0}`}
+          </span>
         </div>
       )}
 
+      {/* Link Modal */}
       <ForumModal
         show={showLinkModal}
         onHide={() => closeModalWithFocus(setShowLinkModal)}
         title={t('editor.link_modal_title')}
         footer={
           <>
-            <Button variant="outline-secondary" onClick={() => closeModalWithFocus(setShowLinkModal)}>
+            <Button variant="secondary" onClick={() => closeModalWithFocus(setShowLinkModal)}>
               {t('editor.link_cancel')}
             </Button>
             <Button variant="primary" onClick={handleLinkSubmit}>
@@ -1105,35 +1074,40 @@ const handleUserSearch = async (queryText) => {
           </>
         }
       >
-        <Form.Group className="mb-3">
-          <Form.Label>{t('editor.link_text_label')}</Form.Label>
-          <Form.Control
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="linkText">{t('editor.link_text_label')}</label>
+          <input
+            id="linkText"
             type="text"
+            className="editor-modal-input"
             value={linkData.text}
             onChange={e => setLinkData({ ...linkData, text: e.target.value })}
             placeholder={t('editor.link_text_placeholder')}
           />
-        </Form.Group>
-        <Form.Group>
-          <Form.Label>URL</Form.Label>
-          <Form.Control
+        </div>
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="linkUrl">URL</label>
+          <input
+            id="linkUrl"
             type="url"
+            className="editor-modal-input"
             value={linkData.url}
             onChange={e => setLinkData({ ...linkData, url: e.target.value })}
             required
             autoFocus
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleLinkSubmit(e); } }}
           />
-        </Form.Group>
+        </div>
       </ForumModal>
 
+      {/* Abbreviation Modal */}
       <ForumModal
         show={showAbbrModal}
         onHide={() => closeModalWithFocus(setShowAbbrModal)}
         title={t('editor.abbr_modal_title')}
         footer={
           <>
-            <Button variant="outline-secondary" onClick={() => closeModalWithFocus(setShowAbbrModal)}>
+            <Button variant="secondary" onClick={() => closeModalWithFocus(setShowAbbrModal)}>
               {t('editor.link_cancel')}
             </Button>
             <Button variant="primary" onClick={handleAbbrSubmit}>
@@ -1142,36 +1116,41 @@ const handleUserSearch = async (queryText) => {
           </>
         }
       >
-        <Form.Group className="mb-3">
-          <Form.Label>{t('editor.abbr_text_label')}</Form.Label>
-          <Form.Control
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="abbrText">{t('editor.abbr_text_label')}</label>
+          <input
+            id="abbrText"
             type="text"
+            className="editor-modal-input"
             value={abbrData.text}
             onChange={e => setAbbrData({ ...abbrData, text: e.target.value })}
             placeholder={t('editor.abbr_text_placeholder')}
             autoFocus
           />
-        </Form.Group>
-        <Form.Group>
-          <Form.Label>{t('editor.abbr_title_label')}</Form.Label>
-          <Form.Control
+        </div>
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="abbrTitle">{t('editor.abbr_title_label')}</label>
+          <input
+            id="abbrTitle"
             type="text"
+            className="editor-modal-input"
             value={abbrData.title}
             onChange={e => setAbbrData({ ...abbrData, title: e.target.value })}
             placeholder={t('editor.abbr_title_placeholder')}
             required
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAbbrSubmit(e); } }}
           />
-        </Form.Group>
+        </div>
       </ForumModal>
 
+      {/* Image Modal */}
       <ForumModal
         show={showImageModal}
         onHide={() => closeModalWithFocus(setShowImageModal)}
         title={t('editor.image_modal_title')}
         footer={
           <>
-            <Button variant="outline-secondary" onClick={() => closeModalWithFocus(setShowImageModal)}>
+            <Button variant="secondary" onClick={() => closeModalWithFocus(setShowImageModal)}>
               {t('editor.link_cancel')}
             </Button>
             <Button variant="primary" onClick={handleImageSubmit}>
@@ -1180,44 +1159,51 @@ const handleUserSearch = async (queryText) => {
           </>
         }
       >
-        <Form.Group className="mb-3">
-          <Form.Label>{t('editor.image_alt_label')}</Form.Label>
-          <Form.Control
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="imageAlt">{t('editor.image_alt_label')}</label>
+          <input
+            id="imageAlt"
             type="text"
+            className="editor-modal-input"
             value={imageData.alt}
             onChange={e => setImageData({ ...imageData, alt: e.target.value })}
             placeholder={t('editor.image_alt_placeholder')}
           />
-        </Form.Group>
-        <Form.Group className="mb-3">
-          <Form.Label>{t('editor.image_width_label')}</Form.Label>
-          <Form.Control
+        </div>
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="imageWidth">{t('editor.image_width_label')}</label>
+          <input
+            id="imageWidth"
             type="text"
+            className="editor-modal-input"
             value={imageData.width || ''}
             onChange={e => setImageData({ ...imageData, width: e.target.value })}
             placeholder={t('editor.image_width_placeholder')}
           />
-        </Form.Group>
-        <Form.Group>
-          <Form.Label>{t('editor.image_url_label')}</Form.Label>
-          <Form.Control
+        </div>
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="imageUrl">{t('editor.image_url_label')}</label>
+          <input
+            id="imageUrl"
             type="url"
+            className="editor-modal-input"
             value={imageData.url}
             onChange={e => setImageData({ ...imageData, url: e.target.value })}
             required
             autoFocus
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleImageSubmit(e); } }}
           />
-        </Form.Group>
+        </div>
       </ForumModal>
 
+      {/* Dice Modal */}
       <ForumModal
         show={showDiceModal}
         onHide={() => closeModalWithFocus(setShowDiceModal)}
         title={t('editor.dice_modal_title')}
         footer={
           <>
-            <Button variant="outline-secondary" onClick={() => closeModalWithFocus(setShowDiceModal)}>
+            <Button variant="secondary" onClick={() => closeModalWithFocus(setShowDiceModal)}>
               {t('editor.link_cancel')}
             </Button>
             <Button variant="primary" onClick={handleDiceSubmit}>
@@ -1226,16 +1212,17 @@ const handleUserSearch = async (queryText) => {
           </>
         }
       >
-        <div className="alert alert-info py-2" style={{ fontSize: '0.875rem' }}>
+        <div className="editor-modal-notice">
           {t('editor.dice_immutable')}
         </div>
 
-        <Form.Group className="mb-3">
-          <Form.Label>{t('editor.dice_select_label')}</Form.Label>
-          <Form.Select
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="diceSides">{t('editor.dice_select_label')}</label>
+          <select
+            id="diceSides"
+            className="editor-modal-select"
             value={diceData.sides}
             onChange={e => setDiceData({ ...diceData, sides: parseInt(e.target.value) })}
-            className="form-select-themed"
           >
             <option value="4">d4</option>
             <option value="6">d6</option>
@@ -1244,34 +1231,34 @@ const handleUserSearch = async (queryText) => {
             <option value="12">d12</option>
             <option value="20">d20</option>
             <option value="100">d100</option>
-          </Form.Select>
-          <Form.Text className="text-muted small mt-1 d-block">
-            {t('editor.dice_type_hint')}
-          </Form.Text>
-        </Form.Group>
+          </select>
+          <small className="editor-modal-hint">{t('editor.dice_type_hint')}</small>
+        </div>
 
         {!hideDiceType && (
-          <Form.Group className="mb-3">
-            <Form.Label>{t('editor.dice_type_label')}</Form.Label>
-            <Form.Select
+          <div className="editor-modal-field">
+            <label className="editor-modal-label" htmlFor="diceType">{t('editor.dice_type_label')}</label>
+            <select
+              id="diceType"
+              className="editor-modal-select"
               value={diceData.type}
               onChange={e => setDiceData({ ...diceData, type: e.target.value })}
-              className="form-select-themed"
             >
               <option value="normal">{t('editor.dice_normal')}</option>
               <option value="master">{t('editor.dice_master')}</option>
-            </Form.Select>
-          </Form.Group>
+            </select>
+          </div>
         )}
       </ForumModal>
 
+      {/* Hide Modal */}
       <ForumModal
         show={showHideModal}
         onHide={() => closeModalWithFocus(setShowHideModal)}
         title={t('editor.hide_modal_title')}
         footer={
           <>
-            <Button variant="outline-secondary" onClick={() => closeModalWithFocus(setShowHideModal)}>
+            <Button variant="secondary" onClick={() => closeModalWithFocus(setShowHideModal)}>
               {t('editor.link_cancel')}
             </Button>
             <Button variant="primary" onClick={handleHideSubmit}>
@@ -1280,108 +1267,108 @@ const handleUserSearch = async (queryText) => {
           </>
         }
       >
-        <Form onSubmit={handleHideSubmit}>
-          <div className="mb-3 p-3 rounded" style={{ backgroundColor: 'rgba(var(--primary-rgb, 13, 110, 253), 0.05)', border: '1px solid var(--border-color)' }}>
-            {/* Threshold Mode */}
-            <Form.Check
+        <form onSubmit={handleHideSubmit} className="editor-modal-card">
+          {/* Threshold Mode */}
+          <label className="editor-modal-radio">
+            <input
               type="radio"
               id="hide-type-posts"
-              label={t('editor.hide_threshold')}
               name="hideType"
               checked={hideData.type === 'posts'}
               onChange={() => setHideData(prev => ({ ...prev, type: 'posts' }))}
-              className="fw-bold mb-2 cursor-pointer"
             />
-            {hideData.type === 'posts' && (
-              <div className="ms-4 mb-3">
-                <Form.Control
-                  type="number"
-                  value={hideData.threshold}
-                  onChange={(e) => setHideData(prev => ({ ...prev, threshold: e.target.value }))}
-                  min="1"
-                  placeholder="10"
-                  className="modal-section-themed"
-                  style={{ width: '120px' }}
-                  autoFocus
-                />
-              </div>
-            )}
+            <span>{t('editor.hide_threshold')}</span>
+          </label>
+          {hideData.type === 'posts' && (
+            <div className="editor-modal-field editor-modal-field--indented">
+              <input
+                type="number"
+                id="hideThreshold"
+                className="editor-modal-input editor-modal-input--small"
+                value={hideData.threshold}
+                onChange={(e) => setHideData(prev => ({ ...prev, threshold: e.target.value }))}
+                min="1"
+                placeholder="10"
+                autoFocus
+              />
+            </div>
+          )}
 
-            {/* Addressed Mode */}
-            <Form.Check
+          {/* Addressed Mode */}
+          <label className="editor-modal-radio">
+            <input
               type="radio"
               id="hide-type-user"
-              label={t('editor.hide_addressed_label')}
               name="hideType"
               checked={hideData.type === 'user'}
               onChange={() => setHideData(prev => ({ ...prev, type: 'user' }))}
-              className="fw-bold mb-2 cursor-pointer"
             />
-            {hideData.type === 'user' && (
-              <div className="ms-4 mb-3 position-relative">
-                <Form.Control
-                  type="text"
-                  placeholder={t('editor.hide_username_placeholder')}
-                  value={hideData.username}
-                  onChange={(e) => handleUserSearch(e.target.value)}
-                  className="modal-section-themed"
-                  autoComplete="off"
-                />
-                {isSearchingUsers && <div className="small text-muted mt-1">{t('editor.hide_searching')}</div>}
-                {!isSearchingUsers && userSearchResults.length > 0 && (
-                  <div className="position-absolute w-100 mt-1 shadow-sm rounded border bg-white" style={{ zIndex: 1000, maxHeight: '200px', overflowY: 'auto' }}>
-                    {userSearchResults.map(u => (
-                      <div 
-                        key={u.id} 
-                        className="p-2 cursor-pointer dropdown-item d-flex align-items-center gap-2"
-                        onClick={() => selectUser(u)}
-                      >
-                        <div style={{ width: 24, height: 24, borderRadius: '50%', backgroundColor: 'var(--bs-gray-300)', overflow: 'hidden' }}>
-                          {u.avatar_url ? (
-                            <img src={resolveAvatarUrl(u.avatar_url)} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                          ) : (
-                            <div className="d-flex align-items-center justify-content-center h-100 text-white small fw-bold">
-                              {u.nickname?.charAt(0).toUpperCase()}
-                            </div>
-                          )}
-                        </div>
-                        <span className="fw-semibold text-dark">{u.nickname}</span>
+            <span>{t('editor.hide_addressed_label')}</span>
+          </label>
+          {hideData.type === 'user' && (
+            <div className="editor-modal-field editor-modal-field--indented editor-modal-field--relative">
+              <input
+                type="text"
+                id="hideUsername"
+                className="editor-modal-input"
+                placeholder={t('editor.hide_username_placeholder')}
+                value={hideData.username}
+                onChange={(e) => handleUserSearch(e.target.value)}
+                autoComplete="off"
+              />
+              {isSearchingUsers && <small className="editor-modal-hint">{t('editor.hide_searching')}</small>}
+              {!isSearchingUsers && userSearchResults.length > 0 && (
+                <div className="editor-modal-dropdown">
+                  {userSearchResults.map(u => (
+                    <button
+                      key={u.id}
+                      type="button"
+                      className="editor-modal-dropdown-item"
+                      onClick={() => selectUser(u)}
+                    >
+                      <div className="editor-modal-avatar">
+                        {u.avatar_url ? (
+                          <img src={resolveAvatarUrl(u.avatar_url)} alt="avatar" />
+                        ) : (
+                          <span>{u.nickname?.charAt(0).toUpperCase()}</span>
+                        )}
                       </div>
-                    ))}
-                  </div>
-                )}
-                {hideData.uid && (
-                  <div className="small text-success mt-1">
-                    {t('editor.hide_user_selected')}
-                  </div>
-                )}
-              </div>
-            )}
+                      <span>{u.nickname}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {hideData.uid && (
+                <small className="editor-modal-hint editor-modal-hint--success">
+                  {t('editor.hide_user_selected')}
+                </small>
+              )}
+            </div>
+          )}
 
-            {/* Hidden Mode */}
-            <Form.Check
+          {/* Hidden Mode */}
+          <label className="editor-modal-radio">
+            <input
               type="radio"
               id="hide-type-hidden"
-              label={t('editor.hide_hidden')}
               name="hideType"
               checked={hideData.type === 'hidden'}
               onChange={() => setHideData(prev => ({ ...prev, type: 'hidden' }))}
-              className="fw-bold cursor-pointer"
             />
-          </div>
-          <p className="small text-muted mb-0">
-            {t('editor.hide_hidden_hint')}
-          </p>
-        </Form>
+            <span>{t('editor.hide_hidden')}</span>
+          </label>
+          <small className="editor-modal-hint">{t('editor.hide_hidden_hint')}</small>
+        </form>
       </ForumModal>
 
+      {/* Columns Modal */}
       <ForumModal
         show={showColumnsModal}
         onHide={() => closeModalWithFocus(setShowColumnsModal)}
         title={t('editor.columns_modal_title')}
         footer={
           <>
-            <Button variant="outline-secondary" onClick={() => closeModalWithFocus(setShowColumnsModal)}>
+            <Button variant="secondary" onClick={() => closeModalWithFocus(setShowColumnsModal)}>
               {t('editor.link_cancel')}
             </Button>
             <Button variant="primary" onClick={handleColumnsSubmit}>
@@ -1390,21 +1377,25 @@ const handleUserSearch = async (queryText) => {
           </>
         }
       >
-        <Form.Group className="mb-3">
-          <Form.Label>{t('editor.columns_count_label')}</Form.Label>
-          <Form.Select
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="columnsCount">{t('editor.columns_count_label')}</label>
+          <select
+            id="columnsCount"
+            className="editor-modal-select"
             value={columnsData.count}
             onChange={(e) => setColumnsData({ ...columnsData, count: parseInt(e.target.value) })}
           >
-            <option value={2}>2</option>
-            <option value={3}>3</option>
-            <option value={4}>4</option>
-          </Form.Select>
-        </Form.Group>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+          </select>
+        </div>
 
-        <Form.Group className="mb-3">
-          <Form.Label>{t('editor.columns_stack_label')}</Form.Label>
-          <Form.Select
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="columnsStack">{t('editor.columns_stack_label')}</label>
+          <select
+            id="columnsStack"
+            className="editor-modal-select"
             value={columnsData.stack}
             onChange={(e) => setColumnsData({ ...columnsData, stack: e.target.value })}
           >
@@ -1413,20 +1404,19 @@ const handleUserSearch = async (queryText) => {
             <option value="768">{t('editor.columns_tablet')}</option>
             <option value="992">{t('editor.columns_desktop')}</option>
             <option value="9999">{t('editor.columns_always')}</option>
-          </Form.Select>
-          <Form.Text className="text-muted small mt-1 d-block">
-            {t('editor.columns_hint')}
-          </Form.Text>
-        </Form.Group>
+          </select>
+          <small className="editor-modal-hint">{t('editor.columns_hint')}</small>
+        </div>
       </ForumModal>
 
+      {/* Table Modal */}
       <ForumModal
         show={showTableModal}
         onHide={() => closeModalWithFocus(setShowTableModal)}
         title={t('editor.table_modal_title')}
         footer={
           <>
-            <Button variant="outline-secondary" onClick={() => closeModalWithFocus(setShowTableModal)}>
+            <Button variant="secondary" onClick={() => closeModalWithFocus(setShowTableModal)}>
               {t('editor.link_cancel')}
             </Button>
             <Button variant="primary" onClick={handleTableSubmit}>
@@ -1435,97 +1425,101 @@ const handleUserSearch = async (queryText) => {
           </>
         }
       >
-        <Form.Group className="mb-3">
-          <Form.Label>{t('editor.table_rows_label')}</Form.Label>
-          <Form.Select
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="tableRows">{t('editor.table_rows_label')}</label>
+          <select
+            id="tableRows"
+            className="editor-modal-select"
             value={tableData.rows}
             onChange={(e) => setTableData({ ...tableData, rows: parseInt(e.target.value) })}
           >
-            <option value={1}>1</option>
-            <option value={2}>2</option>
-            <option value={3}>3</option>
-            <option value={4}>4</option>
-            <option value={5}>5</option>
-            <option value={6}>6</option>
-            <option value={7}>7</option>
-            <option value={8}>8</option>
-            <option value={9}>9</option>
-            <option value={10}>10</option>
-          </Form.Select>
-        </Form.Group>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+            <option value="8">8</option>
+            <option value="9">9</option>
+            <option value="10">10</option>
+          </select>
+        </div>
 
-        <Form.Group className="mb-3">
-          <Form.Label>{t('editor.table_cols_label')}</Form.Label>
-          <Form.Select
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="tableCols">{t('editor.table_cols_label')}</label>
+          <select
+            id="tableCols"
+            className="editor-modal-select"
             value={tableData.cols}
             onChange={(e) => setTableData({ ...tableData, cols: parseInt(e.target.value) })}
           >
-            <option value={1}>1</option>
-            <option value={2}>2</option>
-            <option value={3}>3</option>
-            <option value={4}>4</option>
-            <option value={5}>5</option>
-            <option value={6}>6</option>
-            <option value={7}>7</option>
-            <option value={8}>8</option>
-            <option value={9}>9</option>
-            <option value={10}>10</option>
-          </Form.Select>
-        </Form.Group>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+            <option value="8">8</option>
+            <option value="9">9</option>
+            <option value="10">10</option>
+          </select>
+        </div>
 
-        <Form.Group className="mb-3">
-          <Form.Label>{t('editor.table_layout_label')}</Form.Label>
-          <Form.Select
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="tableLayout">{t('editor.table_layout_label')}</label>
+          <select
+            id="tableLayout"
+            className="editor-modal-select"
             value={tableData.layout}
             onChange={(e) => setTableData({ ...tableData, layout: e.target.value })}
           >
             <option value="auto">{t('editor.table_layout_auto')}</option>
             <option value="fixed">{t('editor.table_layout_fixed')}</option>
-            <option value="revert">{t('editor.table_layout_revert')}</option>
-          </Form.Select>
-        </Form.Group>
+          </select>
+        </div>
 
-        <Form.Group className="mb-3">
-          <Form.Label>{t('editor.table_width_label')}</Form.Label>
-          <Form.Control
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="tableWidth">{t('editor.table_width_label')}</label>
+          <input
+            id="tableWidth"
             type="text"
+            className="editor-modal-input"
             value={tableData.width}
             onChange={(e) => setTableData({ ...tableData, width: e.target.value })}
             placeholder="100%"
           />
-          <Form.Text className="text-muted small mt-1 d-block">
-            {t('editor.table_width_hint')}
-          </Form.Text>
-        </Form.Group>
+          <small className="editor-modal-hint">{t('editor.table_width_hint')}</small>
+        </div>
 
-        <Form.Group className="mb-3">
-          <Form.Label>{t('editor.table_border_label')}</Form.Label>
-          <Form.Control
+        <div className="editor-modal-field">
+          <label className="editor-modal-label" htmlFor="tableBorder">{t('editor.table_border_label')}</label>
+          <input
+            id="tableBorder"
             type="text"
+            className="editor-modal-input"
             value={tableData.border}
             onChange={(e) => setTableData({ ...tableData, border: e.target.value })}
             placeholder="#cccccc"
           />
-          <Form.Text className="text-muted small mt-1 d-block">
-            {t('editor.table_border_hint')}
-          </Form.Text>
-        </Form.Group>
+          <small className="editor-modal-hint">{t('editor.table_border_hint')}</small>
+        </div>
 
-        <Form.Group className="mb-3">
-          <Form.Check
+        <div className="editor-modal-field editor-modal-field--checkbox">
+          <input
             type="checkbox"
-            id="table-no-borders"
-            label={t('editor.table_no_borders')}
+            id="tableNoBorders"
+            className="topic-select-input"
             checked={tableData.noBorders}
             onChange={(e) => setTableData({ ...tableData, noBorders: e.target.checked })}
           />
-          <Form.Text className="text-muted small mt-1 d-block">
-            {t('editor.table_no_borders_hint')}
-          </Form.Text>
-        </Form.Group>
+          <label htmlFor="tableNoBorders">{t('editor.table_no_borders')}</label>
+          <small className="editor-modal-hint">{t('editor.table_no_borders_hint')}</small>
+        </div>
       </ForumModal>
 
-      {/* Hotkeys Manual Modal */}
+      {/* Hotkeys Modal */}
       <ForumModal
         show={showHotkeysModal}
         onHide={() => closeModalWithFocus(setShowHotkeysModal)}
@@ -1536,25 +1530,21 @@ const handleUserSearch = async (queryText) => {
           </Button>
         }
       >
-        <p className="small text-muted mb-3">
+        <p className="editor-hotkeys-hint">
           {t('editor.hotkeys_hint')}
         </p>
 
         {hotkeyGroups.map((group) => (
-          <div key={group.title} className="mb-3">
-            <h6 className="fw-bold mb-2">{group.title}</h6>
-            <Table size="sm" borderless className="mb-0 hotkeys-table">
-              <tbody>
-                {group.items.map((item) => (
-                  <tr key={item.keys}>
-                    <td style={{ width: '45%', whiteSpace: 'nowrap' }}>
-                      <kbd className="px-2 py-1" style={{ fontSize: '0.8rem' }}>{item.keys}</kbd>
-                    </td>
-                    <td className="small align-middle">{item.desc}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
+          <div key={group.title} className="editor-hotkeys-group">
+            <h6 className="editor-hotkeys-group-title">{group.title}</h6>
+            <div className="editor-hotkeys-list">
+              {group.items.map((item) => (
+                <div key={item.keys} className="editor-hotkeys-row">
+                  <kbd className="editor-hotkeys-key">{item.keys}</kbd>
+                  <span className="editor-hotkeys-desc">{item.desc}</span>
+                </div>
+              ))}
+            </div>
           </div>
         ))}
       </ForumModal>
@@ -1566,7 +1556,7 @@ const handleUserSearch = async (queryText) => {
         title={t('editor.smiles_modal_title')}
         size="md"
       >
-        <div style={{ minHeight: '300px' }}>
+        <div className="editor-modal-body">
           <SmilesPicker onSelect={(code) => {
             insertText(code, '');
             setShowSmilesModal(false);
@@ -1581,14 +1571,14 @@ const handleUserSearch = async (queryText) => {
         title={t('editor.additional_formatting_title')}
         size="md"
       >
-        <div 
-          className="editor-overflow-modal-items py-1"
-          onClick={(e) => {
-            if (e.target.closest('.dropdown-item, button')) {
-              setShowMoreToolsModal(false);
-            }
-          }}
-        >
+        <div className="editor-more-tools-modal" onClick={(e) => {
+          // Close after choosing a formatting action or a picker value.
+          // Picker toggles are not matched, so opening a size/color picker
+          // does not close the modal.
+          if (e.target.closest('.editor-overflow-item, .editor-picker__item')) {
+            setShowMoreToolsModal(false);
+          }
+        }}>
           {overflowGroupIds.map(groupId => (
             <React.Fragment key={groupId}>
               {renderGroup(groupId, true)}
