@@ -1563,7 +1563,7 @@
 .editor-hotkeys-list {
   display: flex;
   flex-direction: column;
-  font-size: 0.8125rem;
+  font-size: 0.9rem;
 }
 
 .editor-hotkeys-row {
@@ -1571,7 +1571,7 @@
   grid-template-columns: max-content 1fr;
   gap: 0.75rem;
   align-items: center;
-  padding: 0.375rem 0;
+  padding: 0.8rem 0;
   border-bottom: 1px solid var(--topic-reply-card-border);
 }
 
@@ -1584,7 +1584,7 @@
   align-items: center;
   padding: 0.125rem 0.375rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.75rem;
+  font-size: 1rem;
   background-color: var(--topic-reply-card-bg);
   border: 1px solid var(--topic-reply-card-border);
   border-radius: 0.25rem;
@@ -1697,8 +1697,7 @@
   display: inline;
 }
 
-Semantic utility classes for modals (replacing Bootstrap utilities) */
-.topic-flex-between {
+Semantic utility classes for modals (replacing Bootstrap utilities) */ .topic-flex-between {
   display: flex;
   justify-content: space-between;
   align-items: center;
