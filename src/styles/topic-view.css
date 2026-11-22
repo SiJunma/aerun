@@ -1189,7 +1189,7 @@
   padding: 0;
   border: 1px solid transparent;
   border-radius: 0.375rem;
-  background: var(--editor-toolbar-btn-bg);
+  background: transparent;
   color: var(--text-color);
   cursor: pointer;
   transition: background-color 0.15s ease, border-color 0.15s ease;
@@ -1197,7 +1197,7 @@
 
 .editor-toolbar .editor-toolbar-btn:hover:not(:disabled),
 .editor-toolbar .editor-toolbar-btn:focus:not(:disabled) {
-  background-color: rgba(var(--primary-rgb), 0.2);
+  background-color: rgba(var(--primary-rgb), 0.1);
   border-color: transparent;
   color: var(--text-color);
 }
@@ -1240,7 +1240,7 @@
   padding: 0;
   border: 1px solid transparent;
   border-radius: 0.375rem;
-  background: var(--editor-toolbar-btn-bg);
+  background: transparent;
   color: var(--text-color);
   cursor: pointer;
   transition: background-color 0.15s ease, border-color 0.15s ease;
@@ -1248,7 +1248,7 @@
 
 .editor-toolbar .editor-more-tools-btn:hover:not(:disabled),
 .editor-toolbar .editor-more-tools-btn:focus:not(:disabled) {
-  background-color: rgba(var(--primary-rgb), 0.2);
+  background-color: rgba(var(--primary-rgb), 0.1);
   border-color: transparent;
   color: var(--text-color);
 }
@@ -1281,7 +1281,7 @@
   padding: 0;
   border: 1px solid transparent;
   border-radius: 0.375rem;
-  background: var(--editor-toolbar-btn-bg);
+  background: transparent;
   color: var(--text-color);
   cursor: pointer;
   transition: background-color 0.15s ease, border-color 0.15s ease;
@@ -1289,7 +1289,7 @@
 
 .editor-picker__toggle:hover:not(:disabled),
 .editor-picker__toggle:focus:not(:disabled) {
-  background-color: rgba(var(--primary-rgb), 0.2);
+  background-color: rgba(var(--primary-rgb), 0.1);
   border-color: transparent;
   color: var(--text-color);
 }
@@ -1382,7 +1382,7 @@
   padding: 0;
   border: 1px solid transparent;
   border-radius: 0.375rem;
-  background: var(--editor-toolbar-btn-bg);
+  background: transparent;
   color: var(--text-color);
   cursor: pointer;
   transition: background-color 0.15s ease, border-color 0.15s ease;
@@ -1390,7 +1390,7 @@
 
 .editor-overflow-toggle:hover:not(:disabled),
 .editor-overflow-toggle:focus:not(:disabled) {
-  background-color: rgba(var(--primary-rgb), 0.2);
+  background-color: rgba(var(--primary-rgb), 0.1);
   border-color: transparent;
   color: var(--text-color);
 }
