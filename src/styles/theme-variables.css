@@ -337,6 +337,10 @@ body {
    /* Editor dividers (toolbar dividers, overflow-menu group separators,
       hotkeys rows): paler than the card border in every theme. */
    --editor-divider-color: rgba(var(--primary-rgb), 0.12);
+   /* Toolbar control buttons (formatting buttons, picker toggles, "…"
+      toggle, mobile more-tools button): a visible gray chip on the panel,
+      instead of the old white. Hover is a stronger tint of the same. */
+   --editor-toolbar-btn-bg: rgba(var(--primary-rgb), 0.12);
    --topic-reply-card-radius: 0.375rem;
    --topic-reply-card-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
    --topic-reply-header-bg: var(--nav-bg);

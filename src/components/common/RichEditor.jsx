@@ -1015,10 +1015,12 @@ const RichEditor = forwardRef(({
                       }
                     }}
                   >
-                    {overflowGroupIds.map(groupId => (
+                    {overflowGroupIds.map((groupId, index) => (
                       <React.Fragment key={groupId}>
                         {renderGroup(groupId, true)}
-                        <div className="editor-overflow-group" />
+                        {index < overflowGroupIds.length - 1 && (
+                          <div className="editor-overflow-group" />
+                        )}
                       </React.Fragment>
                     ))}
                   </div>

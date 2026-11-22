@@ -724,12 +724,17 @@
   border: 1px solid var(--topic-reply-card-border);
   border-radius: var(--topic-reply-card-radius);
   box-shadow: var(--topic-reply-card-shadow);
-  overflow: hidden;
+  /* No overflow here: the "…" dropdown menu is absolutely positioned
+     inside this card and must drop down past the card's bottom edge.
+     overflow: hidden trapped it inside the card (same fix as .topic-post
+     in round 3). The header carries its own top radius below so its dark
+     background does not stick out of the card's rounded corners. */
 }
 
 .topic-reply__header {
   padding: var(--topic-reply-header-padding-y) var(--topic-reply-header-padding-x);
   background-color: var(--topic-reply-header-bg);
+  border-radius: var(--topic-reply-card-radius) var(--topic-reply-card-radius) 0 0;
   color: var(--topic-reply-header-text);
 }
 
@@ -1184,7 +1189,7 @@
   padding: 0;
   border: 1px solid transparent;
   border-radius: 0.375rem;
-  background: var(--topic-reply-card-bg);
+  background: var(--editor-toolbar-btn-bg);
   color: var(--text-color);
   cursor: pointer;
   transition: background-color 0.15s ease, border-color 0.15s ease;
@@ -1192,7 +1197,7 @@
 
 .editor-toolbar .editor-toolbar-btn:hover:not(:disabled),
 .editor-toolbar .editor-toolbar-btn:focus:not(:disabled) {
-  background-color: rgba(var(--primary-rgb), 0.1);
+  background-color: rgba(var(--primary-rgb), 0.2);
   border-color: transparent;
   color: var(--text-color);
 }
@@ -1235,7 +1240,7 @@
   padding: 0;
   border: 1px solid transparent;
   border-radius: 0.375rem;
-  background: var(--topic-reply-card-bg);
+  background: var(--editor-toolbar-btn-bg);
   color: var(--text-color);
   cursor: pointer;
   transition: background-color 0.15s ease, border-color 0.15s ease;
@@ -1243,7 +1248,7 @@
 
 .editor-toolbar .editor-more-tools-btn:hover:not(:disabled),
 .editor-toolbar .editor-more-tools-btn:focus:not(:disabled) {
-  background-color: rgba(var(--primary-rgb), 0.1);
+  background-color: rgba(var(--primary-rgb), 0.2);
   border-color: transparent;
   color: var(--text-color);
 }
@@ -1276,7 +1281,7 @@
   padding: 0;
   border: 1px solid transparent;
   border-radius: 0.375rem;
-  background: var(--topic-reply-card-bg);
+  background: var(--editor-toolbar-btn-bg);
   color: var(--text-color);
   cursor: pointer;
   transition: background-color 0.15s ease, border-color 0.15s ease;
@@ -1284,7 +1289,7 @@
 
 .editor-picker__toggle:hover:not(:disabled),
 .editor-picker__toggle:focus:not(:disabled) {
-  background-color: rgba(var(--primary-rgb), 0.1);
+  background-color: rgba(var(--primary-rgb), 0.2);
   border-color: transparent;
   color: var(--text-color);
 }
@@ -1377,7 +1382,7 @@
   padding: 0;
   border: 1px solid transparent;
   border-radius: 0.375rem;
-  background: var(--topic-reply-card-bg);
+  background: var(--editor-toolbar-btn-bg);
   color: var(--text-color);
   cursor: pointer;
   transition: background-color 0.15s ease, border-color 0.15s ease;
@@ -1385,7 +1390,7 @@
 
 .editor-overflow-toggle:hover:not(:disabled),
 .editor-overflow-toggle:focus:not(:disabled) {
-  background-color: rgba(var(--primary-rgb), 0.1);
+  background-color: rgba(var(--primary-rgb), 0.2);
   border-color: transparent;
   color: var(--text-color);
 }
