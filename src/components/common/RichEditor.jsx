@@ -232,6 +232,11 @@ const RichEditor = forwardRef(({
   const [historyIndex, setHistoryIndex] = useState(0);
   const lastHistoryPushTime = useRef(0);
 
+  // onChange contract (as on main): every parent passes an event-style
+  // handler ((e) => setX(e.target.value)), so value changes are delivered
+  // as a synthetic event { target: { value } }, never as a bare string.
+  // The Sprint G migration passed bare strings, and every editor action
+  // (typing, buttons, shortcuts, undo) threw in the parent instead.
   const addToHistory = useCallback((newValue, forceNewSnapshot = true) => {
     let newHistory = history.slice(0, historyIndex + 1);
     const now = Date.now();
@@ -255,7 +260,7 @@ const RichEditor = forwardRef(({
     if (historyIndex > 0) {
       const prevValue = history[historyIndex - 1];
       setHistoryIndex(historyIndex - 1);
-      onChange(prevValue);
+      onChange({ target: { value: prevValue } });
     }
   }, [history, historyIndex, onChange]);
 
@@ -263,7 +268,7 @@ const RichEditor = forwardRef(({
     if (historyIndex < history.length - 1) {
       const nextValue = history[historyIndex + 1];
       setHistoryIndex(historyIndex + 1);
-      onChange(nextValue);
+      onChange({ target: { value: nextValue } });
     }
   }, [history, historyIndex, onChange]);
 
@@ -281,7 +286,7 @@ const RichEditor = forwardRef(({
     }
     const newValue = value.substring(0, start) + newText + value.substring(end);
     addToHistory(newValue);
-    onChange(newValue);
+    onChange({ target: { value: newValue } });
     el.focus();
     if (cursorOffset !== null && !selectedText) {
       setTimeout(() => {
@@ -293,7 +298,7 @@ const RichEditor = forwardRef(({
   const handleTextChange = (e) => {
     const newValue = e.target.value;
     addToHistory(newValue, false);
-    onChange(newValue);
+    onChange({ target: { value: newValue } });
   };
 
   // Keyboard shortcuts (restored from main — the Sprint G migration dropped

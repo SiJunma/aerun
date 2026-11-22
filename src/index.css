@@ -1367,29 +1367,6 @@ strike:hover,
   display: none !important;
 }
 
-.editor-toolbar {
-  background-color: var(--input-bg) !important;
-  border-color: var(--input-border) !important;
-}
-
-.editor-toolbar .btn-light {
-  background-color: transparent !important;
-  border: 1px solid transparent !important;
-  color: var(--text-color) !important;
-  padding: 0.25rem 0.6rem !important;
-  font-size: 0.85rem !important;
-}
-
-.editor-toolbar .btn-light:hover {
-  background-color: rgba(var(--primary-color-rgb, 13, 110, 253), 0.1) !important;
-  border-color: var(--primary-color) !important;
-  color: var(--primary-color) !important;
-}
-
-.editor-dropdown-toggle.no-caret::after {
-  display: none !important;
-}
-
 .dropdown-item:hover,
 .dropdown-item:focus {
   background-color: var(--block-bg) !important;
@@ -3212,16 +3189,6 @@ a.rep-preview-name:hover {
   border: 1px solid rgba(67, 52, 34, 0.05) !important;
 }
 
-/* Editor Toolbar */
-.editor-toolbar-themed {
-  background-color: var(--block-bg) !important;
-  border: 1px solid var(--border-color) !important;
-}
-
-[data-theme='dark'] .editor-toolbar-themed {
-  background-color: rgba(255, 255, 255, 0.02) !important;
-}
-
 /* Dice Box */
 .bbcode-dice {
   background-color: var(--block-bg);
@@ -3691,81 +3658,6 @@ a.rep-preview-name:hover {
   background: var(--card-bg);
   border-left: 1px solid var(--border-color);
   overflow: visible !important;
-}
-
-.editor-overflow-smiles .smiles-picker-container {
-  max-height: 250px !important;
-  border: none !important;
-  background: transparent !important;
-  padding: 0 !important;
-}
-
-.editor-overflow-dropdown-menu {
-  max-height: 260px !important;
-  overflow-y: auto !important;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25) !important;
-}
-
-/* Overflow menu items are <a class="dropdown-item">. Bootstrap already
-   leaves them un-underlined; the guard below keeps it that way wherever
-   the editor is used (reply composer, edit form, create form, DMs). The
-   old `.post-content ...` variant is gone: since the edit form lives in
-   .post-editor instead of .post-content, no overflow menu can sit inside
-   .post-content any more, and the underline rule is scoped to
-   .bbcode-content anyway. */
-.editor-overflow-dropdown-menu .dropdown-item {
-  text-decoration: none;
-}
-
-.editor-overflow-modal-items {
-  display: grid !important;
-  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-  gap: 0.5rem !important;
-  max-height: calc(75dvh - 90px) !important;
-  overflow-y: auto !important;
-  padding: 0.25rem 0.25rem 0.5rem 0.25rem !important;
-}
-
-@media (max-width: 400px) {
-  .editor-overflow-modal-items {
-    grid-template-columns: 1fr !important;
-  }
-}
-
-.editor-overflow-modal-items .dropdown-item {
-  display: flex !important;
-  align-items: center !important;
-  gap: 0.5rem !important;
-  padding: 0.55rem 0.7rem !important;
-  border-radius: 8px !important;
-  background: var(--input-bg) !important;
-  border: 1px solid var(--border-color) !important;
-  color: var(--text-color) !important;
-  font-size: 0.85rem !important;
-  font-weight: 500 !important;
-  text-decoration: none !important;
-  white-space: nowrap !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease !important;
-}
-
-.editor-overflow-modal-items .dropdown-item svg {
-  flex-shrink: 0 !important;
-  color: var(--primary-color) !important;
-}
-
-.editor-overflow-modal-items .dropdown-item:hover,
-.editor-overflow-modal-items .dropdown-item:focus,
-.editor-overflow-modal-items .dropdown-item:active {
-  background: var(--block-bg) !important;
-  border-color: var(--primary-color) !important;
-  color: var(--primary-color) !important;
-  transform: translateY(-1px);
-}
-
-.editor-overflow-modal-items .dropdown-divider {
-  display: none !important;
 }
 
 .dm-fullscreen-card {
@@ -4482,18 +4374,9 @@ kbd {
   padding: 1rem 1.25rem;
 }
 
-.editor-toolbar .dropdown-toggle::after,
 .no-caret.dropdown-toggle::after,
 .no-caret .dropdown-toggle::after {
   display: none !important;
-}
-
-.editor-toolbar .vr {
-  height: 1.2rem;
-  align-self: center;
-  border-left: 1px solid var(--border-color);
-  opacity: 0.2;
-  background-color: var(--border-color);
 }
 
 /* DM unread badge on the navbar — Bootstrap hides .badge:empty, ours must stay visible */
