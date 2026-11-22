@@ -625,6 +625,12 @@
   display: none;
 }
 
+/* The Publish action keeps its icon on desktop too (everywhere else the
+   footer icons are mobile-only): the Send icon marks the action out. */
+.footer-link--publication .lucide {
+  display: inline-block;
+}
+
 .post-author__contact .footer-link {
   font-weight: 400;
 }
@@ -1003,12 +1009,12 @@
 .topic-btn--primary {
   background-color: var(--primary-color);
   border-color: var(--primary-color);
-  color: var(--topic-reply-header-text);
+  color: var(--topic-btn-primary-text);
 }
 
 .topic-btn--primary:hover:not(:disabled),
 .topic-btn--primary:focus {
-  color: var(--topic-reply-header-text);
+  color: var(--topic-btn-primary-text);
   opacity: 0.9;
 }
 
@@ -1164,7 +1170,7 @@
   gap: 0.25rem;
   padding: 0.5rem;
   border-radius: var(--topic-reply-card-radius);
-  background-color: var(--bg-color);
+  background-color: var(--editor-toolbar-bg);
   border: 1px solid var(--topic-reply-card-border);
   min-height: 46px;
   /* No overflow here: the "…" dropdown menu is absolutely positioned
@@ -2567,7 +2573,7 @@
 .topic-btn--primary {
   background-color: var(--primary-color);
   border-color: var(--primary-color);
-  color: var(--topic-reply-header-text);
+  color: var(--topic-btn-primary-text);
 }
 
 .topic-btn--primary:hover:not(:disabled) {
@@ -2677,7 +2683,10 @@
   animation: topic-btn-spin 0.6s linear infinite;
 }
 
-.topic-btn--primary .topic-btn__spinner,
+.topic-btn--primary .topic-btn__spinner {
+  color: var(--topic-btn-primary-text);
+}
+
 .topic-btn--filled .topic-btn__spinner,
 .topic-btn--danger .topic-btn__spinner {
   color: var(--topic-reply-header-text);

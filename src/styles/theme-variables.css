@@ -163,6 +163,11 @@ body {
    --forum-view-btn-primary-bg: var(--primary-color);
    --forum-view-btn-primary-border: var(--primary-color);
    --forum-view-btn-primary-text: var(--bg-color);
+   /* Text on a primary-color button (.topic-btn--primary): near-white on
+      the dark light-theme primary, dark on the light dark-theme primary.
+      --topic-reply-header-text is always white, so it goes invisible on
+      the dark theme's light primary. Mirrored per theme below. */
+   --topic-btn-primary-text: var(--bg-color);
    --forum-view-btn-primary-hover-opacity: 1;
    --forum-view-btn-ghost-bg: transparent;
    --forum-view-btn-ghost-border: var(--secondary-color);
@@ -337,6 +342,10 @@ body {
    /* Editor dividers (toolbar dividers, overflow-menu group separators,
       hotkeys rows): paler than the card border in every theme. */
    --editor-divider-color: rgba(var(--primary-rgb), 0.12);
+   /* Editor toolbar panel: light theme keeps the page background; the dark
+      theme needs a LIGHTER panel than the card (#1e293b), so it is
+      overridden to slate-700 in the dark block below. */
+   --editor-toolbar-bg: var(--bg-color);
    --topic-reply-card-radius: 0.375rem;
    --topic-reply-card-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
    --topic-reply-header-bg: var(--nav-bg);
@@ -466,6 +475,8 @@ body {
       which light/neutral keep). */
    --mini-pagination-hover-bg: #e2e8f0;
    --forum-view-btn-primary-text: #0f172a;
+   --topic-btn-primary-text: #0f172a;
+   --editor-toolbar-bg: #334155;
    --forum-view-btn-ghost-hover-text: #0f172a;
    --management-toolbar-bg: rgba(30, 41, 59, 0.9);
    --management-toolbar-text: #ffffff;
@@ -520,6 +531,7 @@ body {
    --forum-view-btn-primary-bg: #8c7a6b;
    --forum-view-btn-primary-border: #8c7a6b;
    --forum-view-btn-primary-text: #fdf6e3;
+   --topic-btn-primary-text: #fdf6e3;
    --forum-view-btn-ghost-border: #8c7a6b;
    --forum-view-btn-ghost-text: #8c7a6b;
    --forum-view-btn-ghost-hover-bg: #5c4b3a;

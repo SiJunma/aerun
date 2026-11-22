@@ -140,7 +140,7 @@ export const PostInlineEditor = ({
       <div className="topic-post-editor__actions">
         <Button
           type="button"
-          variant={isDraft ? 'secondary' : 'primary'}
+          variant="primary"
           onClick={onSave}
           disabled={isSaving}
         >
