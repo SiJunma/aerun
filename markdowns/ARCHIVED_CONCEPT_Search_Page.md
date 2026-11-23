@@ -1,3 +1,5 @@
+The plan is located in the *_SEARCH_PAGE_SPRINTS.md
+
 # Концепция: Страница расширенного поиска по форуму (Advanced Forum Search)
 
 **Статус:** Согласованный концепт с учётом фидбека (версия 2.0)  
