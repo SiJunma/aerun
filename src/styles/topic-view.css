@@ -663,7 +663,9 @@
   align-items: center;
   gap: var(--topic-meta-gap);
   padding: 0.5rem 1rem;
-  border-radius: .75rem !important;
+  /* Restored from Алина's 01eb36d "css fixes": 0.375rem, no !important.
+     My fabbb8a push had reverted this file to the 30bfd75 version. */
+  border-radius: 0.375rem;
   border: 1px solid var(--primary-color);
   background-color: transparent;
   color: var(--primary-color);
