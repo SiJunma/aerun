@@ -31,7 +31,7 @@
 1. **Компонент формы уже декомпозирован:** Форма ответа выделена в `src/components/topic/TopicReplyComposer.jsx`.
 2. **Очистка цитат и работа с выделением:** В `src/hooks/topic/useTopicPostAuth.jsx` уже есть функции `stripQuotes` и извлечение `window.getSelection()`.
 3. **Модальные окна проекта:** Все модалки обязаны наследоваться от `src/components/common/ForumModal.jsx`. Использование сырого `react-bootstrap/Modal` категорически запрещено (контролируется `scripts/check-no-raw-modal.mjs`).
-4. **Контракты навигации постов:** Скрипт `scripts/check-post-navigation.mjs` (подключён к `npm test` как `test:post-navigation`) проверяет метод `navigateToCreatedPost(tempId, newPostId)` и наличие двух литералов `state: { pendingPostId: tempId }` (для обычного ответа и публикации черновика). Эти паттерны нельзя ломать!
+4. **Контракты навигации постов:** Скрипт `scripts/check-post-navigation.mjs` (подключён к `npm test` как `test:post-navigation`) принимает два состояния кода: legacy (текущий `main`) — 2 вызова `navigateToCreatedPost(..., newPostId)` и 2 литерала `state: { pendingPostId: tempId }`; и новый контракт после рефактора — хелпер `navigateToCreatedPost` не вызывается (тест его поведения в скрипте условный: пропускается, если хелпер удалён), jump взводится явно в `jumpToCreatedPost` и `handleNavigateToTargetPage` (запись `pendingCreatedPostIdRef.current` + `setAlreadyJumped(false)`), а литерал `state: { pendingPostId: tempId }` ровно один — в общем хелпере `handleNavigateToTargetPage`. Смешанное состояние (например, 1 вызов при новом взведении) скрипт отклоняет. Приоритет created-post в эффекте (приоритет 0) сохраняется в обоих контрактах.
 5. **Тестирование:** Вся ветка `main` проходит строгий набор скриптов проверки (`npm test`). После каждого спринта `npm test` и `npm run build` обязаны быть зелёными.
 
 ### Ключевые архитектурные правила реализации:
@@ -270,6 +270,7 @@
 1. В `src/styles/theme-variables.css` добавить переменные композера для всех трёх тем (`:root`, `[data-theme='dark']`, `[data-theme='neutral']`):
    ```css
    /* В блоке :root (светлая тема) */
+   --topic-reply-header-text: #ffffff;
    --topic-reply-inline-bar-bg: var(--nav-bg);
    --topic-reply-inline-bar-text: var(--topic-reply-header-text);
    --topic-reply-inline-btn-border: rgba(255, 255, 255, 0.2);
@@ -280,8 +281,8 @@
    --topic-reply-toast-btn-bg: rgba(255, 255, 255, 0.2);
    --topic-reply-toast-btn-border: rgba(255, 255, 255, 0.4);
 
-       --topic-reply-header-text: #ffffff;
     /* В блоке [data-theme='dark'] */
+   --topic-reply-header-text: #ffffff;
    --topic-reply-inline-bar-bg: var(--nav-bg);
    --topic-reply-inline-bar-text: var(--topic-reply-header-text);
    --topic-reply-inline-btn-border: rgba(255, 255, 255, 0.2);
@@ -293,6 +294,7 @@
    --topic-reply-toast-btn-border: rgba(255, 255, 255, 0.4);
 
    /* В блоке [data-theme='neutral'] */
+   --topic-reply-header-text: #ffffff;
    --topic-reply-inline-bar-bg: var(--nav-bg);
    --topic-reply-inline-bar-text: var(--topic-reply-header-text);
    --topic-reply-inline-btn-border: rgba(255, 255, 255, 0.2);
@@ -771,8 +773,8 @@
    ```
 
 #### Задача 4.4. Сохранение контрактов тестов `scripts/check-post-navigation.mjs` и стили подсветки
-1. **Счётчик вызовов `navigateToCreatedPost`:**  
-   Скрипт `scripts/check-post-navigation.mjs` требует ровно 2 вхождения `navigateToCreatedPost(..., newPostId)` в исходнике `TopicPage.jsx` (одно для `submitReply`, одно для `handlePublishDraft`). Оба вызова сохраняются в файле, но переносятся в логику осознанного перехода пользователя (обработчик кнопки в Action Toast / модалке), а не выполняются автоматически в `onSuccess`.
+1. **Новый контракт `scripts/check-post-navigation.mjs`:**  
+   После рефактора `navigateToCreatedPost` нигде не вызывается: его guard требует `location.state.pendingPostId === tempId`, а это состояние после отказа от предмутационного `setSearchParams` не выставляется — вызывать хелпер из обработчиков тоста/модалки нельзя. Вместо этого скрипт проверяет: `jumpToCreatedPost` и `handleNavigateToTargetPage` ставят `pendingCreatedPostIdRef.current` и вызывают `setAlreadyJumped(false)`, а литерал `state: { pendingPostId: tempId }` ровно один — в общем хелпере `handleNavigateToTargetPage`. Если хелпер `navigateToCreatedPost` удалён из `useTopicJumpScroll.js`, тест его поведения в скрипте пропускается (условная проверка). Смешанное состояние (например, один вызов `navigateToCreatedPost` при новом взведении) скрипт отклоняет: либо legacy 2 вызова + 2 литерала, либо новый контракт целиком.
 2. **Файл `useTopicJumpScroll.js`:**  
    Остаётся в списке файлов спринта. Сам внутренний алгоритм эффекта и приоритет созданного поста не меняются — меняется только то, кто инициирует взведение `pendingCreatedPostIdRef.current`.
 3. **Поддержка класса `.highlight-target-post` в `src/index.css`:**  
@@ -965,7 +967,7 @@
 3. Клик «Остаться на текущей странице» закрывает окно и сохраняет текущее место чтения, выводя тоаст со ссылкой.
 4. Клик «Перейти на страницу N» переключает страницу, взводит `pendingCreatedPostIdRef.current = realPostId` и плавно центрирует созданный пост.
 5. Публикация черновика на стыке страниц (переполнение последней страницы) обрабатывается тем же общим хелпером.
-6. Правило `scripts/check-no-raw-modal.mjs` и оба литерала `state: { pendingPostId: tempId }` для `scripts/check-post-navigation.mjs` сохранены.
+6. Правило `scripts/check-no-raw-modal.mjs` соблюдено; `scripts/check-post-navigation.mjs` зелёный по новому контракту: ровно один литерал `state: { pendingPostId: tempId }` — в общем хелпере `handleNavigateToTargetPage`.
 
 ### Чеклист проверки после Спринта 5
 - [ ] Открыть страницу 1 многостраничной темы, отправить ответ: автоматического перехода на страницу 2/3 нет.
@@ -1124,6 +1126,7 @@
    - пиллу `ReplyScrollStatusPill` назначен `z-index: 1051` (выше кнопок скролла `1050`);
    - сброс размещения перенесён в `onSuccess`;
    - скрипт `check-post-navigation` подключён к `package.json` как `test:post-navigation`.
+8. **Контракт `check-post-navigation` переведён на двойной (коммит `0b3cf2b7d`):** скрипт принимает legacy (2 вызова `navigateToCreatedPost` + 2 литерала) или новый контракт (взведение в `jumpToCreatedPost`/`handleNavigateToTargetPage` + ровно 1 литерал); формулировки §0, задачи 4.4 и DoD спринта 5 приведены к новому контракту. Токен `--topic-reply-header-text` определён во всех трёх блоках тем (`#ffffff`; `--nav-bg` тёмный везде, поэтому белый текст подходит всем темам).
 
 ### 12.3. Журнал выполнения (заполняет исполнитель по спринтам)
 
