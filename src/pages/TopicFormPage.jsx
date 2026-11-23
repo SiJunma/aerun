@@ -126,7 +126,7 @@ const TopicFormPage = () => {
       mounted = false;
       characterUnsub();
     };
-  }, [categoryId, user, settings, hasPermission, PERMISSIONS, category]);
+  }, [categoryId, user, settings, hasPermission, PERMISSIONS, category, categories]);
 
   useEffect(() => {
     if (!draftLoaded) return;
@@ -209,7 +209,7 @@ const TopicFormPage = () => {
     } finally {
       setSubmitting(false);
     }
-  }, [title, description, content, selectedCharacterId, pinFirstPost, guestNickname, submitting, user, characters, categoryId, hasPermission, PERMISSIONS, settings, navigate, showToast, t]);
+  }, [title, description, content, selectedCharacterId, pinFirstPost, guestNickname, submitting, user, characters, categoryId, navigate, showToast, t, markTopicRead, scheduleForumStateRefresh]);
 
   if (!category) {
     return (
