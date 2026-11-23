@@ -1755,6 +1755,11 @@
   text-align: center;
 }
 
+.topic-text-pre-wrap {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
 .topic-gap-2 {
   gap: 0.5rem;
 }

@@ -1376,7 +1376,7 @@ const ProfilePage = () => {
                                     </div>
                                   ) : (
                                     <div className="d-flex justify-content-between align-items-center">
-                                      <div className="text-break">
+                                      <div className="text-break topic-text-pre-wrap">
                                         {commentsAdminBypass && log.comment && (
                                           <Lock size={10} className="text-warning opacity-50 me-1" />
                                         )}

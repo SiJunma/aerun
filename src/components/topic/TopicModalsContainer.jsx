@@ -263,7 +263,7 @@ export const TopicModalsContainer = ({
                   </div>
                 </div>
               ) : (
-                <div className="modal-inner-card min-h-60px">
+                <div className="modal-inner-card min-h-60px topic-text-pre-wrap">
                   {selectedVote.comment || <span className="topic-opacity-50 topic-italic">{t('forum.vote_no_comment')}</span>}
                 </div>
               )}
