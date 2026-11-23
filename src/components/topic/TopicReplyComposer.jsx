@@ -99,58 +99,60 @@ export const TopicReplyComposer = React.forwardRef(({
   const isInline = placement?.mode === 'inline';
   const isCollapsed = placement?.isCollapsed === true;
 
-  // Inline header bar (shown when in inline mode and not collapsed)
-  const inlineHeader = isInline && !isCollapsed ? (
-    <div className="topic-reply__inline-bar">
-      <div className="topic-reply__inline-bar-right">
-        <button
-          type="button"
-          className="topic-reply__inline-btn"
-          onClick={onToggleCollapse}
-          aria-label={t?.('forum.collapse') || 'Collapse'}
-          title={t?.('forum.collapse') || 'Collapse'}
-        >
-          <Minimize2 size={16} />
-          <span className="topic-reply__inline-btn-label">{t?.('forum.collapse') || 'Свернуть'}</span>
-        </button>
-        <button
-          type="button"
-          className="topic-reply__inline-btn"
-          onClick={onResetToBottom}
-          aria-label={t?.('forum.move_to_bottom') || 'Move to bottom'}
-          title={t?.('forum.to_bottom') || 'В конец'}
-        >
-          <ArrowDownToLine size={16} />
-          <span className="topic-reply__inline-btn-label">{t?.('forum.to_bottom') || 'В конец'}</span>
-        </button>
-      </div>
-    </div>
-  ) : null;
-
   // Collapsed pill (shown when collapsed) - either pill OR form, not both
   const collapsedPill = isCollapsed ? (
     <div className="topic-reply__collapsed-pill">
       <FilePen size={16} className="topic-reply__collapsed-pill-icon" />
       <span className="topic-reply__collapsed-pill-text">
         {t?.('forum.reply_collapsed_draft') || 'Reply minimized'}
-        {replyContent.trim() && ` (${replyContent.trim().length} ${t?.('forum.chars') || 'chars'})`}
+        {replyContent.trim() && ` (${replyContent.trim().length} ${t?.('forum.chars_short') || 'chars'})`}
       </span>
-      <button
+      <Button
         type="button"
-        className="topic-reply__collapsed-pill-btn"
+        variant="ghost"
+        size="sm"
         onClick={onToggleCollapse}
         aria-label={t?.('forum.expand') || 'Expand'}
       >
         {t?.('forum.expand') || 'Развернуть'}
-      </button>
-      <button
+      </Button>
+      <Button
         type="button"
-        className="topic-reply__collapsed-pill-btn topic-reply__collapsed-pill-btn--danger"
+        variant="secondary"
+        size="sm"
         onClick={onResetToBottom}
         aria-label={t?.('forum.move_to_bottom') || 'Move to bottom'}
       >
         {t?.('forum.to_bottom') || 'В конец'}
-      </button>
+      </Button>
+    </div>
+  ) : null;
+
+  // Inline header controls (shown when in inline mode and not collapsed)
+  const inlineHeaderControls = isInline && !isCollapsed ? (
+    <div className="topic-reply__header-controls">
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        onClick={onToggleCollapse}
+        aria-label={t?.('forum.collapse') || 'Collapse'}
+        title={t?.('forum.collapse') || 'Свернуть'}
+        leftIcon={<Minimize2 size={16} />}
+      >
+        {t?.('forum.collapse') || 'Свернуть'}
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        onClick={onResetToBottom}
+        aria-label={t?.('forum.move_to_bottom') || 'Move to bottom'}
+        title={t?.('forum.to_bottom') || 'В конец'}
+        leftIcon={<ArrowDownToLine size={16} />}
+      >
+        {t?.('forum.to_bottom') || 'В конец'}
+      </Button>
     </div>
   ) : null;
 
@@ -167,9 +169,9 @@ export const TopicReplyComposer = React.forwardRef(({
     <>
       <div className={`mt-5${isInline ? ' topic-reply--inline' : ''}`} ref={ref} id="reply-composer-form">
         <div className="topic-reply__card">
-          {inlineHeader}
           <div className="topic-reply__header">
             <h5 className="topic-reply__title">{t?.('forum.create_post') || 'Reply'}</h5>
+            {inlineHeaderControls}
           </div>
           <div className="topic-reply__body">
           <form onSubmit={handleReply}>

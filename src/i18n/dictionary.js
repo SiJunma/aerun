@@ -391,6 +391,7 @@ export const translations = {
       connecting_messages: "Connecting to messages...",
       bbcode_supported: "BBCode is supported",
       chars: "Chars:",
+      chars_short: "chars",
       post_as_character_label: "Character",
       post_as_user_label: "User",
     },
@@ -1893,6 +1894,7 @@ export const translations = {
       delete_post_confirm: "Вы уверены, что хотите удалить это сообщение?",
       bbcode_supported: "Поддерживается BBCode",
       chars: "Символов:",
+      chars_short: "символов",
     },
 
     topic_form: {
