@@ -56,6 +56,25 @@
   gap: 0.375rem;
 }
 
+/* Ghost buttons inside dark header — override colors for dark surface */
+/* Default ghost uses --link-color/--text-color (dark on light), 
+   but header is dark (--nav-bg). Use white text + border from inline tokens. */
+.topic-reply__header-controls .topic-btn--ghost {
+  color: var(--topic-reply-inline-bar-text);
+  border-color: var(--topic-reply-inline-btn-border);
+}
+
+.topic-reply__header-controls .topic-btn--ghost:hover:not(:disabled) {
+  color: var(--topic-reply-inline-bar-text);
+  background-color: var(--topic-reply-inline-btn-hover-bg);
+  text-decoration: none;
+}
+
+.topic-reply__header-controls .topic-btn--ghost:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
 /* Collapsed pill */
 .topic-reply__collapsed-pill {
   display: flex;
