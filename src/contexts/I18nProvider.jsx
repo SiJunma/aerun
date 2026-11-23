@@ -38,10 +38,15 @@ export const I18nProvider = ({ children }) => {
     }
   }, [profile]);
 
-  const setLang = async (newLang) => {
+  const setLang = async (newLang, { persist = true } = {}) => {
     setLangState(newLang);
     localStorage.setItem(makeStorageKey('language', profile?.uid || 'guest'), newLang);
-    if (profile) {
+    // `persist: false` is for callers that already saved the language in the
+    // same request (ProfilePage's settings save): a second updateSettings
+    // here would merge against the pre-save profile and overwrite the other
+    // settings the save just wrote — e.g. it reverted a theme changed in the
+    // same save back to the old value.
+    if (persist && profile) {
       await updateSettings({ language: newLang });
     }
   };

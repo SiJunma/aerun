@@ -663,6 +663,8 @@
   align-items: center;
   gap: var(--topic-meta-gap);
   padding: 0.5rem 1rem;
+  /* Restored from Алина's 01eb36d "css fixes": 0.375rem, no !important.
+     My fabbb8a push had reverted this file to the 30bfd75 version. */
   border-radius: 0.375rem;
   border: 1px solid var(--primary-color);
   background-color: transparent;
@@ -683,7 +685,6 @@
 .topic-actions-subscription:focus {
   background-color: var(--forum-view-btn-ghost-hover-bg);
   color: var(--forum-view-btn-ghost-hover-text);
-  border-color: var(--forum-view-btn-ghost-hover-bg);
 }
 
 #topic-actions-bottom .topic-actions-subscription.is-subscribed {
@@ -1132,6 +1133,52 @@
   background-color: var(--success-bg);
   color: var(--success-text);
   border: 1px solid var(--success-border);
+}
+
+/* Reputation vote direction toggle: one joined control, not two loose
+   buttons. The active half takes the badge's own colors (success for +,
+   danger for −), so the toggle and the value badge below it read as one. */
+.rep-vote-toggle {
+  display: inline-flex;
+  border: 1px solid var(--topic-reply-card-border);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.rep-vote-toggle__btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--text-color);
+  padding: 0.375rem 1rem;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.rep-vote-toggle__btn + .rep-vote-toggle__btn {
+  border-left: 1px solid var(--topic-reply-card-border);
+}
+
+.rep-vote-toggle__btn--plus.rep-vote-toggle__btn--active {
+  background-color: var(--success-bg);
+  color: var(--success-text);
+}
+
+.rep-vote-toggle__btn--minus.rep-vote-toggle__btn--active {
+  background-color: var(--danger-bg);
+  color: var(--danger-text);
+}
+
+.rep-vote-toggle__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.rep-vote-toggle__btn:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: -2px;
 }
 
 .topic-badge--danger {
@@ -1706,6 +1753,11 @@
 
 .topic-text-center {
   text-align: center;
+}
+
+.topic-text-pre-wrap {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
 }
 
 .topic-gap-2 {
@@ -2610,7 +2662,10 @@
 }
 
 .topic-btn--ghost:hover:not(:disabled) {
-  color: var(--link-hover-color);
+  /* --link-hover-color is a NAV variable (#ffffff): white text disappears
+     on every light surface a ghost button sits on (Vote Info modal Edit,
+     and any future ghost text button). --text-color reads in all themes. */
+  color: var(--text-color);
   text-decoration: underline;
 }
 

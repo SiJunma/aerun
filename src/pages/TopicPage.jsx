@@ -1968,8 +1968,10 @@ export default function TopicPage() {
         onCancelRepVote={() => setModalState((prev) => ({ ...prev, showRepModal: false, repTargetPost: null }))}
         onConfirmRepVote={handleConfirmRepVote}
         repValue={modalState.repValue}
+        setRepValue={(v) => setModalState((prev) => ({ ...prev, repValue: v }))}
         repComment={modalState.repComment}
         setRepComment={(v) => setModalState((prev) => ({ ...prev, repComment: v }))}
+        reputationStyle={settings?.reputationStyle}
         submittingRep={modalState.submittingRep}
         showVoteInfoModal={modalState.showVoteInfoModal}
         onCancelVoteInfo={() => setModalState((prev) => ({ ...prev, showVoteInfoModal: false }))}

@@ -143,7 +143,12 @@ export const getProfileVote = async (voterUid, targetUid) => {
  * @param {string} newComment
  */
 export const updateReputationComment = async (vote, newComment = '') => {
-  if (!vote || !vote.id) return null;
+  // The vote route re-casts by voter + post/target, so the record id is not
+  // needed — only a target is. (A just-cast vote stored locally has no id
+  // until reload; gating on id made the save silently no-op.)
+  if (!vote || (!vote.post_id && !vote.target_id)) {
+    throw new Error('updateReputationComment needs a post_id or target_id');
+  }
   const text = newComment || '';
 
   // A vote on a post: the route knows the post from the URL.

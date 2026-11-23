@@ -138,7 +138,7 @@ const PostVotersModal = ({
                   {voter.comment && voter.comment.trim() && (
                     <>
                       <div className="post-voter-divider" />
-                      <div className="post-voter-comment">
+                      <div className="post-voter-comment topic-text-pre-wrap">
                         {voter.comment}
                       </div>
                     </>

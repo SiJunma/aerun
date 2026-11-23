@@ -299,7 +299,10 @@ export const useTopicModalState = ({
     if (!repTargetPost || !currentUser?.uid || !repTargetPost.author?.user_id) return;
     setModalState((prev) => ({ ...prev, submittingRep: true }));
     try {
-      await voteOnPost(
+      // The cast returns the vote record ({ vote, ... }); keep it, so the
+      // vote-info modal can edit the comment right away. A hand-built entry
+      // without id/post_id made Save silently no-op (see handleUpdateRepComment).
+      const res = await voteOnPost(
         currentUser.uid,
         repTargetPost.author?.user_id,
         repTargetPost.id,
@@ -310,6 +313,7 @@ export const useTopicModalState = ({
         modalState.repTargetPostNumber,
         profile?.nickname || currentUser.displayName || 'User'
       );
+      const castVote = res?.vote;
 
       // Optimistic update for posts — the rep badge must re-render without a reload.
       setPosts((prev) => prev.map((p) => (
@@ -339,16 +343,21 @@ export const useTopicModalState = ({
 
       setModalState((prev) => ({ ...prev, showRepModal: false }));
 
-      // Record the own vote so the voted badge shows immediately.
+      // Record the own vote so the voted badge shows immediately. The real
+      // record travels (id/post_id/target_id), so the vote-info modal can
+      // save a comment edit without a reload; post_id is set explicitly as
+      // a fallback if the response ever lacks the vote.
       setMyVotes?.((prev) => ({
         ...prev,
         [repTargetPost.id]: {
+          ...(castVote || {}),
+          post_id: repTargetPost.id,
           value: repValue,
           comment: modalState.repComment,
           voter_nickname: profile?.nickname || currentUser.displayName || 'User',
           topic_title: topic?.title || '',
           post_number: modalState.repTargetPostNumber,
-          created_at: { toDate: () => new Date() },
+          created_at: castVote?.created || { toDate: () => new Date() },
         },
       }));
 
@@ -378,7 +387,10 @@ export const useTopicModalState = ({
   }, [setModalState]);
 
   const handleUpdateRepComment = useCallback(async () => {
-    if (!modalState.selectedVote?.id) return;
+    // The re-cast route identifies the vote by voter + post/target, not by
+    // the record id — a just-cast vote has no id in local state until the
+    // page reloads, and gating on it made Save silently do nothing.
+    if (!modalState.selectedVote?.post_id && !modalState.selectedVote?.target_id) return;
     setModalState((prev) => ({ ...prev, savingRepComment: true }));
     try {
       await updateReputationComment(modalState.selectedVote, modalState.editingRepComment);

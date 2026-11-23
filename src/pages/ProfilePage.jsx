@@ -621,7 +621,10 @@ const ProfilePage = () => {
     }
     scheduleForumStateRefresh();
     if (uid === profile?.uid && nextLang && nextLang !== lang) {
-      setLang(nextLang);
+      // The language was already saved by updateProfile in this same save —
+      // only switch it locally. Persisting again here would merge against
+      // the pre-save profile and overwrite the theme changed in the same save.
+      setLang(nextLang, { persist: false });
     }
     showToast(t('profile.profile_updated'));
   };
@@ -1376,7 +1379,7 @@ const ProfilePage = () => {
                                     </div>
                                   ) : (
                                     <div className="d-flex justify-content-between align-items-center">
-                                      <div className="text-break">
+                                      <div className="text-break topic-text-pre-wrap">
                                         {commentsAdminBypass && log.comment && (
                                           <Lock size={10} className="text-warning opacity-50 me-1" />
                                         )}
