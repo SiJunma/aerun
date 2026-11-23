@@ -12,8 +12,10 @@
 > - `src/components/modals/CrossPagePostModal.jsx` *(новый)*  
 > - `src/components/topic/QuoteSelectionTooltip.jsx` *(новый)*  
 > - `src/components/topic/FloatingReplyDrawer.jsx` *(новый)*  
+> - `src/components/topic/ReplyScrollStatusPill.jsx` *(новый)*  
 > - `src/styles/topic-reply-composer.css` *(новый)*  
 > - `src/styles/theme-variables.css`  
+> - `src/index.css`  
 > - `src/languages/dictionary.js`  
 > - `scripts/check-inline-reply-contracts.mjs` *(новый)*  
 > **Основа:** `markdowns/CONCEPT_Inline_Floating_Reply_Form.md`  
@@ -25,12 +27,12 @@
 
 Этот документ представляет собой пошаговую инженерную инструкцию для реализации функционала плавающей и инлайн-формы ответа в теме форума.
 
-### Что уже сделано в проекте (Ground Truth из `main`):
+### Что уже сделано в проекте (Ground Truth из `main` @ `58ae2738`):
 1. **Компонент формы уже декомпозирован:** Форма ответа выделена в `src/components/topic/TopicReplyComposer.jsx`.
 2. **Очистка цитат и работа с выделением:** В `src/hooks/topic/useTopicPostAuth.jsx` уже есть функции `stripQuotes` и извлечение `window.getSelection()`.
 3. **Модальные окна проекта:** Все модалки обязаны наследоваться от `src/components/common/ForumModal.jsx`. Использование сырого `react-bootstrap/Modal` категорически запрещено (контролируется `scripts/check-no-raw-modal.mjs`).
-4. **Контракты навигации постов:** Скрипт `scripts/check-post-navigation.mjs` проверяет метод `navigateToCreatedPost(tempId, newPostId)` и наличие `state: { pendingPostId: tempId }`. Эти паттерны нельзя ломать!
-5. **Тестирование:** Вся ветка `main` проходит строгий набор из 35+ скриптов проверки (`npm test`). После каждого спринта `npm test` и `npm run build` обязаны быть зелёными.
+4. **Контракты навигации постов:** Скрипт `scripts/check-post-navigation.mjs` (подключён к `npm test` как `test:post-navigation`) проверяет метод `navigateToCreatedPost(tempId, newPostId)` и наличие двух литералов `state: { pendingPostId: tempId }` (для обычного ответа и публикации черновика). Эти паттерны нельзя ломать!
+5. **Тестирование:** Вся ветка `main` проходит строгий набор скриптов проверки (`npm test`). После каждого спринта `npm test` и `npm run build` обязаны быть зелёными.
 
 ### Ключевые архитектурные правила реализации:
 1. **Синглтон формы через `ReactDOM.createPortal`:**  
@@ -38,14 +40,14 @@
 2. **Абсолютный запрет на принудительный скролл (Zero Forced Scroll):**  
    Ни при нажатии кнопки «Цитировать», ни при отправке ответа экран **не должен самовольно срываться вниз**! Пользователь остаётся у того поста, который он читал. При отправке ответа всплывает интерактивный тоаст с возможностью перейти к созданному сообщению по желанию.
 3. **Автоматический возврат формы в дефолтное положение (Auto-Reset on Submit):**  
-   При успешной отправке сообщения форма очищается, инлайн-слот под постом схлопывается (`height: 0`), а форма через портал возвращается на штатное место внизу страницы (подвал темы).
+   При успешной отправке сообщения (`onSuccess`) форма очищается, инлайн-слот под постом схлопывается (`height: 0`), а форма через портал возвращается на штатное место внизу страницы (подвал темы). При ошибке отправки форма остаётся на месте под постом.
 4. **Межстраничная публикация без резких скачков (Cross-Page Modal):**  
-   Если опубликованный пост оказывается на другой странице темы (`targetPage !== currentPage`), система не делает резкий `setSearchParams({ page: targetPage })`, а показывает диалоговое окно `CrossPagePostModal` с предложением перейти или остаться на текущей странице.
+   Если опубликованный пост оказывается на другой странице темы (`targetPage !== currentPage`), система не делает резкий переход `setSearchParams({ page: targetPage })`, а после подтверждения от сервера (`onSuccess`) показывает диалоговое окно `CrossPagePostModal` с предложением перейти или остаться на текущей странице.
 5. **Строгие правила вёрстки и темы форума:**
-   - **Никаких инлайн-стилей** (`style={{ ... }}`) в новых и модифицируемых компонентах.
+   - **Никаких инлайн-стилей** (`style={{ ... }}`) в новых и модифицируемых компонентах. **Единственное узкое исключение:** динамические координаты позиционирования (`top`/`left`) компонента `QuoteSelectionTooltip.jsx`, вычисляемые из `getBoundingClientRect()`; любые другие свойства (цвета, фоны, размеры) выносить в инлайн-стили категорически запрещено.
    - **Никаких Bootstrap-утилит** (`d-flex`, `mb-3`, `text-muted`, `border-0`, `p-2` и др.) в новой вёрстке — все стили определяются классами по BEM в `topic-reply-composer.css`.
    - **Никаких новых импортов из `react-bootstrap`**. Кнопки создаются через `<Button>` или семантические теги `<button type="button" className="...">`. Модальные окна — через `<ForumModal>`.
-   - **Цвета — строго через токены** из `src/styles/theme-variables.css`. Любой прямой HEX/RGB в CSS запрещён. Стили должны гармонично работать во всех трёх темах: `light`, `dark`, `neutral`.
+   - **Цвета — строго через токены** из `src/styles/theme-variables.css`. Прямой HEX/RGB в CSS компонентов запрещён. Стили должны гармонично работать во всех трёх темах: `light`, `dark`, `neutral`.
 
 ---
 
@@ -64,17 +66,17 @@
                                     │
 ┌───────────────────────────────────▼────────────────────────────────────┐
 │ Спринт 3: Плавающий режим и статус-виджет при скролле (Sticky Dock)    │
-│ (Кнопка «В плавающее окно», FloatingDrawer, Pill-бейдж при скролле)    │
+│ (Кнопка «В плавающее окно», FloatingDrawer, Pill-бейдж z-index 1051)   │
 └───────────────────────────────────┬────────────────────────────────────┘
                                     │
 ┌───────────────────────────────────▼────────────────────────────────────┐
 │ Спринт 4: Отмена принудительного скролла и интерактивный тоаст         │
-│ (Авто-возврат в подвал, Action Toast со ссылкой [↗ Перейти к посту])   │
+│ (Отмена jump в submitReply и handlePublishDraft, Action Toast, стили)  │
 └───────────────────────────────────┬────────────────────────────────────┘
                                     │
 ┌───────────────────────────────────▼────────────────────────────────────┐
 │ Спринт 5: Межстраничный диалог публикации (CrossPagePostModal)         │
-│ (Диалог выбора перехода/продолжения чтения, сохранение скролла)        │
+│ (Диалог выбора после подтверждения сервера, общий хелпер публикации)   │
 └───────────────────────────────────┬────────────────────────────────────┘
                                     │
 ┌───────────────────────────────────▼────────────────────────────────────┐
@@ -96,7 +98,7 @@
 - **Изменить:**
   - `src/pages/TopicPage.jsx`
   - `src/components/topic/TopicPostCard.jsx`
-  - `src/App.jsx` (или `index.html` / `main.jsx` для импорта `topic-reply-composer.css`)
+  - `src/styles/topic-view.css`
 
 ---
 
@@ -140,10 +142,10 @@
      pointer-events: auto;
    }
    ```
-3. Подключить `topic-reply-composer.css` в `src/styles/topic-view.css` или `src/pages/TopicPage.jsx`.
+3. Подключить `topic-reply-composer.css` в `src/styles/topic-view.css` (`@import './topic-reply-composer.css';`).
 
 #### Задача 1.2. Добавление слота в карточку поста (`TopicPostCard.jsx`)
-1. В `src/components/topic/TopicPostCard.jsx` в конец разметки поста (сразу после закрывающего тега карточки `article`/`div`) добавить DOM-контейнер для портала:
+1. В `src/components/topic/TopicPostCard.jsx` в конец разметки поста (сразу после закрывающего тега карточки `article`) добавить DOM-контейнер для портала:
    ```jsx
    <div 
      id={`inline-reply-slot-${post.id}`} 
@@ -192,20 +194,20 @@
      ```jsx
      <div id="floating-reply-drawer-slot" className="floating-reply-drawer-slot" />
      ```
-   - Заменить прямое монтирование `<TopicReplyComposer>` на `ReactDOM.createPortal`:
+   - Заменить прямое монтирование `<TopicReplyComposer>` на `ReactDOM.createPortal`. Список пропсов берется дословно из текущего `TopicPage.jsx:1905–1929` с добавлением новых обработчиков размещения:
      ```jsx
      {portalTargetNode && ReactDOM.createPortal(
        <TopicReplyComposer
          ref={replyRef}
          topic={topic}
-         category={category}
+         category={topic.category || categories.find((c) => c.id === topic.category_id)}
          user={user}
          profile={profile}
          settings={settings}
          characters={characters}
          selectedCharacterId={selectedCharacterId}
          setSelectedCharacterId={setSelectedCharacterId}
-         setLastSelectedMask={setLastSelectedMask}
+         setLastSelectedMask={handleSelectCharacter}
          replyContent={replyContent}
          setReplyContent={setReplyContent}
          guestNickname={guestNickname}
@@ -218,6 +220,7 @@
          hasPermission={hasPermission}
          PERMISSIONS={PERMISSIONS}
          computedMaxChars={computedMaxChars}
+         lang={lang}
          t={t}
          placement={replyPlacement}
          onResetToBottom={() => setReplyPlacement({ mode: 'bottom', targetPostId: null, targetAuthor: null, targetPostNumber: null, isCollapsed: false })}
@@ -227,6 +230,7 @@
        portalTargetNode
      )}
      ```
+   *(Примечание: передача `setLastSelectedMask={handleSelectCharacter}` обязательна, так как `handleSelectCharacter` в `TopicPage.jsx:420–430` обновляет состояние маски и персонажа).*
 
 ---
 
@@ -240,17 +244,18 @@
 ### Чеклист проверки после Спринта 1
 - [ ] `npm run build` — сборка проходит без предупреждений.
 - [ ] `npm test` — все существующие тесты проекта зелёные.
-- [ ] В браузере открыть тему: форма ответа отображается внизу страницы ровно так же, как и раньше, весь функционал отправки работает штатно.
+- [ ] В браузере открыть тему: форма ответа отображается внизу страницы ровно так же, как и раньше, выбор маски через `handleSelectCharacter` и весь функционал отправки работают штатно.
 
 ---
 
 ## Спринт 2: Инлайн-перемещение по клику «Цитировать» и шапка формы (Inline Relocation & Header)
 
 ### Цель спринта
-Исключить принудительный скролл вниз при нажатии кнопок «Цитировать» (`Quote`) и цитировании автора. Перемещать форму ответа непосредственно под целевой пост в режиме `inline`. Оснастить форму компактной информативной шапкой с кнопками возврата в подвал («⬇ В конец темы»), сворачивания («✕ Свернуть») и перевода в плавающее состояние.
+Исключить принудительный скролл вниз при нажатии кнопок «Цитировать» (`Quote`) и цитировании автора. Перемещать форму ответа непосредственно под целевой пост в режиме `inline`. Оснастить форму компактной информативной шапкой с кнопками возврата в подвал («⬇ В конец темы»), сворачивания («✕ Свернуть») и перевода в плавающее состояние. Оформить стили через токены темы без хардкода цветов.
 
 ### Файлы спринта
 - **Изменить:**
+  - `src/styles/theme-variables.css`
   - `src/hooks/topic/useTopicPostAuth.jsx`
   - `src/pages/TopicPage.jsx`
   - `src/components/topic/TopicReplyComposer.jsx`
@@ -261,7 +266,44 @@
 
 ### Пошаговые задачи исполнителя
 
-#### Задача 2.1. Модификация хука `useTopicPostAuth.jsx`
+#### Задача 2.1. Добавление токенов темы композера (`theme-variables.css`)
+1. В `src/styles/theme-variables.css` добавить переменные композера для всех трёх тем (`:root`, `[data-theme='dark']`, `[data-theme='neutral']`):
+   ```css
+   /* В блоке :root (светлая тема) */
+   --topic-reply-inline-bar-bg: var(--nav-bg);
+   --topic-reply-inline-bar-text: var(--topic-reply-header-text);
+   --topic-reply-inline-btn-border: rgba(255, 255, 255, 0.2);
+   --topic-reply-inline-btn-hover-bg: rgba(255, 255, 255, 0.15);
+   --topic-reply-shadow-inline: 0 4px 16px rgba(0, 0, 0, 0.12);
+   --topic-reply-shadow-floating: 0 -4px 24px rgba(0, 0, 0, 0.25);
+   --topic-reply-shadow-pill: 0 4px 18px rgba(0, 0, 0, 0.2);
+   --topic-reply-toast-btn-bg: rgba(255, 255, 255, 0.2);
+   --topic-reply-toast-btn-border: rgba(255, 255, 255, 0.4);
+
+   /* В блоке [data-theme='dark'] */
+   --topic-reply-inline-bar-bg: var(--nav-bg);
+   --topic-reply-inline-bar-text: var(--topic-reply-header-text);
+   --topic-reply-inline-btn-border: rgba(255, 255, 255, 0.2);
+   --topic-reply-inline-btn-hover-bg: rgba(255, 255, 255, 0.15);
+   --topic-reply-shadow-inline: 0 4px 16px rgba(0, 0, 0, 0.4);
+   --topic-reply-shadow-floating: 0 -4px 24px rgba(0, 0, 0, 0.5);
+   --topic-reply-shadow-pill: 0 4px 18px rgba(0, 0, 0, 0.4);
+   --topic-reply-toast-btn-bg: rgba(255, 255, 255, 0.2);
+   --topic-reply-toast-btn-border: rgba(255, 255, 255, 0.4);
+
+   /* В блоке [data-theme='neutral'] */
+   --topic-reply-inline-bar-bg: var(--nav-bg);
+   --topic-reply-inline-bar-text: var(--topic-reply-header-text);
+   --topic-reply-inline-btn-border: rgba(255, 255, 255, 0.2);
+   --topic-reply-inline-btn-hover-bg: rgba(255, 255, 255, 0.15);
+   --topic-reply-shadow-inline: 0 4px 16px rgba(0, 0, 0, 0.2);
+   --topic-reply-shadow-floating: 0 -4px 24px rgba(0, 0, 0, 0.35);
+   --topic-reply-shadow-pill: 0 4px 18px rgba(0, 0, 0, 0.25);
+   --topic-reply-toast-btn-bg: rgba(255, 255, 255, 0.2);
+   --topic-reply-toast-btn-border: rgba(255, 255, 255, 0.4);
+   ```
+
+#### Задача 2.2. Модификация хука `useTopicPostAuth.jsx`
 1. В аргументы хука `useTopicPostAuth` добавить параметр `setReplyPlacement`:
    ```javascript
    export const useTopicPostAuth = ({
@@ -282,10 +324,10 @@
      });
      ```
 3. В `handleQuoteAuthor`:
-   - Если пост передан или известен контекст — также переводить форму в инлайн под пост, либо если пост не передан — оставлять форму на текущем месте без принудительного резкого скролла страницы вниз.
+   - Переводить форму в инлайн под пост автора без принудительного скролла страницы вниз.
 4. В `TopicPage.jsx` передать `setReplyPlacement` в вызов `useTopicPostAuth(...)`.
 
-#### Задача 2.2. Шапка инлайн-режима в `TopicReplyComposer.jsx`
+#### Задача 2.3. Шапка инлайн-режима в `TopicReplyComposer.jsx`
 1. Принять пропсы `placement`, `onResetToBottom`, `onSwitchToFloating`, `onToggleCollapse` в `TopicReplyComposer.jsx`.
 2. Если `placement.mode === 'inline'`, над формой рендерится специальная навигационная шапка:
    ```jsx
@@ -336,46 +378,45 @@
    )}
    ```
 3. **Режим свернутого состояния (`placement.isCollapsed === true`):**
-   - Если форма свернута под постом, всё тело редактора скрывается, а на его месте отображается компактный Pill-бар:
-     ```jsx
-     {placement.isCollapsed ? (
-       <div className="topic-reply__collapsed-pill">
-         <span className="topic-reply__collapsed-text">
-           <FilePen size={14} />
-           {t('forum.reply_collapsed_draft', 'Ответ сохранен в черновик')}
-           {replyContent.trim() && ` (${replyContent.trim().length} ${t('forum.chars', 'знаков')})`}
-         </span>
-         <div className="topic-reply__collapsed-actions">
-           <button
-             type="button"
-             className="topic-reply__pill-btn"
-             onClick={onToggleCollapse}
-           >
-             {t('forum.expand', 'Развернуть')}
-           </button>
-           <button
-             type="button"
-             className="topic-reply__pill-btn topic-reply__pill-btn--danger"
-             onClick={onResetToBottom}
-           >
-             ✕
-           </button>
-         </div>
+   ```jsx
+   {placement.isCollapsed ? (
+     <div className="topic-reply__collapsed-pill">
+       <span className="topic-reply__collapsed-text">
+         <FilePen size={14} />
+         {t('forum.reply_collapsed_draft', 'Ответ сохранен в черновик')}
+         {replyContent.trim() && ` (${replyContent.trim().length} ${t('forum.chars', 'знаков')})`}
+       </span>
+       <div className="topic-reply__collapsed-actions">
+         <button
+           type="button"
+           className="topic-reply__pill-btn"
+           onClick={onToggleCollapse}
+         >
+           {t('forum.expand', 'Развернуть')}
+         </button>
+         <button
+           type="button"
+           className="topic-reply__pill-btn topic-reply__pill-btn--danger"
+           onClick={onResetToBottom}
+         >
+           ✕
+         </button>
        </div>
-     ) : (
-       /* Стандартный рендер карточки редактора */
-     )}
-     ```
+     </div>
+   ) : (
+     /* Стандартный рендер карточки редактора */
+   )}
+   ```
 
-#### Задача 2.3. Стили инлайн-формы (`topic-reply-composer.css`)
-1. Оформить инлайн-шапку с использованием токенов темы:
+#### Задача 2.4. Стили инлайн-формы без хардкода цветов (`topic-reply-composer.css`)
+1. Оформить инлайн-шапку строго через CSS-токены (без `#ffffff` и `rgba`):
    ```css
    .topic-reply--inline {
      margin-top: 1rem;
      margin-bottom: 1.5rem;
      border-left: 3px solid var(--primary-color);
-     border-radius: var(--topic-reply-card-radius, 6px);
-     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+     border-radius: var(--topic-reply-card-radius);
+     box-shadow: var(--topic-reply-shadow-inline);
      animation: inlineReplySlideDown 0.25s ease-out;
    }
 
@@ -395,10 +436,10 @@
      align-items: center;
      justify-content: space-between;
      padding: 0.5rem 1rem;
-     background-color: var(--nav-bg);
-     color: var(--topic-reply-header-text, #ffffff);
-     border-top-left-radius: var(--topic-reply-card-radius, 6px);
-     border-top-right-radius: var(--topic-reply-card-radius, 6px);
+     background-color: var(--topic-reply-inline-bar-bg);
+     color: var(--topic-reply-inline-bar-text);
+     border-top-left-radius: var(--topic-reply-card-radius);
+     border-top-right-radius: var(--topic-reply-card-radius);
      font-size: 0.875rem;
    }
 
@@ -413,8 +454,8 @@
      align-items: center;
      gap: 0.35rem;
      background: transparent;
-     border: 1px solid rgba(255, 255, 255, 0.2);
-     color: #ffffff;
+     border: 1px solid var(--topic-reply-inline-btn-border);
+     color: var(--topic-reply-inline-bar-text);
      border-radius: 4px;
      padding: 0.25rem 0.5rem;
      font-size: 0.75rem;
@@ -423,8 +464,8 @@
    }
 
    .topic-reply__inline-btn:hover {
-     background-color: rgba(255, 255, 255, 0.15);
-     border-color: rgba(255, 255, 255, 0.4);
+     background-color: var(--topic-reply-inline-btn-hover-bg);
+     border-color: var(--topic-reply-inline-btn-border);
    }
 
    .topic-reply__collapsed-pill {
@@ -442,7 +483,7 @@
    }
    ```
 
-#### Задача 2.4. Локализация (`dictionary.js`)
+#### Задача 2.5. Локализация (`dictionary.js`)
 1. Добавить фразы в `src/languages/dictionary.js`:
    - `forum.reply_to_post`: "Ответ на сообщение #{number}" / "Replying to post #{number}"
    - `forum.dock_to_bottom`: "Закрепить внизу экрана" / "Dock to bottom"
@@ -463,6 +504,7 @@
 4. Кнопка «В конец темы» мгновенно возвращает форму в штатный подвал страницы с сохранением введённого текста.
 5. Кнопка «Свернуть» сворачивает форму в аккуратный чип под постом.
 6. При повторном клике «Цитировать» на другом посте текст цитаты дописывается в существующий драфт, а форма перемещается под новый пост.
+7. Все цвета шапки и кнопок инлайна читаются во всех трёх темах (`light`, `dark`, `neutral`), прямой HEX/RGB в `topic-reply-composer.css` отсутствует.
 
 ### Чеклист проверки после Спринта 2
 - [ ] Кликнуть «Цитировать» на посте #2: форма открылась под постом #2, страница не улетела вниз.
@@ -477,7 +519,7 @@
 ## Спринт 3: Плавающий режим и статус-виджет при скролле (Sticky Dock & Hybrid Pill)
 
 ### Цель спринта
-Реализовать режим плавающей шторки (`placement.mode === 'floating'`) в стиле лучших современных платформ (Discourse / Linear) и гибридный мини-виджет, всплывающий внизу экрана, когда форма инлайн уходит из зоны видимости при скролле.
+Реализовать режим плавающей шторки (`placement.mode === 'floating'`) и гибридный мини-виджет `ReplyScrollStatusPill`, всплывающий внизу экрана, когда форма инлайн уходит из зоны видимости при скролле. Отрегулировать z-index (`1051` для пилла, выше кнопок скролла темы), оформить стили через токены теней.
 
 ### Файлы спринта
 - **Создать:**
@@ -497,11 +539,10 @@
 1. Когда `placement.mode === 'floating'`:
    - Форма через портал проецируется в `#floating-reply-drawer-slot`.
    - Карточке формы присваивается класс `.topic-reply--floating`.
-   - В шапке формы отображается заголовок темы, кнопки свернуть в нижний бар (`— Свернуть`) и вернуть в подвал (`⬇ В подвал`).
-   - Добавляется возможность изменения высоты (drag-handle) или переключения режима развернутости.
+   - В шапке формы отображаются заголовок темы, кнопки свернуть в нижний бар (`— Свернуть`) и вернуть в подвал (`⬇ В подвал`).
 
-#### Задача 3.2. Стили плавающего режима (`topic-reply-composer.css`)
-1. Добавить стилизацию плавающей шторки:
+#### Задача 3.2. Стили плавающего режима через токены (`topic-reply-composer.css`)
+1. Добавить стилизацию плавающей шторки через токены теней:
    ```css
    .topic-reply--floating {
      width: 100%;
@@ -512,7 +553,7 @@
      border-bottom: none;
      border-top-left-radius: 8px;
      border-top-right-radius: 8px;
-     box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.25);
+     box-shadow: var(--topic-reply-shadow-floating);
      animation: floatingDrawerSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
    }
 
@@ -559,13 +600,13 @@
        </div>
      </div>
      ```
-3. Стилизация виджета в `topic-reply-composer.css`:
+3. Стилизация виджета в `topic-reply-composer.css` с z-index 1051 (выше плавающих кнопок скролла `ScrollButtons.css:8`, где `z-index: 1050`, и выше бэкдропа модалки `1050`, но ниже тела модалки `1055`):
    ```css
    .reply-scroll-pill {
      position: fixed;
      bottom: 1.5rem;
      right: 1.5rem;
-     z-index: 1030;
+     z-index: 1051;
      display: flex;
      align-items: center;
      gap: 0.75rem;
@@ -573,7 +614,7 @@
      background-color: var(--card-bg);
      border: 1px solid var(--border-color);
      border-radius: 30px;
-     box-shadow: 0 4px 18px rgba(0, 0, 0, 0.2);
+     box-shadow: var(--topic-reply-shadow-pill);
      animation: pillFadeIn 0.2s ease-out;
    }
 
@@ -595,7 +636,7 @@
 
    .reply-scroll-pill__btn:hover {
      background-color: var(--primary-color);
-     color: #ffffff;
+     color: var(--topic-reply-inline-bar-text);
    }
    ```
 
@@ -605,11 +646,13 @@
 1. Форма умеет переключаться в режим `floating` (шторка внизу окна).
 2. Пользователь может свободно скроллить всю страницу вверх и вниз, редактор всегда зафиксирован перед глазами.
 3. В инлайн-режиме при уходе формы из зоны видимости экрана появляется статус-виджет с возможностью мгновенного скролла к форме или открепления в шторку.
-4. Отсутствуют любые сбросы состояния редактора (текст не теряется).
+4. Пилл корректно перекрывает кнопки скролла страницы (не прячется под ними) на ширине от 360px.
+5. Отсутствуют любые сбросы состояния редактора (текст не теряется).
 
 ### Чеклист проверки после Спринта 3
 - [ ] Открыть форму под постом #3, проскроллить вниз до поста #15.
 - [ ] Проверить появление мини-виджета внизу экрана.
+- [ ] Проверить визуальное взаимодействие пилла и кнопок скролла на ширине 360px: пилл отображается поверх кнопок скролла (`z-index: 1051`), не перекрываясь ими.
 - [ ] Нажать «К форме» — экран плавно скроллится обратно к посту #3.
 - [ ] Нажать «Открепить» — форма переходит в шторку внизу экрана.
 - [ ] Проверить сборку `npm run build` и тесты `npm test`.
@@ -619,24 +662,24 @@
 ## Спринт 4: Отмена принудительного скролла и интерактивный тоаст публикации (Zero Forced Scroll & Action Toast)
 
 ### Цель спринта
-Исключить принудительный скролл вниз экрана при отправке ответа на текущей странице (`TopicPage.jsx:submitReply`). Автоматически сбрасывать инлайн-форму в дефолтный подвал, схлопывать слот и выводить интерактивный тоаст с предложением перейти к созданному сообщению по желанию пользователя (с эффектом подсветки `.highlight-new-post` как в ссылках цитат `BBCode.jsx`).
+Исключить принудительный скролл вниз экрана при отправке ответа на текущей странице (`submitReply`) и при публикации черновика (`handlePublishDraft`). Заменить безусловное взведение jump-контроллера на интерактивный тоаст с кликабельным переходом `[↗ Перейти к сообщению]`. Обеспечить подсветку целевого поста (включая регистрацию `.highlight-target-post` в `src/index.css`).
 
 ### Файлы спринта
 - **Изменить:**
   - `src/pages/TopicPage.jsx`
   - `src/hooks/topic/useTopicJumpScroll.js`
-  - `src/contexts/ToastProvider.jsx` (или хелпер тоастов)
-  - `src/styles/topic-view.css`
+  - `src/index.css`
+  - `src/styles/topic-reply-composer.css`
   - `src/languages/dictionary.js`
 
 ---
 
 ### Пошаговые задачи исполнителя
 
-#### Задача 4.1. Автоматический возврат формы в дефолтное положение при отправке
-1. В `src/pages/TopicPage.jsx` в методе `submitReply()` перед отправкой мутации:
+#### Задача 4.1. Автоматический возврат формы в дефолтное положение при успехе отправки
+1. В `src/pages/TopicPage.jsx` в `submitReply()` перенос формы в подвал темы производить **в блоке `onSuccess`** (после подтверждения от сервера):
    ```javascript
-   // 1. Очистка инлайн-размещения и возврат в дефолтный слот в подвале темы
+   // Внутри onSuccess:
    setReplyPlacement({
      mode: 'bottom',
      targetPostId: null,
@@ -645,19 +688,34 @@
      isCollapsed: false,
    });
    ```
-2. Очистить локальный черновик темы: `localStorage.removeItem(DRAFT_KEY)`.
+   *(При ошибке `onError` форма остаётся под постом, а введённый текст восстанавливается — пользователь может исправить ошибку и повторить отправку).*
+2. Очистить локальный черновик темы: `localStorage.removeItem(DRAFT_KEY)` в `onSuccess`.
 3. Убедиться, что инлайн-слот под постом `#inline-reply-slot-${postId}` плавно схлопывается и не оставляет пустого места между постами.
 
-#### Задача 4.2. Отмена принудительного скролла на текущей странице
-1. В `src/pages/TopicPage.jsx` в ветке `targetPage === currentPage`:
-   - Найти места, где ранее принудительно вызывался скролл или взводился безусловный флаг jump-контроллера.
-   - **ОТМЕНИТЬ автоматический скролл вниз экрана:** экран читателя должен оставаться на месте!
-   - Вместо принудительного скролла отобразить интерактивный тоаст.
+#### Задача 4.2. Отмена принудительного скролла на текущей странице в `submitReply` и `handlePublishDraft`
+Конкретные места в кодовой базе `main` @ `58ae2738`, которые ранее взводили принудительный скролл:
+1. `src/pages/TopicPage.jsx:1085`: `pendingCreatedPostIdRef.current = newPostId` в `onSuccess` у `submitReply`.
+2. `src/pages/TopicPage.jsx:1079`: безусловный вызов `navigateToCreatedPost(tempIdRef, newPostId)` в `onSuccess` у `submitReply`.
+3. `src/pages/TopicPage.jsx:1042, 1089`: `setAlreadyJumped(false)` снимает защёлку, после чего эффект в `useTopicJumpScroll.js` (~строки 58–110) выполняет `scrollIntoView` к `post-${newPostId}` с приоритетом 0.
+4. В публикации черновика `handlePublishDraft`:
+   - `src/pages/TopicPage.jsx:731`: `pendingCreatedPostIdRef.current = tempId` до аппенда;
+   - `src/pages/TopicPage.jsx:838`: безусловный `navigateToCreatedPost(tempId, newPostId)`;
+   - `src/pages/TopicPage.jsx:898`: прямая запись `pendingCreatedPostIdRef.current = newPostId` после успеха.
+
+**Новая логика для той же страницы (`targetPage === currentPage`):**
+1. В `onSuccess` у `submitReply` и в `handlePublishDraft` при публикации на той же странице:
+   - **НЕ записывать** `pendingCreatedPostIdRef.current = newPostId`;
+   - **НЕ вызывать** `setAlreadyJumped(false)`;
+   - **НЕ вызывать** `navigateToCreatedPost(...)` безусловно в основном потоке успеха.
+2. Экран читателя остаётся ровно на том месте, где он читал/отвечал.
+3. Jump-контроллер взводится **только по явному действию пользователя**: клик по кнопке `[↗ Перейти к сообщению]` в Action Toast.
 
 #### Задача 4.3. Интерактивный тоаст перехода к посту (`Action Toast`)
-1. Реализовать хелпер мягкого скролла к созданному посту:
+1. Реализовать хелпер мягкого перехода к созданному сообщению:
    ```javascript
-   const jumpToPostWithHighlight = useCallback((postId) => {
+   const jumpToCreatedPost = useCallback((postId) => {
+     pendingCreatedPostIdRef.current = postId;
+     setAlreadyJumped(false);
      const el = document.getElementById(`post-${postId}`);
      if (el) {
        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -666,7 +724,7 @@
      }
    }, []);
    ```
-2. Вызывать тоаст при успешной публикации:
+2. Показывать тоаст при успешной публикации на текущей странице (в `submitReply` и `handlePublishDraft`):
    ```javascript
    showToast(
      <div className="action-toast-content">
@@ -674,7 +732,7 @@
        <button
          type="button"
          className="action-toast-btn"
-         onClick={() => jumpToPostWithHighlight(newPostId || tempId)}
+         onClick={() => jumpToCreatedPost(newPostId || tempId)}
        >
          {t('forum.go_to_post', 'Перейти к сообщению ↗')}
        </button>
@@ -683,7 +741,7 @@
      6000
    );
    ```
-3. Стилизовать `action-toast-btn` в `topic-reply-composer.css`:
+3. Стилизовать `action-toast-btn` в `topic-reply-composer.css` через токены (без прямого `rgba`):
    ```css
    .action-toast-content {
      display: flex;
@@ -694,8 +752,8 @@
    }
 
    .action-toast-btn {
-     background-color: rgba(255, 255, 255, 0.2);
-     border: 1px solid rgba(255, 255, 255, 0.4);
+     background-color: var(--topic-reply-toast-btn-bg);
+     border: 1px solid var(--topic-reply-toast-btn-border);
      color: inherit;
      border-radius: 4px;
      padding: 0.25rem 0.6rem;
@@ -703,34 +761,44 @@
      font-weight: 600;
      cursor: pointer;
      white-space: nowrap;
+     transition: background-color 0.15s ease;
    }
 
    .action-toast-btn:hover {
-     background-color: rgba(255, 255, 255, 0.35);
+     background-color: var(--topic-reply-toast-btn-border);
    }
    ```
 
-#### Задача 4.4. Сохранение контрактов тестов `scripts/check-post-navigation.mjs`
-1. Внимательно проверить, что в `TopicPage.jsx` сохранены обязательные вызовы:
-   - `navigateToCreatedPost(tempIdRef, newPostId);`
-   - Запись `state: { pendingPostId: tempId }`
-2. Запустить `node scripts/check-post-navigation.mjs` и убедиться, что тест полностью удовлетворён.
+#### Задача 4.4. Сохранение контрактов тестов `scripts/check-post-navigation.mjs` и стили подсветки
+1. **Счётчик вызовов `navigateToCreatedPost`:**  
+   Скрипт `scripts/check-post-navigation.mjs` требует ровно 2 вхождения `navigateToCreatedPost(..., newPostId)` в исходнике `TopicPage.jsx` (одно для `submitReply`, одно для `handlePublishDraft`). Оба вызова сохраняются в файле, но переносятся в логику осознанного перехода пользователя (обработчик кнопки в Action Toast / модалке), а не выполняются автоматически в `onSuccess`.
+2. **Файл `useTopicJumpScroll.js`:**  
+   Остаётся в списке файлов спринта. Сам внутренний алгоритм эффекта и приоритет созданного поста не меняются — меняется только то, кто инициирует взведение `pendingCreatedPostIdRef.current`.
+3. **Поддержка класса `.highlight-target-post` в `src/index.css`:**  
+   Класс `.highlight-target-post` выставляется jump-контроллером (`useTopicJumpScroll.js:104`), `useTopicNavigation.js:14` и `useTopicModalState.js:193`, но ранее отсутствовал в CSS. В `src/index.css` добавить правило рядом с `.highlight-new-post`:
+   ```css
+   .highlight-new-post,
+   .highlight-target-post {
+     animation: highlight-fade 1s cubic-bezier(0.4, 0, 0.2, 1);
+   }
+   ```
 
 ---
 
 ### Критерии готовности Спринта 4 (Definition of Done)
-1. При отправке сообщения инлайн-форма схлопывается и возвращается в дефолтный подвал страницы.
-2. Экран пользователя **не срывается вниз**.
+1. При отправке ответа и публикации черновика на текущей странице экран пользователя **не срывается вниз**.
+2. Инлайн-форма схлопывается и возвращается в подвал темы только при успешном ответе от сервера (`onSuccess`). При ошибке форма остаётся под постом с набранным текстом.
 3. Всплывает тоаст успеха с кнопкой `[Перейти к сообщению ↗]`.
-4. При клике на кнопку страница плавно скроллится к сообщению, и оно подсвечивается классом `.highlight-new-post`.
-5. Если пользователь не кликает, тоаст мягко исчезает через 6 секунд, чтение темы не прерывается.
-6. Скрипт `check-post-navigation.mjs` и `npm test` зелёные.
+4. Клик по кнопке тоаста плавно центрирует созданный пост с анимацией подсветки.
+5. Правила `.highlight-new-post` и `.highlight-target-post` зарегистрированы в `src/index.css`.
+6. Скрипт `node scripts/check-post-navigation.mjs` и полный `npm test` зелёные.
 
 ### Чеклист проверки после Спринта 4
-- [ ] Написать ответ на пост #3 в середине страницы и нажать «Отправить».
-- [ ] Убедиться, что экран остался на посте #3.
-- [ ] Убедиться, что форма под постом #3 исчезла, а в подвале темы появилась чистая форма.
-- [ ] Кликнуть в тоасте кнопку «Перейти к сообщению ↗» — экран плавно центрирует новый пост внизу с анимацией подсветки.
+- [ ] Написать ответ на пост #3 в середине страницы и отправить: экран остался на посте #3.
+- [ ] Опубликовать черновик на текущей странице: экран не срывается вниз, всплывает Action Toast.
+- [ ] Проверить ошибку отправки (например, отключив сеть): форма осталась под постом, текст не сбросился.
+- [ ] Кликнуть в тоасте кнопку «Перейти к сообщению ↗»: экран плавно скроллится к сообщению, работает подсветка.
+- [ ] `node scripts/check-post-navigation.mjs` — PASS.
 - [ ] `npm test` — PASS.
 
 ---
@@ -738,7 +806,7 @@
 ## Спринт 5: Межстраничный диалог публикации (CrossPagePostModal)
 
 ### Цель спринта
-Исключить автоматический срыв пользователя на другую страницу пагинации при публикации ответа (`targetPage !== currentPage`). Реализовать модальное окно `CrossPagePostModal` на базе `ForumModal`, предлагающее пользователю осознанный выбор: перейти к опубликованному сообщению на последней странице темы или продолжить спокойное чтение текущей страницы.
+Исключить автоматический переход на другую страницу пагинации при публикации ответа (`submitReply`) или публикации черновика (`handlePublishDraft`), когда `targetPage !== currentPage`. Реализовать общий хелпер межстраничной публикации и модальное окно `CrossPagePostModal` на базе `ForumModal`. Модалка открывается **только после подтверждения сервера**, а переход «Перейти» корректно центрирует пост.
 
 ### Файлы спринта
 - **Создать:**
@@ -753,8 +821,7 @@
 ### Пошаговые задачи исполнителя
 
 #### Задача 5.1. Создание компонента `CrossPagePostModal.jsx`
-1. Создать файл `src/components/modals/CrossPagePostModal.jsx`.
-2. Использовать проектный компонент `src/components/common/ForumModal.jsx` (ни в коем случае не сырой `react-bootstrap/Modal`!):
+1. Создать файл `src/components/modals/CrossPagePostModal.jsx` на базе `ForumModal`:
    ```jsx
    import React from 'react';
    import ForumModal from '../common/ForumModal';
@@ -815,44 +882,60 @@
    export default CrossPagePostModal;
    ```
 
-#### Задача 5.2. Интеграция в `TopicPage.jsx`
-1. В `TopicPage.jsx` добавить состояние модалки:
+#### Задача 5.2. Интеграция межстраничного диалога в `TopicPage.jsx`
+1. В `TopicPage.jsx` добавить состояние модалки с хранением `tempId` и серверного `postId`:
    ```javascript
    const [crossPageModal, setCrossPageModal] = useState({
      show: false,
+     tempId: null,
      postId: null,
      targetPage: 1,
      currentPage: 1,
    });
    ```
-2. В `submitReply()` при расчете `targetPage !== currentPage`:
-   - Сохранить пост в оптимистичную очередь `queueOptimisticPost`.
-   - **НЕ ВЫЗЫВАТЬ** немедленный `setSearchParams({ page: String(targetPage) })`!
-   - Открыть модальное окно:
+2. **Общий хелпер для `submitReply` и `handlePublishDraft`:**
+   Вынести общую логику обработки межстраничного результата. (В публикации черновика `handlePublishDraft` это покрывает два сценария: последняя страница была ровно заполнена и новый пост создал следующую страницу, либо пока писался черновик, другие участники добавили сообщения).
+3. **Поведение до отправки (`targetPage !== currentPage`):**
+   - Добавить оптимистичный пост в очередь: `queueOptimisticPost(id, optimisticPost);`
+   - **НЕ вызывать** `setSearchParams`!
+   - **НЕ открывать** модалку раньше времени!
+4. **Поведение в `onSuccess` (после подтверждения от сервера):**
+   - Если `targetPage !== currentPage`:
      ```javascript
      setCrossPageModal({
        show: true,
-       postId: tempId,
+       tempId: tempIdRef || tempId,
+       postId: newPostId,
        targetPage,
        currentPage,
      });
      ```
-3. Обработчик «Перейти»:
+   - При ошибке `onError` модалка не открывается.
+5. **Обработчик «Перейти к сообщению»:**
+   Для корректного скролла на целевой странице необходимо взвести jump с **реальным** серверным ID и сохранить точный литерал `state: { pendingPostId: tempId }` (требование `scripts/check-post-navigation.mjs`):
    ```javascript
    const handleNavigateToTargetPage = () => {
+     const realPostId = crossPageModal.postId;
+     const tempId = crossPageModal.tempId;
+
      setCrossPageModal(prev => ({ ...prev, show: false }));
+
+     if (realPostId) {
+       pendingCreatedPostIdRef.current = realPostId;
+     }
      setAlreadyJumped(false);
+
      setSearchParams((prev) => {
        const next = new URLSearchParams(prev);
        next.set('page', String(crossPageModal.targetPage));
        return next;
      }, {
        preventScrollReset: true,
-       state: { pendingPostId: crossPageModal.postId }
+       state: { pendingPostId: tempId }
      });
    };
    ```
-4. Обработчик «Остаться на текущей странице»:
+6. **Обработчик «Остаться на текущей странице»:**
    ```javascript
    const handleStayOnCurrentPage = () => {
      setCrossPageModal(prev => ({ ...prev, show: false }));
@@ -877,17 +960,18 @@
 
 ### Критерии готовности Спринта 5 (Definition of Done)
 1. При ответе с архивной страницы пользователь остаётся на текущей странице, скролл не срывается.
-2. Всплывает `CrossPagePostModal`.
-3. Клик «Остаться на текущей странице» закрывает окно и оставляет пользователя читать тему дальше.
-4. Клик «Перейти на страницу N» переключает пагинатор и мягко центрирует созданный пост.
-5. Правило `scripts/check-no-raw-modal.mjs` и `scripts/check-post-navigation.mjs` соблюдены на 100%.
+2. `CrossPagePostModal` открывается **только после успешного подтверждения сервером** (`onSuccess`). При ошибке отправки модалка не открывается.
+3. Клик «Остаться на текущей странице» закрывает окно и сохраняет текущее место чтения, выводя тоаст со ссылкой.
+4. Клик «Перейти на страницу N» переключает страницу, взводит `pendingCreatedPostIdRef.current = realPostId` и плавно центрирует созданный пост.
+5. Публикация черновика на стыке страниц (переполнение последней страницы) обрабатывается тем же общим хелпером.
+6. Правило `scripts/check-no-raw-modal.mjs` и оба литерала `state: { pendingPostId: tempId }` для `scripts/check-post-navigation.mjs` сохранены.
 
 ### Чеклист проверки после Спринта 5
-- [ ] Зайти на страницу 1 многостраничной темы (всего 3 страницы).
-- [ ] Нажать «Цитировать» и отправить ответ.
-- [ ] Убедиться, что не произошел внезапный переход на страницу 3.
-- [ ] В открывшейся модалке нажать «Остаться на текущей странице» — пользователь остался на странице 1, появился тоаст с быстрой ссылкой.
-- [ ] Повторить тест и нажать «Перейти» — открылась страница 3, пост подсвечен.
+- [ ] Открыть страницу 1 многостраничной темы, отправить ответ: автоматического перехода на страницу 2/3 нет.
+- [ ] Модалка появилась только после ответа сети.
+- [ ] Проверить падение запроса (симуляция ошибки): модалка не появляется, сообщение об ошибке в тоасте.
+- [ ] В модалке нажать «Перейти»: открылась последняя страница, целевой пост плавно отцентрирован.
+- [ ] `node scripts/check-post-navigation.mjs` — PASS.
 - [ ] `npm test` — все тесты зелёные.
 
 ---
@@ -895,7 +979,7 @@
 ## Спринт 6: Быстрое цитирование выделения, адаптивность и i18n (Quote Tooltip & Hardening)
 
 ### Цель спринта
-Реализовать всплывающий тултип цитирования при выделении мышкой фрагмента сообщения (`QuoteSelectionTooltip`), оптимизировать форму под мобильные экраны (< 768px), завершить локализацию и создать автоматический скрипт проверки контрактов `scripts/check-inline-reply-contracts.mjs`.
+Реализовать всплывающий тултип цитирования при выделении мышкой фрагмента сообщения (`QuoteSelectionTooltip`), оптимизировать форму под мобильные экраны (< 768px), завершить локализацию и создать скрипт проверки контрактов `scripts/check-inline-reply-contracts.mjs`.
 
 ### Файлы спринта
 - **Создать:**
@@ -905,7 +989,7 @@
   - `src/components/topic/TopicPostCard.jsx`
   - `src/styles/topic-reply-composer.css`
   - `src/languages/dictionary.js`
-  - `package.json` (добавление скрипта в `npm test`)
+  - `package.json`
 
 ---
 
@@ -913,8 +997,8 @@
 
 #### Задача 6.1. Всплывающий тултип быстрого цитирования (`QuoteSelectionTooltip.jsx`)
 1. Создать компонент `src/components/topic/QuoteSelectionTooltip.jsx`.
-2. Компонент слушает событие `mouseup`/`selectionchange` внутри контейнера поста:
-   - Если пользователь выделил от 3 до 2000 символов внутри `.post-content`, вычисляются экранные координаты выделения (`range.getBoundingClientRect()`).
+2. Компонент отслеживает выделение текста внутри `.post-content`:
+   - Если выделено от 3 до 2000 символов, вычисляются координаты `range.getBoundingClientRect()`.
    - Над выделенной фразой всплывает компактная кнопка с иконкой цитаты:
      ```jsx
      <button
@@ -922,7 +1006,7 @@
        className="quote-selection-tooltip"
        style={{ top: tooltipCoords.top, left: tooltipCoords.left }}
        onMouseDown={(e) => {
-         e.preventDefault(); // чтобы не сбросить выделение
+         e.preventDefault();
          handleQuoteSelection(post, selectedText);
        }}
      >
@@ -930,8 +1014,8 @@
        <span>{t('forum.quote_selection', 'Цитата')}</span>
      </button>
      ```
-3. При клике в форму ответа конкатенируется только выделенный текст, обернутый в BB-код цитаты, и форма активируется под данным постом.
-4. Выделение в браузере очищается (`window.getSelection().removeAllRanges()`).
+   *(Динамические координаты `top`/`left` — единственное разрешённое исключение из запрета инлайн-стилей; оформление внешнего вида кнопки выполнено строго в CSS).*
+3. При клике в форму ответа конкатенируется выделенный текст, очищенный от цитатных пирамид (`stripQuotes`), обёрнутый в BB-код `[quote]`, и форма активируется инлайн под этим постом.
 
 #### Задача 6.2. Мобильная адаптивность (< 768px)
 1. В `topic-reply-composer.css` для экранов мобильных устройств:
@@ -950,7 +1034,7 @@
      }
 
      .topic-reply__btn-label {
-       display: none; /* скрываем текст кнопок, оставляя только иконки */
+       display: none;
      }
 
      .reply-scroll-pill {
@@ -963,22 +1047,22 @@
    ```
 
 #### Задача 6.3. Скрипт проверки контрактов `scripts/check-inline-reply-contracts.mjs`
-1. Создать скрипт проверки контрактов:
+1. Создать скрипт проверки:
    - Проверяет наличие контейнеров слотов `#inline-reply-slot-`, `#bottom-reply-slot`, `#floating-reply-drawer-slot`.
-   - Проверяет использование `createPortal` в `TopicPage.jsx`.
+   - Проверяет монтирование `<TopicReplyComposer>` через `createPortal` в `TopicPage.jsx`.
    - Проверяет отсутствие сырого `react-bootstrap/Modal` в `CrossPagePostModal.jsx`.
-   - Проверяет отсутствие инлайн-стилей `style={{` в новых компонентах.
-   - Проверяет наличие всех новых ключей в `dictionary.js`.
+   - Проверяет отсутствие инлайн-стилей `style={{` во всех новых компонентах, **за исключением** динамических координат `top`/`left` в `QuoteSelectionTooltip.jsx`.
+   - Проверяет наличие всех добавленных языковых ключей в `dictionary.js`.
 2. Подключить запуск скрипта в `package.json` в цепочку `npm test`.
 
 ---
 
 ### Критерии готовности Спринта 6 (Definition of Done)
-1. Выделение текста в любом сообщении вызывает аккуратный тултип «💬 Цитата».
+1. Выделение текста в любом сообщении вызывает тултип «💬 Цитата».
 2. Клик по тултипу отправляет в форму только выделенный фрагмент и разворачивает инлайн-форму под постом.
 3. На мобильных устройствах композер гармонично адаптируется в Bottom Sheet.
 4. Скрипт `check-inline-reply-contracts.mjs` внедрен и отдаёт PASS.
-5. `npm test` и `npm run build` полностью зелёные.
+5. Полный цикл проверок `npm test` и `npm run build` зелёный.
 
 ### Чеклист проверки после Спринта 6
 - [ ] Выделить фрагмент текста внутри поста мышкой → появился тултип «Цитата».
@@ -986,7 +1070,7 @@
 - [ ] Проверить отображение во всех 3 темах: `light`, `dark`, `neutral`.
 - [ ] Проверить на мобильной ширине 375px в инструментах разработчика.
 - [ ] `node scripts/check-inline-reply-contracts.mjs` — PASS.
-- [ ] `npm test` — все 36+ тестов зелёные.
+- [ ] `npm test` — все тесты зелёные.
 
 ---
 
@@ -996,10 +1080,11 @@
 |---|---|---|
 | **Синглтон формы (React Portal)** | `TopicPage.jsx` | `node scripts/check-inline-reply-contracts.mjs` |
 | **Слоты инлайн-ответа** | `TopicPostCard.jsx` | `node scripts/check-inline-reply-contracts.mjs` |
-| **Zero Forced Scroll** | `TopicPage.jsx` | Ручной сценарий E2E + контракты `useTopicJumpScroll` |
+| **Zero Forced Scroll (ответ)** | `TopicPage.jsx:submitReply` | Ручной E2E-сценарий + `check-post-navigation.mjs` |
+| **Zero Forced Scroll (черновик)** | `TopicPage.jsx:handlePublishDraft` | Ручной E2E-сценарий + `check-post-navigation.mjs` |
 | **Межстраничная модалка** | `CrossPagePostModal.jsx` | `node scripts/check-no-raw-modal.mjs` |
-| **Контракт навигации постов** | `TopicPage.jsx` | `node scripts/check-post-navigation.mjs` |
-| **Без инлайн-стилей** | Новые JSX-файлы | `node scripts/check-inline-reply-contracts.mjs` |
+| **Контракт навигации постов** | `TopicPage.jsx`, `useTopicJumpScroll.js` | `node scripts/check-post-navigation.mjs` |
+| **Без инлайн-стилей** (кроме координат тултипа) | Новые JSX-файлы | `node scripts/check-inline-reply-contracts.mjs` |
 | **Без Bootstrap-утилит** | Новые JSX-файлы | `node scripts/check-inline-reply-contracts.mjs` |
 | **Цвета из theme-variables** | `topic-reply-composer.css` | Ручной визуальный аудит (Light/Dark/Neutral) |
 | **Общая сборка фронтенда** | Vite build | `npm run build` |
@@ -1012,23 +1097,32 @@
 
 ### 12.1. Решения (зафиксировано до и по ходу работы)
 
-| Дата | Решение | Кто / источник |
+| Дата | Решение | Источник |
 |---|---|---|
 | 2026-11-23 | Форма ответа реализуется как **синглтон через `ReactDOM.createPortal`**, исключая unmount/remount и сброс состояния редактора | Архитектурный выбор |
-| 2026-11-23 | При нажатии «Цитировать» принудительный скролл вниз **отменяется**, форма монтируется инлайн под целевым постом | Пользователь / Концепт |
-| 2026-11-23 | При отправке ответа форма **автоматически возвращается в подвал темы**, инлайн-слот схлопывается | Пользователь / Концепт |
-| 2026-11-23 | На текущей странице при отправке экран **не срывается вниз**; показывается интерактивный Action Toast со ссылкой `[↗ Перейти к сообщению]` | Пользователь / Концепт |
-| 2026-11-23 | При отправке на другой странице (`targetPage !== currentPage`) резкий переход отменяется, показывается модалка выбора `CrossPagePostModal` | Пользователь / Концепт |
+| 2026-11-23 | При нажатии «Цитировать» принудительный скролл вниз **отменяется**, форма монтируется инлайн под целевым постом | Концепт |
+| 2026-11-23 | При отправке ответа форма **автоматически возвращается в подвал темы** в `onSuccess`, инлайн-слот схлопывается | Концепт |
+| 2026-11-23 | На текущей странице при отправке экран **не срывается вниз**; безусловное взведение jump-контроллера отменено в `submitReply` и `handlePublishDraft`, показывается Action Toast со ссылкой `[↗ Перейти к сообщению]` | Бриф / Сверка |
+| 2026-11-23 | При отправке на другой странице (`targetPage !== currentPage`) резкий переход отменяется; модалка `CrossPagePostModal` открывается только после подтверждения сервера (`onSuccess`), клик «Перейти» взводит jump на реальный `postId` | Бриф / Сверка |
 | 2026-11-23 | Все модалки строятся строго на базе `ForumModal` (прямой `react-bootstrap/Modal` запрещён правилом `check-no-raw-modal.mjs`) | Правило репозитория |
-| 2026-11-23 | Стили оформляются в `topic-reply-composer.css` на базе переменных из `theme-variables.css`, без инлайн-стилей и классов Bootstrap | Правило репозитория |
+| 2026-11-23 | Стили оформляются в `topic-reply-composer.css` на базе токенов из `theme-variables.css`, без прямого HEX/RGB и классов Bootstrap | Правило репозитория |
+| 2026-11-23 | Инлайн-стили запрещены везде, кроме динамических экранных координат (`top`/`left`) в `QuoteSelectionTooltip.jsx` | Бриф / Сверка |
+| 2026-11-23 | Скролл при явном нажатии «Сохранить черновик» (`TopicPage.jsx:698`, `scrollIntoView` к сохранённому черновику с `.highlight-new-post`) — отдельное действие по запросу пользователя, план его не затрагивает | Архитектурный выбор |
 
-### 12.2. Проверка плана (2026-11-23 — сверка с `main`)
+### 12.2. Проверка плана (2026-11-23 — сверка с `main` @ `58ae2738`)
 
-Подтверждено в кодовой базе ветки `main`:
-1. Компонент `TopicReplyComposer.jsx` уже изолирован и готов к расширению пропсами `placement`, `onResetToBottom`, `onSwitchToFloating`.
-2. В `useTopicPostAuth.jsx` уже есть логика очистки цитат `stripQuotes` и заготовка под выделение `window.getSelection()`.
-3. Контракты тестов `check-post-navigation.mjs` и `check-unsent-reply-rescue.mjs` учтены и защищены от поломок.
-4. План полностью декомпозирован на 6 последовательных изолированных спринтов и готов к передаче исполнителю.
+В план внесены следующие исправления по результатам сверки с кодовой базой:
+1. **Назван реальный механизм принудительного скролла (Спринт 4):** зафиксированы конкретные строки `TopicPage.jsx:1042, 1079, 1085, 1089` и `useTopicJumpScroll.js:58–110`, безусловный скролл отменён в `onSuccess` и перенесён на клик в тоасте.
+2. **Модалка межстраничной публикации перенесена в `onSuccess` (Спринт 5):** исключено открытие модалки до подтверждения сервером; обработчик перехода взводит `pendingCreatedPostIdRef.current` с реальным ID поста и сохраняет обязательный литерал `state: { pendingPostId: tempId }`.
+3. **Разрешено узкое исключение для инлайн-стилей (Спринт 6):** динамические координаты `top`/`left` тултипа выделения согласованы с правилами оформления и гейт-скриптом.
+4. **Покрыта публикация черновика `handlePublishDraft` (Спринты 4–5):** устранён принудительный скролл на текущей странице (`TopicPage.jsx:731, 838, 898`) и задействован общий хелпер межстраничной публикации при переполнении последней страницы.
+5. **Устранён хардкод цветов в образцах CSS (Спринты 2–3):** введены токены `--topic-reply-inline-bar-*`, `--topic-reply-shadow-*` в `theme-variables.css` для всех трёх тем.
+6. **Исправлен проп в образце портала (Спринт 1):** указан `setLastSelectedMask={handleSelectCharacter}` из `TopicPage.jsx:1915`.
+7. **Уточнены системные детали:**
+   - добавлена регистрация `.highlight-target-post` в `src/index.css`;
+   - пиллу `ReplyScrollStatusPill` назначен `z-index: 1051` (выше кнопок скролла `1050`);
+   - сброс размещения перенесён в `onSuccess`;
+   - скрипт `check-post-navigation` подключён к `package.json` как `test:post-navigation`.
 
 ### 12.3. Журнал выполнения (заполняет исполнитель по спринтам)
 
@@ -1040,4 +1134,3 @@
 | | Спринт 4: Отмена принудительного скролла и тоаст | | |
 | | Спринт 5: Межстраничный диалог публикации | | |
 | | Спринт 6: Quote Tooltip, адаптивность и i18n | | |
-

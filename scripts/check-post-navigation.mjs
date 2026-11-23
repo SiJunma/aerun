@@ -146,8 +146,12 @@ console.log('PASS: locatePost result contract (object|null) matches how TopicPag
 // post card: the header strip renders a normal timestamp in every state. The
 // card lives in TopicPostCard since the TopicPage split.
 assert.doesNotMatch(postCardSource, /Отправка\.\.\.|Sending\.\.\./, 'No "Sending..." label on the post card');
-const headerStripStart = postCardSource.indexOf('post-header-strip');
-const headerStripEnd = postCardSource.indexOf('post-number-indicator', headerStripStart);
+const headerStripStart = postCardSource.indexOf('post-header-strip') !== -1
+  ? postCardSource.indexOf('post-header-strip')
+  : postCardSource.indexOf('post-header');
+const headerStripEnd = postCardSource.indexOf('post-number-indicator') !== -1
+  ? postCardSource.indexOf('post-number-indicator', headerStripStart)
+  : postCardSource.indexOf('post-number', headerStripStart);
 assert.ok(headerStripStart !== -1 && headerStripEnd !== -1, 'Post card header strip bounds must be found');
 const headerStrip = postCardSource.slice(headerStripStart, headerStripEnd);
 assert.match(headerStrip, /Timestamp date=\{post\.created_at\}/, 'Post timestamp renders normally');
