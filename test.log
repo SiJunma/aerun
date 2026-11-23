@@ -1,0 +1,381 @@
+
+> aerun@0.0.0 test
+> npm run test:first-post-guard && npm run test:topic-delete-affordance && npm run test:topic-delete-cleanup && npm run test:golast-overlay && npm run test:inflight-guard && npm run test:shared-poll && npm run test:dm-mutation-state && npm run test:dm-draft-conversations && npm run test:jsx-comments && npm run test:category-subscriber && npm run test:manage-mode-affordance && npm run test:date-accessors && npm run test:unread-floor && npm run test:audit-action-labels && npm run test:admin-empty-state && npm run test:forum-empty-state && npm run test:admin-form-validation && npm run test:error-classification && npm run test:forum-read-contract && npm run test:drafts-and-settings && npm run test:identity-refresh && npm run test:identity-placeholder && npm run test:user-profile-normalization && npm run test:security-tab && npm run test:last-selected-mask && npm run test:roles-live-update && npm run test:account-status-axis && npm run test:admin-role-authority && npm run test:admin-nav-config && npm run test:endpoints && npm run test:mask-avatar-isolation && npm run test:no-firebase-storage && npm run test:no-raw-modal && npm run test:unsent-reply-rescue && npm run test:post-navigation && npm run test:no-firebase-deps && npm run lint:js
+
+
+> aerun@0.0.0 test:first-post-guard
+> node scripts/check-first-post-guard.mjs
+
+OK  first-post guard: page-2 posts never delete the topic
+OK  first-post guard: genuine first post still detected
+OK  first-post guard: edge cases handled
+
+> aerun@0.0.0 test:topic-delete-affordance
+> node scripts/check-topic-delete-affordance.mjs
+
+OK  topic delete: the author is offered the delete of their own topic
+OK  topic delete: a stranger and a guest are not
+OK  topic delete: staff with delete_others_topics are
+OK  topic delete: a guest topic has no owner
+OK  topic delete: the 409/403 refusals are named, not raw
+OK  topic delete: the rule lives in one place and the page imports it
+
+> aerun@0.0.0 test:topic-delete-cleanup
+> node scripts/check-topic-delete-cleanup.mjs
+
+OK  topic delete: every author loses post_count for their deleted posts
+OK  topic delete: a topic's first post is refused as a post delete
+OK  topic delete: reputation, votes and subscriptions are cleaned up
+OK  topic delete: the settlement runs inside the delete's own transaction
+
+> aerun@0.0.0 test:golast-overlay
+> node scripts/check-golast-overlay.mjs
+
+OK  goLast overlay: the jump flag can only change through a re-rendering setter
+OK  goLast overlay: the guest page fallback no longer duplicates the posts request
+
+> aerun@0.0.0 test:inflight-guard
+> node --test scripts/test-inflight-guard.mjs
+
+✔ begin() wins exactly once per busy period (0.7752ms)
+✔ the latch releases and can be taken again (0.1322ms)
+✔ two separate latches do not block each other (0.1102ms)
+✔ keys are unique per logical submit and long enough for the backend (4.8403ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 84.7634
+
+> aerun@0.0.0 test:shared-poll
+> node --test scripts/test-shared-poll.mjs
+
+✔ two subscribers to one resource issue ONE request, not two (6.8289ms)
+✔ a late subscriber gets the cached value without another request (0.5333ms)
+✔ a slow read is never stacked: one request per trigger burst (301.5586ms)
+✔ a realtime hook is ACCEPTED, and its events drive the reads (318.3506ms)
+✔ a stream that never CONNECTS falls back to polling on the grace window (10149.5955ms)
+✔ a CONNECTED but idle stream is NOT declared dead — this is the "realtime keeps dying" bug (10336.2548ms)
+✔ a stream that drops after being healthy falls back, and recovers when it returns (1.5876ms)
+✔ the transport is observable, and unsubscribing closes the stream (324.8181ms)
+✔ connect replay is skipped within the freshness window when opted in (655.1187ms)
+✔ connect replay is skipped when primary read is still in flight (317.7541ms)
+✔ a SYNCHRONOUSLY connected hub costs ONE read, not a cold read plus a coalesced replay (315.8627ms)
+✔ a STALE re-entry connect does not replay behind the in-flight cold read (1412.2172ms)
+✔ connect replay still runs when stale (357.0457ms)
+✔ connect replay still runs when primary never succeeded (328.991ms)
+✔ connect replay is unconditional without opt-in (660.9948ms)
+✔ a hidden tab is not polled, and is read once on return (47.7405ms)
+✔ a failed read keeps the last good value and reports the error (314.5226ms)
+✔ the loop stops when the last subscriber leaves (63.4333ms)
+✔ nothing is delivered after every subscriber has gone (1.4397ms)
+✔ sharedPoll returns ONE resource per name, however often it is asked (0.9806ms)
+✔ different names are different resources (0.245ms)
+✔ a restart within restartFreshMs hands the cached value and costs no request (1.5023ms)
+✔ a restart outside restartFreshMs re-reads, and without the opt-in always re-reads (12.103ms)
+✔ the poll still starts when no realtime hook is passed (0.9534ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 26017.6063
+
+> aerun@0.0.0 test:dm-mutation-state
+> node scripts/check-dm-mutation-state.mjs
+
+OK  dms: send/edit/delete return the row they wrote
+OK  dms: the thread applies it and converges the read
+OK  dms: a send also converges the inbox read
+OK  dms: a read also converges the badge, not just the row
+OK  dms: no Firestore date accessors on PocketBase datetimes
+OK  dms: a conversation reads a peer card, never the profile page
+OK  dms: a migration ghost (peer_missing) is hidden, not drawn as junk
+OK  realtime: health is the connection, so a quiet thread stays live
+
+> aerun@0.0.0 test:dm-draft-conversations
+> node scripts/check-dm-draft-conversations.mjs
+
+  ok  isDraftId divides draft ids from real ones by construction
+  ok  repeated opens never fork a second draft row (idempotent by shape)
+  ok  the snapshot survives an empty refresh and unknown peers stay empty
+  ok  drafts are isolated per account (uid is in the key)
+  ok  drafts with different peers coexist; deleting one keeps the rest
+  ok  draft rows are stored under the dedicated draft prefix
+  ok  a peer with a real conversation prunes its draft (merge, requirement 3)
+  ok  pruning with no real conversations changes nothing
+[dm-drafts] corrupt draft store, treating as empty SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)
+    at JSON.parse (<anonymous>)
+    at readAll (file:///C:/Users/Alina/source/repos/SiJunma/aerun/src/api/dm-drafts.js:83:25)
+    at listDrafts (file:///C:/Users/Alina/source/repos/SiJunma/aerun/src/api/dm-drafts.js:105:15)
+    at file:///C:/Users/Alina/source/repos/SiJunma/aerun/scripts/check-dm-draft-conversations.mjs:150:20
+[dm-drafts] corrupt draft store, treating as empty SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)
+    at JSON.parse (<anonymous>)
+    at readAll (file:///C:/Users/Alina/source/repos/SiJunma/aerun/src/api/dm-drafts.js:83:25)
+    at getDraft (file:///C:/Users/Alina/source/repos/SiJunma/aerun/src/api/dm-drafts.js:114:10)
+    at file:///C:/Users/Alina/source/repos/SiJunma/aerun/scripts/check-dm-draft-conversations.mjs:151:16
+[dm-drafts] corrupt draft store, treating as empty SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)
+    at JSON.parse (<anonymous>)
+    at readAll (file:///C:/Users/Alina/source/repos/SiJunma/aerun/src/api/dm-drafts.js:83:25)
+    at upsertDraft (file:///C:/Users/Alina/source/repos/SiJunma/aerun/src/api/dm-drafts.js:127:15)
+    at file:///C:/Users/Alina/source/repos/SiJunma/aerun/scripts/check-dm-draft-conversations.mjs:152:3
+  ok  a corrupted draft store degrades to empty and self-heals on write
+  ok  a fresh draft sorts above a real conversation (the number shape is parsed)
+  ok  the order is by freshness, not by kind
+  ok  composer text is restored per (conversation, account) and isolated
+  ok  a successful send clears the composer key; nothing resurrects it
+  ok  shape: no seed literal, POST only in startConversationWithMessage
+  ok  shape: subscription effect and mark-read guard drafts
+  ok  shape: draft delete is client-only
+  ok  shape: openChat resolves, never creates
+
+[OK] draft DM conversations: 17 checks passed (incl. source shape)
+  ok  composer text is stored under the dedicated composer prefix
+
+[OK] draft DM conversations: 18 module checks passed
+
+> aerun@0.0.0 test:jsx-comments
+> node scripts/check-jsx-no-line-comments.mjs
+
+jsx line comments OK — no // text inside JSX children
+
+> aerun@0.0.0 test:category-subscriber
+> node scripts/check-category-subscriber-shape.mjs
+
+category subscriber shape OK — callbacks receive arrays, not promises
+
+> aerun@0.0.0 test:manage-mode-affordance
+> node scripts/check-manage-mode-affordance.mjs
+
+OK  manage mode: the action bar appears immediately, not only after a tick
+OK  manage mode: it says out loud that topics must be selected first
+OK  manage mode: the actions stay disabled until there is something to act on
+
+> aerun@0.0.0 test:date-accessors
+> node scripts/check-date-accessors.mjs
+
+OK  dates: no `?.toDate()`/`?.toMillis()` — the type-unsafe optional-chain trap
+OK  dates: <Timestamp> receives raw values, so no render site converts them
+
+> aerun@0.0.0 test:unread-floor
+> node scripts/check-unread-floor.mjs
+
+OK  unread floor: a day-only registration date parses to its midnight
+OK  unread floor: registration and last-visit take the later of the two
+OK  dates: the PocketBase space form resolves to UTC, not local
+OK  unread floor: no call site reads the registration date through a Firestore accessor
+
+> aerun@0.0.0 test:audit-action-labels
+> node scripts/check-audit-action-labels.mjs
+
+OK  audit labels: all 41 backend action types are translated in EN and RU
+OK  audit labels: the search box can match every row it renders
+OK  audit labels: no orphaned labels left behind by the pre-PocketBase era
+
+> aerun@0.0.0 test:admin-empty-state
+> node scripts/check-admin-empty-state.mjs
+
+admin empty state OK — 2 table(s) guarded, unassigned section conditional
+
+> aerun@0.0.0 test:forum-empty-state
+> node scripts/check-forum-empty-state.mjs
+
+forum empty state OK — 7 pages use the shared component
+
+> aerun@0.0.0 test:admin-form-validation
+> node scripts/check-admin-form-validation.mjs && node scripts/check-admin-form-validation-truth.mjs
+
+admin form validation OK — 4 guard(s) mirrored by disabled buttons, invalid fields and trims
+admin form validity truth table OK — trim, either-language, sentinel and length boundaries all hold
+
+> aerun@0.0.0 test:error-classification
+> node scripts/check-error-classification.mjs
+
+error classification OK — transport, server fault, access and contract errors are told apart
+
+> aerun@0.0.0 test:forum-read-contract
+> node scripts/check-forum-read-contract.mjs
+
+OK  forum read contract: every topic/post list is read under `items`
+OK  forum read contract: the topic form and reply path navigate with real ids
+OK  forum read contract: category paging reads `total`/`per_page`
+OK  forum read contract: category counters and last-post fields survive toCategory
+OK  forum read contract: the main page seeds categories, groups and stats — and no topic list
+OK  forum read contract: every topic list normalises before rendering
+OK  forum read contract: the subscriptions list normalises too — it renders TopicRow
+OK  forum read contract: reputation_votes is read server-side, never from the browser
+OK  forum read contract: accounts are read through /api/aerun/users/{id}, never the collection
+OK  forum read contract: the topic form transmits the mask and the pin
+OK  forum read contract: "override off" is stored as the live inherit marker, not a snapshot
+OK  forum read contract: the members board refreshes, says so, and is localised
+OK  realtime client: signals are nudges, and the fallback is observable
+OK  topic freshness: /stats delivers topic metadata and freshness; full-topic read eliminated from topic open
+
+> aerun@0.0.0 test:drafts-and-settings
+> node scripts/check-drafts-and-settings.mjs
+
+OK  drafts: stored server-side, not in localStorage
+OK  drafts: save, edit, delete and publish all address the right id
+OK  drafts: a write updates the card, so it appears without a reload
+OK  drafts: the card never falls back to a Guest author
+OK  drafts: the picked mask is stored on the draft row and survives publish
+OK  drafts: publish answers with a decorated post, so the mask does not vanish
+OK  masks: another member's mask is resolved through the characters collection
+OK  authors: one AuthorRef DTO — no flat author_* fields (F-18), no top-level author_character_id/is_character on posts/topics (F-21)
+OK  masks: the edit form picker is transmitted, not silently dropped
+OK  masks: only the author may re-file a post under a different mask
+OK  settings: a save cannot delete keys the account form does not know
+
+> aerun@0.0.0 test:identity-refresh
+> node scripts/check-identity-refresh.mjs
+
+OK  identity refresh: the forum re-reads on uid, role and status change
+OK  identity refresh: the online list is cleared on sign-out
+OK  identity refresh: a closed page lands on / with replace
+OK  identity refresh: logout records a departure, idling does not
+OK  identity refresh: one guest per browser, not one per tab
+OK  identity refresh: "Visited today" is a 24h window, not the online list
+OK  identity refresh: the caller's own profile is read from the server, not replayed
+OK  identity refresh: a confirmed save writes the auth store snapshot back
+OK  identity refresh: a cancelled profile read is deduplicated, not reported as a failure
+OK  identity refresh: every rendered icon is imported
+OK  identity refresh: the root handover excludes you, and works without a password
+
+> aerun@0.0.0 test:identity-placeholder
+> node scripts/check-identity-placeholder.mjs
+
+OK  identity placeholder: one resolver (identityAvatar) shared by posts, thumbnails and DM
+OK  identity placeholder: the custom deleted/guest image reaches every render site
+OK  identity placeholder: no inline ui-avatars URL bypasses the helper
+OK  identity placeholder: the admin upload form and both translations are present
+
+> aerun@0.0.0 test:user-profile-normalization
+> node scripts/check-user-profile-normalization.mjs
+
+OK  user profile: role, counters, bio and totals all normalise
+
+> aerun@0.0.0 test:security-tab
+> node scripts/check-security-tab-credentials.mjs
+
+OK  security tab: real state, command-layer writes, unlink guard
+OK  forgot password: branches on the server-reported mail state, never lies either way
+
+> aerun@0.0.0 test:last-selected-mask
+> node scripts/check-last-selected-mask.mjs
+
+OK  mask selection: picker write refreshes the store both pickers read from
+
+> aerun@0.0.0 test:roles-live-update
+> node scripts/check-roles-live-update.mjs
+
+OK  roles live update: add/update/delete re-read the registry and notify subscribers
+OK  roles live update: a refused mutation surfaces the server message
+
+> aerun@0.0.0 test:account-status-axis
+> node scripts/check-account-status-axis.mjs
+
+OK  account status axis: no mutation names a pseudo-role as the role
+OK  account status axis: ban/pending are read from the status column
+OK  account status axis: 'banned_logout' is written before the session is evicted
+
+> aerun@0.0.0 test:admin-role-authority
+> node scripts/check-admin-role-authority.mjs
+
+OK  admin role authority: root is read from the role, not the address
+OK  admin role authority: the badge metrics match; `badge-root` is the hook
+OK  admin role authority: the role editor mirrors the server matrix
+OK  admin role authority: the delete confirmation names its subject
+
+> aerun@0.0.0 test:admin-nav-config
+> node scripts/check-admin-nav-config.mjs
+
+admin navigation OK - 3 groups, 6 sections, permissions, i18n and the themeable contract verified
+
+> aerun@0.0.0 test:endpoints
+> node scripts/audit-endpoints.mjs
+
+frontend call shapes: 109
+backend routes registered: 123
+
+FRONTEND CALLS WITH NO MATCHING BACKEND ROUTE (0):
+
+> aerun@0.0.0 test:mask-avatar-isolation
+> node scripts/check-mask-avatar-isolation.mjs
+
+OK  mask avatars: one Storage object per mask, drafts included
+
+> aerun@0.0.0 test:no-firebase-storage
+> node scripts/check-no-firebase-storage.mjs
+
+[OK] No Firebase Storage references found in src/
+
+> aerun@0.0.0 test:no-raw-modal
+> node scripts/check-no-raw-modal.mjs
+
+[OK] No raw react-bootstrap modals in src/ — every modal goes through ForumModal
+
+> aerun@0.0.0 test:unsent-reply-rescue
+> node scripts/check-unsent-reply-rescue.mjs
+
+  ok  a refused reply is rescued with its reason
+  ok  stored under the dedicated unsent-reply prefix, not the composer draft key
+  ok  read back for the member who wrote it
+  ok  another member cannot read this rescue (uid is in the key)
+  ok  hasUnsentReply answers existence per (topic, member)
+  ok  an empty reply form creates no rescue
+  ok  the in-tab change bus notifies on save and clear, then unsubscribes
+  ok  clearUnsentReply removes exactly that (topic, member) rescue
+  ok  listUnsentReplies returns every remaining rescue with its reason
+  ok  the list is newest-first, so the notice opens the most recent rescue
+  ok  a rescue is invisible to every other member
+  ok  guests (no uid) are never served
+  ok  a corrupted key degrades to "no rescue" instead of throwing
+  ok  a flattened message (even one naming a status) is never "the topic is gone"
+  ok  an absent error answers false
+  ok  404 and 403 (status or backend kind) mean the topic will not be served
+  ok  a timeout, 5xx, 409, 429 or contract error is "the read failed", not "gone"
+  ok  only the backend error contract (underscore spellings) is recognised
+
+[OK] unsent-reply rescue: 18 checks passed
+
+> aerun@0.0.0 test:post-navigation
+> node scripts/check-post-navigation.mjs
+
+PASS: focused post navigation regression checks
+PASS: ?post=ID resolves its page server-side; scroll targets stay local
+PASS: in-topic post links scroll locally without a redundant locate
+PASS: locatePost result contract (object|null) matches how TopicPage branches on it
+PASS: optimistic post renders like a regular post, no sending indicator
+{
+  "before": {
+    "errors": 0,
+    "warnings": 0
+  },
+  "after": {
+    "errors": 0,
+    "warnings": 0
+  },
+  "newDiagnostics": []
+}
+PASS: JSX syntax and no new ESLint diagnostics
+
+> aerun@0.0.0 test:no-firebase-deps
+> node scripts/check-no-firebase-deps.mjs
+
+[OK] No Firebase packages or CLI references found in root package.json / lockfile / scripts
+
+> aerun@0.0.0 lint:js
+> eslint .
+
+
+C:\Users\Alina\source\repos\SiJunma\aerun\src\pages\TopicFormPage.jsx
+  129:6  warning  React Hook useEffect has a missing dependency: 'categories'. Either include it or remove the dependency array                                         react-hooks/exhaustive-deps
+  212:6  warning  React Hook useCallback has missing dependencies: 'markTopicRead' and 'scheduleForumStateRefresh'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+✖ 2 problems (0 errors, 2 warnings)
+

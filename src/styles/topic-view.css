@@ -13,6 +13,8 @@
  * consumes it in its topic components.
  */
 
+@import './topic-reply-composer.css';
+
 #topic-page,
 .topic-page {
   margin: var(--topic-page-margin);

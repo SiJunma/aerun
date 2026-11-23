@@ -19,6 +19,7 @@
  * - handleSaveDraft and handleUpdateDraft
  */
 import React, { useState, useCallback, useRef, useEffect } from 'react';
+import ReactDOM from 'react-dom';
 import { useParams, useSearchParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { useI18n } from '../contexts/I18nProvider';
 
@@ -401,6 +402,34 @@ export default function TopicPage() {
   const isSubmittingReplyRef = useRef(false);
   const replyInFlightRef = useRef(createInFlight());
   const rescueWrittenRef = useRef(null);
+
+  // ── Reply placement (portal target) state ──────────────────────────────
+  // The singleton TopicReplyComposer is rendered ONCE here and portaled into
+  // whichever slot the current placement points at. Changing the placement
+  // never unmounts the composer — only the DOM node it lives in.
+  const [replyPlacement, setReplyPlacement] = useState({
+    mode: 'bottom', // 'bottom' | 'inline' | 'floating'
+    targetPostId: null,
+    targetAuthor: null,
+    targetPostNumber: null,
+    isCollapsed: false,
+  });
+  const [portalTargetNode, setPortalTargetNode] = useState(null);
+
+  useEffect(() => {
+    let target = null;
+    if (replyPlacement.mode === 'inline' && replyPlacement.targetPostId) {
+      target = document.getElementById(`inline-reply-slot-${replyPlacement.targetPostId}`);
+    } else if (replyPlacement.mode === 'floating') {
+      target = document.getElementById('floating-reply-drawer-slot');
+    }
+
+    // Fallback: дефолтный слот внизу темы
+    if (!target) {
+      target = document.getElementById('bottom-reply-slot');
+    }
+    setPortalTargetNode(target);
+  }, [replyPlacement, posts]);
 
   // Mask initialization & selection (contract: check-last-selected-mask.mjs)
   useEffect(() => {
@@ -1902,32 +1931,45 @@ export default function TopicPage() {
         t={t}
       />
 
-      <TopicReplyComposer
-        ref={replyRef}
-        topic={topic}
-        category={topic.category || categories.find((c) => c.id === topic.category_id)}
-        user={user}
-        profile={profile}
-        settings={settings}
-        characters={characters}
-        selectedCharacterId={selectedCharacterId}
-        setSelectedCharacterId={setSelectedCharacterId}
-        setLastSelectedMask={handleSelectCharacter}
-        replyContent={replyContent}
-        setReplyContent={setReplyContent}
-        guestNickname={guestNickname}
-        setGuestNickname={setGuestNickname}
-        submitting={submitting}
-        draftSaving={draftSaving}
-        hasDraft={!!myDraft}
-        handleReply={handleReply}
-        handleSaveDraft={handleSaveDraft}
-        hasPermission={hasPermission}
-        PERMISSIONS={PERMISSIONS}
-        computedMaxChars={computedMaxChars}
-        lang={lang}
-        t={t}
-      />
+      {portalTargetNode && ReactDOM.createPortal(
+        <TopicReplyComposer
+          ref={replyRef}
+          topic={topic}
+          category={topic.category || categories.find((c) => c.id === topic.category_id)}
+          user={user}
+          profile={profile}
+          settings={settings}
+          characters={characters}
+          selectedCharacterId={selectedCharacterId}
+          setSelectedCharacterId={setSelectedCharacterId}
+          setLastSelectedMask={handleSelectCharacter}
+          replyContent={replyContent}
+          setReplyContent={setReplyContent}
+          guestNickname={guestNickname}
+          setGuestNickname={setGuestNickname}
+          submitting={submitting}
+          draftSaving={draftSaving}
+          hasDraft={!!myDraft}
+          handleReply={handleReply}
+          handleSaveDraft={handleSaveDraft}
+          hasPermission={hasPermission}
+          PERMISSIONS={PERMISSIONS}
+          computedMaxChars={computedMaxChars}
+          lang={lang}
+          t={t}
+          placement={replyPlacement}
+          onResetToBottom={() => setReplyPlacement({ mode: 'bottom', targetPostId: null, targetAuthor: null, targetPostNumber: null, isCollapsed: false })}
+          onSwitchToFloating={() => setReplyPlacement(prev => ({ ...prev, mode: 'floating' }))}
+          onToggleCollapse={() => setReplyPlacement(prev => ({ ...prev, isCollapsed: !prev.isCollapsed }))}
+        />,
+        portalTargetNode
+      )}
+
+      {/* Default bottom slot — the composer portals here when placement is 'bottom' */}
+      <div id="bottom-reply-slot" className="bottom-reply-slot" />
+
+      {/* Floating drawer slot — fixed at the bottom of the viewport when placement is 'floating' */}
+      <div id="floating-reply-drawer-slot" className="floating-reply-drawer-slot" />
 
       {/* Bottom breadcrumbs & back-to-category (legacy parity) */}
       <nav id="topic-breadcrumbs-bottom" aria-label="breadcrumb">

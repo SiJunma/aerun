@@ -1,0 +1,40 @@
+/**
+ * Aerun Topic Reply Composer — Inline & Floating Reply Form
+ *
+ * Portal slot containers and layout tokens for the singleton TopicReplyComposer.
+ * All colors come from theme-variables.css; no raw hex/rgb here.
+ */
+
+/* Слот под карточкой поста */
+.inline-reply-slot {
+  width: 100%;
+  transition: height 0.25s ease, opacity 0.2s ease;
+}
+
+.inline-reply-slot:empty {
+  display: none;
+}
+
+/* Дефолтный слот в подвале темы */
+.bottom-reply-slot {
+  width: 100%;
+  margin-top: var(--topic-reply-margin-top, 3rem);
+}
+
+.bottom-reply-slot:empty {
+  display: none;
+}
+
+/* Слот для плавающей шторки внизу экрана */
+.floating-reply-drawer-slot {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 1040;
+  pointer-events: none;
+}
+
+.floating-reply-drawer-slot > * {
+  pointer-events: auto;
+}

@@ -63,7 +63,7 @@ export const TopicPostCard = ({
       const width = lineWidths[i % lineWidths.length];
       return <Skeleton key={i} width={width} height="1.25rem" />;
     });
-    return (
+    return (<>
       <article className="topic-post">
         <div className="topic-post-inner">
           <aside className="post-author">
@@ -128,7 +128,7 @@ export const TopicPostCard = ({
           </div>
         </div>
       </article>
-    );
+    </>);
   }
   if (!post) return null;
 
@@ -182,7 +182,7 @@ export const TopicPostCard = ({
     !isBannedAuthor
   );
 
-  return (
+  return (<>
     <article
       id={`post-${post.id}`}
       data-post-id={post.id}
@@ -536,7 +536,16 @@ export const TopicPostCard = ({
         </div>
       </div>
     </article>
-  );
+
+    {/* Inline reply slot — portal target for the singleton TopicReplyComposer.
+        Lives OUTSIDE the article so the post's own padding/borders never
+        bleed onto the composer. Empty when no composer is portaled here. */}
+    <div
+      id={`inline-reply-slot-${post.id}`}
+      className="inline-reply-slot"
+      data-post-id={post.id}
+    />
+  </>);
 };
 
 export default TopicPostCard;
