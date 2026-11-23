@@ -40,10 +40,10 @@ export const TopicModalsContainer = ({
   showRepModal,
   onCancelRepVote,
   onConfirmRepVote,
-  _repValue,
-  _repComment,
-  _setRepComment,
-  _submittingRep,
+  repValue,
+  repComment,
+  setRepComment,
+  submittingRep,
 
   // Vote info
   showVoteInfoModal,
@@ -127,16 +127,44 @@ export const TopicModalsContainer = ({
         topicId={topicId}
       />
 
-      {/* Reputation Vote Modal */}
-      <ConfirmModal
+      {/* Reputation Vote Modal — restored from main: the vote value badge,
+          the explanation and the comment field. The Sprint A migration had
+          replaced it with a bare ConfirmModal, dropping all three. */}
+      <ForumModal
         show={showRepModal}
         onHide={onCancelRepVote}
-        onConfirm={onConfirmRepVote}
+        size="md"
         title={t('forum.rep_vote_title')}
-        message={t('forum.rep_vote_message')}
-        confirmText={t('forum.rep_vote_confirm')}
-        cancelText={t?.('common.cancel') || 'Cancel'}
-      />
+        footer={
+          <>
+            <Button variant="secondary" onClick={onCancelRepVote}>
+              {t?.('common.cancel') || 'Cancel'}
+            </Button>
+            <Button variant="primary" onClick={onConfirmRepVote} disabled={submittingRep}>
+              {submittingRep ? t('common.loading') : t('forum.rep_vote_confirm')}
+            </Button>
+          </>
+        }
+      >
+        <div className="topic-text-center topic-mb-3">
+          <span className={`topic-badge topic-badge--${repValue > 0 ? 'success' : 'danger'}`}>
+            {repValue > 0 ? `+${repValue}` : repValue}
+          </span>
+          <div className="topic-text-sm topic-text-muted topic-mt-2">
+            {t('forum.rep_vote_explanation')}
+          </div>
+        </div>
+        <div>
+          <div className="topic-text-sm topic-text-muted topic-mb-2">{t('forum.vote_comment')}</div>
+          <textarea
+            className="topic-textarea modal-section-themed"
+            rows={3}
+            value={repComment}
+            onChange={(e) => setRepComment(e.target.value)}
+            placeholder={t('forum.vote_comment_placeholder')}
+          />
+        </div>
+      </ForumModal>
 
       {/* Vote Info Modal */}
       <ForumModal
