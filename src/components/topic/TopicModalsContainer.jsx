@@ -153,25 +153,25 @@ export const TopicModalsContainer = ({
               at all (ProfilePage gates its − button the same way). In
               positive-only mode there is no choice — the vote is +1. */}
           {reputationStyle !== 'positive_only' && (
-            <div className="topic-flex-center topic-gap-2 topic-mb-3">
-              <Button
+            <div className="rep-vote-toggle topic-mb-3" role="group">
+              <button
                 type="button"
-                variant={repValue > 0 ? 'primary' : 'secondary'}
-                size="sm"
+                className={`rep-vote-toggle__btn rep-vote-toggle__btn--plus${repValue > 0 ? ' rep-vote-toggle__btn--active' : ''}`}
                 onClick={() => setRepValue(1)}
                 disabled={submittingRep}
+                aria-pressed={repValue > 0}
               >
                 +
-              </Button>
-              <Button
+              </button>
+              <button
                 type="button"
-                variant={repValue < 0 ? 'danger' : 'secondary'}
-                size="sm"
+                className={`rep-vote-toggle__btn rep-vote-toggle__btn--minus${repValue < 0 ? ' rep-vote-toggle__btn--active' : ''}`}
                 onClick={() => setRepValue(-1)}
                 disabled={submittingRep}
+                aria-pressed={repValue < 0}
               >
                 −
-              </Button>
+              </button>
             </div>
           )}
           <span className={`topic-badge topic-badge--lg topic-badge--${repValue > 0 ? 'success' : 'danger'}`}>
@@ -182,9 +182,9 @@ export const TopicModalsContainer = ({
           </div>
         </div>
         <div>
-          <div className="topic-text-sm topic-text-muted topic-mb-2">{t('forum.vote_comment')}</div>
+          <div className="topic-text-sm topic-text-muted topic-mb-2">{t('profile.rep_add_comment')}</div>
           <textarea
-            className="topic-textarea modal-section-themed"
+            className="topic-textarea"
             rows={3}
             value={repComment}
             onChange={(e) => setRepComment(e.target.value)}
@@ -238,7 +238,7 @@ export const TopicModalsContainer = ({
               {isEditingRepComment ? (
                 <div className="modal-inner-card">
                   <textarea
-                    className="topic-textarea modal-section-themed topic-mb-2"
+                    className="topic-textarea topic-mb-2"
                     rows={2}
                     value={editingRepComment}
                     onChange={(e) => setEditingRepComment(e.target.value)}
