@@ -280,7 +280,8 @@
    --topic-reply-toast-btn-bg: rgba(255, 255, 255, 0.2);
    --topic-reply-toast-btn-border: rgba(255, 255, 255, 0.4);
 
-   /* В блоке [data-theme='dark'] */
+       --topic-reply-header-text: #ffffff;
+    /* В блоке [data-theme='dark'] */
    --topic-reply-inline-bar-bg: var(--nav-bg);
    --topic-reply-inline-bar-text: var(--topic-reply-header-text);
    --topic-reply-inline-btn-border: rgba(255, 255, 255, 0.2);
