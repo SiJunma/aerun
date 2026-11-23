@@ -3,7 +3,7 @@
 > **Статус:** Рабочий пошаговый план внедрения для исполнителя  
 > **Ветка:** `main`  
 > **Стек:** Go 1.27 + PocketBase v0.40.4 + SQLite (FTS5) + React 19 + Lucide-react  
-> **Основа:** `markdowns/CONCEPT_Search_Page.md` (версия 2.0), `markdowns/Бриф.md`  
+> **Основа:** `*_Search_Page.md`  
 > **Референс:** Классическая панель расширенного поиска форума (стиль MyBB / vBulletin)
 
 ---
