@@ -414,6 +414,9 @@ export default function TopicPage() {
   });
   const [portalTargetNode, setPortalTargetNode] = useState(null);
 
+  // Track previous placement to detect when mode/targetPostId changes (for scroll-to-form)
+  const prevPlacementRef = useRef({ mode: replyPlacement.mode, targetPostId: replyPlacement.targetPostId });
+
   useEffect(() => {
     let target = null;
     if (replyPlacement.mode === 'inline' && replyPlacement.targetPostId) {
@@ -425,6 +428,23 @@ export default function TopicPage() {
       target = document.getElementById('bottom-reply-slot');
     }
     setPortalTargetNode(target);
+
+    // Scroll to form when placement mode or targetPostId changes (not on posts/isCollapsed changes)
+    const prevMode = prevPlacementRef.current.mode;
+    const prevTargetPostId = prevPlacementRef.current.targetPostId;
+    const currMode = replyPlacement.mode;
+    const currTargetPostId = replyPlacement.targetPostId;
+
+    if (prevMode !== currMode || prevTargetPostId !== currTargetPostId) {
+      prevPlacementRef.current = { mode: currMode, targetPostId: currTargetPostId };
+      // Use requestAnimationFrame to ensure portal has moved the form first
+      requestAnimationFrame(() => {
+        const form = document.getElementById('reply-composer-form');
+        if (form) {
+          form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      });
+    }
   }, [replyPlacement, posts]);
 
   // Mask initialization & selection (contract: check-last-selected-mask.mjs)
@@ -1113,6 +1133,8 @@ export default function TopicPage() {
             // (guarded by alreadyJumpedRef.current) can reposition on the
             // confirmed post after a same-page send.
             setAlreadyJumped(false);
+            // Reset form placement to bottom after successful publish
+            setReplyPlacement({ mode: 'bottom', targetPostId: null, isCollapsed: false });
             if (curCategoryId) {
               updateLocalTopicLastPost?.(id);
             }
@@ -1955,7 +1977,7 @@ export default function TopicPage() {
           lang={lang}
           t={t}
           placement={replyPlacement}
-          onResetToBottom={() => setReplyPlacement({ mode: 'bottom', targetPostId: null, isCollapsed: false })}
+          onResetToBottom={() => setReplyPlacement(prev => ({ ...prev, mode: 'bottom', targetPostId: null }))}
           onToggleCollapse={() => setReplyPlacement(prev => ({ ...prev, isCollapsed: !prev.isCollapsed }))}
         />,
         portalTargetNode

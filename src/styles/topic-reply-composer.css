@@ -110,3 +110,8 @@
     transform: translateY(0);
   }
 }
+
+/* Ensure form not covered by sticky header when scrolled into view */
+#reply-composer-form {
+  scroll-margin-top: 85px;
+}

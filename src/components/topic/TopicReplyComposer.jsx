@@ -167,7 +167,7 @@ export const TopicReplyComposer = React.forwardRef(({
 
   return (
     <>
-      <div className={`mt-5${isInline ? ' topic-reply--inline' : ''}`} ref={ref} id="reply-composer-form">
+      <div className={`${isInline ? ' topic-reply--inline' : ''}`} ref={ref} id="reply-composer-form">
         <div className="topic-reply__card">
           <div className="topic-reply__header">
             <h5 className="topic-reply__title">{t?.('forum.create_post') || 'Reply'}</h5>
