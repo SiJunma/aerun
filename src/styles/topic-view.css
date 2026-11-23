@@ -2617,7 +2617,10 @@
 }
 
 .topic-btn--ghost:hover:not(:disabled) {
-  color: var(--link-hover-color);
+  /* --link-hover-color is a NAV variable (#ffffff): white text disappears
+     on every light surface a ghost button sits on (Vote Info modal Edit,
+     and any future ghost text button). --text-color reads in all themes. */
+  color: var(--text-color);
   text-decoration: underline;
 }
 
