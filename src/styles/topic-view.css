@@ -1701,6 +1701,12 @@
   align-items: center;
 }
 
+.topic-flex-center {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
 .topic-text-bold {
   font-weight: 700;
 }

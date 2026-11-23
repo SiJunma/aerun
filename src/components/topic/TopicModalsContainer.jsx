@@ -41,8 +41,10 @@ export const TopicModalsContainer = ({
   onCancelRepVote,
   onConfirmRepVote,
   repValue,
+  setRepValue,
   repComment,
   setRepComment,
+  reputationStyle,
   submittingRep,
 
   // Vote info
@@ -147,6 +149,31 @@ export const TopicModalsContainer = ({
         }
       >
         <div className="topic-text-center topic-mb-3">
+          {/* Vote direction: the forum setting decides whether minuses exist
+              at all (ProfilePage gates its − button the same way). In
+              positive-only mode there is no choice — the vote is +1. */}
+          {reputationStyle !== 'positive_only' && (
+            <div className="topic-flex-center topic-gap-2 topic-mb-3">
+              <Button
+                type="button"
+                variant={repValue > 0 ? 'primary' : 'secondary'}
+                size="sm"
+                onClick={() => setRepValue(1)}
+                disabled={submittingRep}
+              >
+                +
+              </Button>
+              <Button
+                type="button"
+                variant={repValue < 0 ? 'danger' : 'secondary'}
+                size="sm"
+                onClick={() => setRepValue(-1)}
+                disabled={submittingRep}
+              >
+                −
+              </Button>
+            </div>
+          )}
           <span className={`topic-badge topic-badge--lg topic-badge--${repValue > 0 ? 'success' : 'danger'}`}>
             {repValue > 0 ? `+${repValue}` : repValue}
           </span>
