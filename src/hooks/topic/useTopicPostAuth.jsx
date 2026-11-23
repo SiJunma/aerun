@@ -15,8 +15,9 @@ export const useTopicPostAuth = ({
   hasPermission,
   PERMISSIONS,
   setReplyContent,
-  replyRef,
-  scrollToReply,
+  _replyRef,
+  _scrollToReply,
+  setReplyPlacement,
   _lang,
 }) => {
   const stripQuotes = useCallback((text) => {
@@ -159,8 +160,17 @@ export const useTopicPostAuth = ({
       return prev + separator + quote;
     });
     window.getSelection().removeAllRanges();
-    scrollToReply(replyRef);
-  }, [getLiveAuthorDisplayName, setReplyContent, replyRef, scrollToReply, topicId, stripQuotes]);
+    // Activate inline mode under the quoted post instead of scrolling to bottom
+    if (setReplyPlacement) {
+      setReplyPlacement({
+        mode: 'inline',
+        targetPostId: post.id,
+        targetAuthor: author,
+        targetPostNumber: post.postNumber,
+        isCollapsed: false,
+      });
+    }
+  }, [getLiveAuthorDisplayName, setReplyContent, setReplyPlacement, topicId, stripQuotes]);
 
   const handleQuoteAuthor = useCallback((authorName) => {
     if (!authorName) return;
@@ -168,8 +178,17 @@ export const useTopicPostAuth = ({
       const separator = prev.trim() && !prev.endsWith('\n') ? '\n' : '';
       return `${prev}${separator}[b]${authorName}[/b], `;
     });
-    scrollToReply(replyRef);
-  }, [setReplyContent, replyRef, scrollToReply]);
+    // Activate inline mode instead of scrolling to bottom
+    if (setReplyPlacement) {
+      setReplyPlacement({
+        mode: 'inline',
+        targetPostId: null,
+        targetAuthor: authorName,
+        targetPostNumber: null,
+        isCollapsed: false,
+      });
+    }
+  }, [setReplyContent, setReplyPlacement]);
 
   return {
     getLiveAuthorDisplayName,

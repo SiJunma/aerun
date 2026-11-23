@@ -1,5 +1,5 @@
 import React from 'react';
-import { User, Keyboard, FilePen, Lock, MessageSquareOff } from 'lucide-react';
+import { User, Keyboard, FilePen, Lock, MessageSquareOff, ChevronDown, ChevronUp, X } from 'lucide-react';
 import RichEditor from '../common/RichEditor';
 import MaskPicker from './MaskPicker';
 import Button from '../common/Button';
@@ -30,7 +30,11 @@ export const TopicReplyComposer = React.forwardRef(({
   hasPermission,
   PERMISSIONS,
   computedMaxChars,
-  t
+  t,
+  placement,
+  onResetToBottom,
+  onSwitchToFloating,
+  onToggleCollapse,
 }, ref) => {
   const replyEditorRef = React.useRef(null);
 
@@ -93,13 +97,72 @@ export const TopicReplyComposer = React.forwardRef(({
 
   const canUseMasks = user && hasPermission(PERMISSIONS.USE_MASKS, { category }) && (settings?.enableCharacters !== false);
 
+  const isInline = placement?.mode === 'inline';
+  const isCollapsed = placement?.isCollapsed === true;
+
+  // Inline header bar (shown when in inline mode and not collapsed)
+  const inlineHeader = isInline && !isCollapsed ? (
+    <div className="topic-reply__inline-bar">
+      <div className="topic-reply__inline-bar-left">
+        <span className="topic-reply__inline-title">
+          {t?.('forum.replying_to') || 'Replying to'} {placement.targetAuthor}
+        </span>
+        {placement.targetPostNumber && (
+          <span className="topic-reply__inline-post-num">#{placement.targetPostNumber}</span>
+        )}
+      </div>
+      <div className="topic-reply__inline-bar-right">
+        <button
+          type="button"
+          className="topic-reply__inline-btn"
+          onClick={onToggleCollapse}
+          aria-label={t?.('forum.collapse') || 'Collapse'}
+          title={t?.('forum.collapse') || 'Collapse'}
+        >
+          <ChevronUp size={16} />
+        </button>
+        <button
+          type="button"
+          className="topic-reply__inline-btn"
+          onClick={onSwitchToFloating}
+          aria-label={t?.('forum.switch_to_floating') || 'Switch to floating'}
+          title={t?.('forum.switch_to_floating') || 'Switch to floating'}
+        >
+          <ChevronDown size={16} />
+        </button>
+        <button
+          type="button"
+          className="topic-reply__inline-btn"
+          onClick={onResetToBottom}
+          aria-label={t?.('forum.return_to_footer') || 'Return to footer'}
+          title={t?.('forum.return_to_footer') || 'Return to footer'}
+        >
+          <X size={16} />
+        </button>
+      </div>
+    </div>
+  ) : null;
+
+  // Collapsed pill (shown when collapsed)
+  const collapsedPill = isCollapsed ? (
+    <div className="topic-reply__collapsed-pill" onClick={onToggleCollapse}>
+      <span className="topic-reply__collapsed-pill-text">
+        {t?.('forum.reply_draft') || 'Reply draft'} — {placement.targetAuthor}
+      </span>
+      <ChevronDown size={16} className="topic-reply__collapsed-pill-icon" />
+    </div>
+  ) : null;
+
   return (
-    <div className="mt-5" ref={ref} id="reply-composer-form">
-      <div className="topic-reply__card">
-        <div className="topic-reply__header">
-          <h5 className="topic-reply__title">{t?.('forum.create_post') || 'Reply'}</h5>
-        </div>
-        <div className="topic-reply__body">
+    <>
+      {collapsedPill}
+      <div className={`mt-5${isInline ? ' topic-reply--inline' : ''}`} ref={ref} id="reply-composer-form">
+        <div className="topic-reply__card">
+          {inlineHeader}
+          <div className="topic-reply__header">
+            <h5 className="topic-reply__title">{t?.('forum.create_post') || 'Reply'}</h5>
+          </div>
+          <div className="topic-reply__body">
           <form onSubmit={handleReply}>
             {!user && (
               <div className="topic-reply__field">
@@ -185,8 +248,9 @@ export const TopicReplyComposer = React.forwardRef(({
             </div>
           </form>
         </div>
+        </div>
       </div>
-    </div>
+    </>
   );
 });
 

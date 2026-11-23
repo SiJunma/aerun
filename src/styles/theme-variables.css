@@ -374,6 +374,13 @@ body {
    --topic-reply-notice-icon-max-width: 400px;
    --topic-reply-notice-gap: 1rem;
 
+   /* ── Inline reply form tokens (Sprint 2) ───────────────────── */
+   --topic-reply-inline-bar-bg: var(--nav-bg);
+   --topic-reply-inline-bar-text: var(--topic-reply-header-text);
+   --topic-reply-inline-btn-border: rgba(255, 255, 255, 0.2);
+   --topic-reply-inline-btn-hover-bg: rgba(255, 255, 255, 0.15);
+   --topic-reply-shadow-inline: 0 4px 16px rgba(0, 0, 0, 0.12);
+
    --topic-actions-row-padding-x: 0.5rem;
    --topic-actions-row-padding-x-md: 0;
    --topic-actions-row-margin-top: 1.5rem;
@@ -485,6 +492,13 @@ body {
    --management-toolbar-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
    --quote-border-color: #334155;
 
+   /* ── Inline reply form tokens (Sprint 2) ───────── */
+   --topic-reply-inline-bar-bg: var(--nav-bg);
+   --topic-reply-inline-bar-text: var(--topic-reply-header-text);
+   --topic-reply-inline-btn-border: rgba(255, 255, 255, 0.2);
+   --topic-reply-inline-btn-hover-bg: rgba(255, 255, 255, 0.15);
+   --topic-reply-shadow-inline: 0 4px 16px rgba(0, 0, 0, 0.35);
+
    --link-hover-color: #ffffff;
    --success-bg: #0f5132;
    --success-text: #d1e7dd;
@@ -526,6 +540,11 @@ body {
    --topic-pinned-color: #78350f;
    --topic-locked-color: #b91c1c;
    --quote-border-color: #666;
+   --topic-reply-inline-bar-bg: var(--nav-bg);
+   --topic-reply-inline-bar-text: var(--topic-reply-header-text);
+   --topic-reply-inline-btn-border: rgba(255, 255, 255, 0.2);
+   --topic-reply-inline-btn-hover-bg: rgba(255, 255, 255, 0.15);
+   --topic-reply-shadow-inline: 0 4px 16px rgba(0, 0, 0, 0.2);
    --footer-post-header-bg: #f8f4ec;
    --mini-pagination-hover-color: #fffcf5;
    --forum-view-btn-primary-bg: #8c7a6b;

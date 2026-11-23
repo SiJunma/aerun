@@ -38,3 +38,132 @@
 .floating-reply-drawer-slot > * {
   pointer-events: auto;
 }
+
+/* ────────────────────────────────────────────────────────────────
+   Inline reply form (Sprint 2)
+   ──────────────────────────────────────────────────────────────── */
+
+/* Inline mode card modifier */
+.topic-reply--inline .topic-reply__card {
+  margin-bottom: 1.5rem;
+  border-left: 3px solid var(--primary-color);
+  border-radius: var(--topic-reply-card-radius);
+  box-shadow: var(--topic-reply-shadow-inline);
+  animation: inlineReplySlideDown 0.25s ease-out;
+}
+
+@keyframes inlineReplySlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Inline header bar */
+.topic-reply__inline-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 1rem;
+  background-color: var(--topic-reply-inline-bar-bg);
+  color: var(--topic-reply-inline-bar-text);
+  border-top-left-radius: var(--topic-reply-card-radius);
+  border-top-right-radius: var(--topic-reply-card-radius);
+  font-size: 0.875rem;
+}
+
+.topic-reply__inline-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.topic-reply__inline-title {
+  font-weight: 500;
+}
+
+.topic-reply__inline-post-num {
+  color: var(--topic-reply-inline-bar-text);
+  opacity: 0.7;
+  font-size: 0.75rem;
+}
+
+.topic-reply__inline-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.topic-reply__inline-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--topic-reply-inline-btn-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--topic-reply-inline-bar-text);
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.topic-reply__inline-btn:hover {
+  background-color: var(--topic-reply-inline-btn-hover-bg);
+  border-color: var(--topic-reply-inline-btn-border);
+}
+
+.topic-reply__inline-btn:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
+/* Collapsed pill */
+.topic-reply__collapsed-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--topic-reply-card-border);
+  border-radius: 9999px;
+  background-color: var(--topic-reply-card-bg);
+  box-shadow: var(--topic-reply-card-shadow);
+  cursor: pointer;
+  animation: pillFadeIn 0.2s ease-out;
+}
+
+.topic-reply__collapsed-pill:hover {
+  background-color: var(--topic-reply-card-bg);
+  border-color: var(--primary-color);
+}
+
+.topic-reply__collapsed-pill:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
+.topic-reply__collapsed-pill-text {
+  font-size: 0.875rem;
+  color: var(--text-color);
+}
+
+.topic-reply__collapsed-pill-icon {
+  color: var(--secondary-color);
+  transition: transform 0.2s ease;
+}
+
+@keyframes pillFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

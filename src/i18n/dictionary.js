@@ -212,6 +212,14 @@ export const translations = {
       spectator_mode: "👁 Spectator mode — you can read but cannot post replies.",
       topic_locked: "Topic Locked",
       topic_locked_desc: "This topic has been locked by a moderator. New replies are not allowed.",
+
+      // Inline reply form (Sprint 2)
+      replying_to: "Replying to",
+      reply_draft: "Reply draft",
+      collapse: "Collapse",
+      switch_to_floating: "Switch to floating",
+      return_to_footer: "Return to footer",
+
       mark_all_read: "Mark all as read",
       private_topic: "Private Topic",
       wrote: "wrote",
@@ -1699,6 +1707,14 @@ export const translations = {
       spectator_mode: "👁 Режим наблюдателя — вы можете читать, но не можете публиковать сообщения.",
       topic_locked: "Тема закрыта",
       topic_locked_desc: "Эта тема была закрыта модератором. Публикация новых сообщений невозможна.",
+
+      // Inline reply form (Sprint 2)
+      replying_to: "Ответ",
+      reply_draft: "Черновик ответа",
+      collapse: "Свернуть",
+      switch_to_floating: "Переключить на плавающую",
+      return_to_footer: "Вернуть в подвал",
+
       mark_all_read: "Отметить все как прочитанные",
       private_topic: "Приватная тема",
       wrote: "написал(а)",

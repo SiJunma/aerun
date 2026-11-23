@@ -643,6 +643,7 @@ export default function TopicPage() {
     setReplyContent,
     replyRef,
     scrollToReply,
+    setReplyPlacement,
     _lang: lang,
   });
 
