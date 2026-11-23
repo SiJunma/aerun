@@ -1,5 +1,5 @@
 import React from 'react';
-import { User, Keyboard, FilePen, Lock, MessageSquareOff, ChevronDown, ChevronUp, X } from 'lucide-react';
+import { User, Keyboard, FilePen, Lock, MessageSquareOff, Minimize2, ArrowDownToLine } from 'lucide-react';
 import RichEditor from '../common/RichEditor';
 import MaskPicker from './MaskPicker';
 import Button from '../common/Button';
@@ -33,7 +33,6 @@ export const TopicReplyComposer = React.forwardRef(({
   t,
   placement,
   onResetToBottom,
-  onSwitchToFloating,
   onToggleCollapse,
 }, ref) => {
   const replyEditorRef = React.useRef(null);
@@ -103,14 +102,6 @@ export const TopicReplyComposer = React.forwardRef(({
   // Inline header bar (shown when in inline mode and not collapsed)
   const inlineHeader = isInline && !isCollapsed ? (
     <div className="topic-reply__inline-bar">
-      <div className="topic-reply__inline-bar-left">
-        <span className="topic-reply__inline-title">
-          {t?.('forum.replying_to') || 'Replying to'} {placement.targetAuthor}
-        </span>
-        {placement.targetPostNumber && (
-          <span className="topic-reply__inline-post-num">#{placement.targetPostNumber}</span>
-        )}
-      </div>
       <div className="topic-reply__inline-bar-right">
         <button
           type="button"
@@ -119,43 +110,61 @@ export const TopicReplyComposer = React.forwardRef(({
           aria-label={t?.('forum.collapse') || 'Collapse'}
           title={t?.('forum.collapse') || 'Collapse'}
         >
-          <ChevronUp size={16} />
-        </button>
-        <button
-          type="button"
-          className="topic-reply__inline-btn"
-          onClick={onSwitchToFloating}
-          aria-label={t?.('forum.switch_to_floating') || 'Switch to floating'}
-          title={t?.('forum.switch_to_floating') || 'Switch to floating'}
-        >
-          <ChevronDown size={16} />
+          <Minimize2 size={16} />
+          <span className="topic-reply__inline-btn-label">{t?.('forum.collapse') || 'Свернуть'}</span>
         </button>
         <button
           type="button"
           className="topic-reply__inline-btn"
           onClick={onResetToBottom}
-          aria-label={t?.('forum.return_to_footer') || 'Return to footer'}
-          title={t?.('forum.return_to_footer') || 'Return to footer'}
+          aria-label={t?.('forum.move_to_bottom') || 'Move to bottom'}
+          title={t?.('forum.to_bottom') || 'В конец'}
         >
-          <X size={16} />
+          <ArrowDownToLine size={16} />
+          <span className="topic-reply__inline-btn-label">{t?.('forum.to_bottom') || 'В конец'}</span>
         </button>
       </div>
     </div>
   ) : null;
 
-  // Collapsed pill (shown when collapsed)
+  // Collapsed pill (shown when collapsed) - either pill OR form, not both
   const collapsedPill = isCollapsed ? (
-    <div className="topic-reply__collapsed-pill" onClick={onToggleCollapse}>
+    <div className="topic-reply__collapsed-pill">
+      <FilePen size={16} className="topic-reply__collapsed-pill-icon" />
       <span className="topic-reply__collapsed-pill-text">
-        {t?.('forum.reply_draft') || 'Reply draft'} — {placement.targetAuthor}
+        {t?.('forum.reply_collapsed_draft') || 'Reply minimized'}
+        {replyContent.trim() && ` (${replyContent.trim().length} ${t?.('forum.chars') || 'chars'})`}
       </span>
-      <ChevronDown size={16} className="topic-reply__collapsed-pill-icon" />
+      <button
+        type="button"
+        className="topic-reply__collapsed-pill-btn"
+        onClick={onToggleCollapse}
+        aria-label={t?.('forum.expand') || 'Expand'}
+      >
+        {t?.('forum.expand') || 'Развернуть'}
+      </button>
+      <button
+        type="button"
+        className="topic-reply__collapsed-pill-btn topic-reply__collapsed-pill-btn--danger"
+        onClick={onResetToBottom}
+        aria-label={t?.('forum.move_to_bottom') || 'Move to bottom'}
+      >
+        {t?.('forum.to_bottom') || 'В конец'}
+      </button>
     </div>
   ) : null;
 
+  // When collapsed, render only the pill, not the form
+  if (isCollapsed) {
+    return (
+      <>
+        {collapsedPill}
+      </>
+    );
+  }
+
   return (
     <>
-      {collapsedPill}
       <div className={`mt-5${isInline ? ' topic-reply--inline' : ''}`} ref={ref} id="reply-composer-form">
         <div className="topic-reply__card">
           {inlineHeader}

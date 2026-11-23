@@ -380,6 +380,9 @@ body {
    --topic-reply-inline-btn-border: rgba(255, 255, 255, 0.2);
    --topic-reply-inline-btn-hover-bg: rgba(255, 255, 255, 0.15);
    --topic-reply-shadow-inline: 0 4px 16px rgba(0, 0, 0, 0.12);
+    --topic-reply-shadow-pill: 0 4px 18px rgba(0, 0, 0, 0.2);
+    --topic-reply-toast-btn-bg: rgba(255, 255, 255, 0.2);
+    --topic-reply-toast-btn-border: rgba(255, 255, 255, 0.4);
 
    --topic-actions-row-padding-x: 0.5rem;
    --topic-actions-row-padding-x-md: 0;
@@ -498,6 +501,9 @@ body {
    --topic-reply-inline-btn-border: rgba(255, 255, 255, 0.2);
    --topic-reply-inline-btn-hover-bg: rgba(255, 255, 255, 0.15);
    --topic-reply-shadow-inline: 0 4px 16px rgba(0, 0, 0, 0.35);
+    --topic-reply-shadow-pill: 0 4px 18px rgba(0, 0, 0, 0.35);
+    --topic-reply-toast-btn-bg: rgba(255, 255, 255, 0.2);
+    --topic-reply-toast-btn-border: rgba(255, 255, 255, 0.4);
 
    --link-hover-color: #ffffff;
    --success-bg: #0f5132;
@@ -545,6 +551,9 @@ body {
    --topic-reply-inline-btn-border: rgba(255, 255, 255, 0.2);
    --topic-reply-inline-btn-hover-bg: rgba(255, 255, 255, 0.15);
    --topic-reply-shadow-inline: 0 4px 16px rgba(0, 0, 0, 0.2);
+   --topic-reply-shadow-pill: 0 4px 18px rgba(0, 0, 0, 0.25);
+   --topic-reply-toast-btn-bg: rgba(255, 255, 255, 0.2);
+   --topic-reply-toast-btn-border: rgba(255, 255, 255, 0.4);
    --footer-post-header-bg: #f8f4ec;
    --mini-pagination-hover-color: #fffcf5;
    --forum-view-btn-primary-bg: #8c7a6b;

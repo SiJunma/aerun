@@ -214,11 +214,11 @@ export const translations = {
       topic_locked_desc: "This topic has been locked by a moderator. New replies are not allowed.",
 
       // Inline reply form (Sprint 2)
-      replying_to: "Replying to",
-      reply_draft: "Reply draft",
       collapse: "Collapse",
-      switch_to_floating: "Switch to floating",
-      return_to_footer: "Return to footer",
+      expand: "Expand",
+      to_bottom: "To bottom",
+      move_to_bottom: "Move to bottom",
+      reply_collapsed_draft: "Reply minimized",
 
       mark_all_read: "Mark all as read",
       private_topic: "Private Topic",
@@ -1709,11 +1709,11 @@ export const translations = {
       topic_locked_desc: "Эта тема была закрыта модератором. Публикация новых сообщений невозможна.",
 
       // Inline reply form (Sprint 2)
-      replying_to: "Ответ",
-      reply_draft: "Черновик ответа",
       collapse: "Свернуть",
-      switch_to_floating: "Переключить на плавающую",
-      return_to_footer: "Вернуть в подвал",
+      expand: "Развернуть",
+      to_bottom: "В конец",
+      move_to_bottom: "Переместить в конец",
+      reply_collapsed_draft: "Ответ свернут",
 
       mark_all_read: "Отметить все как прочитанные",
       private_topic: "Приватная тема",

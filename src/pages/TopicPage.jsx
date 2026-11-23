@@ -408,10 +408,8 @@ export default function TopicPage() {
   // whichever slot the current placement points at. Changing the placement
   // never unmounts the composer — only the DOM node it lives in.
   const [replyPlacement, setReplyPlacement] = useState({
-    mode: 'bottom', // 'bottom' | 'inline' | 'floating'
+    mode: 'bottom', // 'bottom' | 'inline'
     targetPostId: null,
-    targetAuthor: null,
-    targetPostNumber: null,
     isCollapsed: false,
   });
   const [portalTargetNode, setPortalTargetNode] = useState(null);
@@ -420,8 +418,6 @@ export default function TopicPage() {
     let target = null;
     if (replyPlacement.mode === 'inline' && replyPlacement.targetPostId) {
       target = document.getElementById(`inline-reply-slot-${replyPlacement.targetPostId}`);
-    } else if (replyPlacement.mode === 'floating') {
-      target = document.getElementById('floating-reply-drawer-slot');
     }
 
     // Fallback: дефолтный слот внизу темы
@@ -1959,8 +1955,7 @@ export default function TopicPage() {
           lang={lang}
           t={t}
           placement={replyPlacement}
-          onResetToBottom={() => setReplyPlacement({ mode: 'bottom', targetPostId: null, targetAuthor: null, targetPostNumber: null, isCollapsed: false })}
-          onSwitchToFloating={() => setReplyPlacement(prev => ({ ...prev, mode: 'floating' }))}
+          onResetToBottom={() => setReplyPlacement({ mode: 'bottom', targetPostId: null, isCollapsed: false })}
           onToggleCollapse={() => setReplyPlacement(prev => ({ ...prev, isCollapsed: !prev.isCollapsed }))}
         />,
         portalTargetNode
@@ -1968,9 +1963,6 @@ export default function TopicPage() {
 
       {/* Default bottom slot — the composer portals here when placement is 'bottom' */}
       <div id="bottom-reply-slot" className="bottom-reply-slot" />
-
-      {/* Floating drawer slot — fixed at the bottom of the viewport when placement is 'floating' */}
-      <div id="floating-reply-drawer-slot" className="floating-reply-drawer-slot" />
 
       {/* Bottom breadcrumbs & back-to-category (legacy parity) */}
       <nav id="topic-breadcrumbs-bottom" aria-label="breadcrumb">

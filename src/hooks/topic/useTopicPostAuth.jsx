@@ -165,8 +165,6 @@ export const useTopicPostAuth = ({
       setReplyPlacement({
         mode: 'inline',
         targetPostId: post.id,
-        targetAuthor: author,
-        targetPostNumber: post.postNumber,
         isCollapsed: false,
       });
     }
@@ -178,17 +176,7 @@ export const useTopicPostAuth = ({
       const separator = prev.trim() && !prev.endsWith('\n') ? '\n' : '';
       return `${prev}${separator}[b]${authorName}[/b], `;
     });
-    // Activate inline mode instead of scrolling to bottom
-    if (setReplyPlacement) {
-      setReplyPlacement({
-        mode: 'inline',
-        targetPostId: null,
-        targetAuthor: authorName,
-        targetPostNumber: null,
-        isCollapsed: false,
-      });
-    }
-  }, [setReplyContent, setReplyPlacement]);
+  }, [setReplyContent]);
 
   return {
     getLiveAuthorDisplayName,
