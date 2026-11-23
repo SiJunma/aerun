@@ -173,6 +173,13 @@ export const useTopicModalState = ({
         if (Object.keys(topicUpdates).length > 0) {
           await updateTopic(topicId, topicUpdates, currentUser?.uid);
           setTopic((prev) => (prev ? { ...prev, ...topicUpdates } : prev));
+          // The topic page now shows the new title, but the forum index
+          // (AuthProvider's categories) still carries the old
+          // last_post_topic_title: a rename emits no realtime signal, so
+          // the index would otherwise re-read only on its 60s poll and the
+          // main page keeps showing the old title until then. Refresh it
+          // the same way the delete/move handlers in this file do.
+          scheduleForumStateRefresh?.();
         }
       }
 
@@ -193,7 +200,7 @@ export const useTopicModalState = ({
     } finally {
       if (isMountedRef.current) setModalState((prev) => ({ ...prev, savingEdit: false }));
     }
-  }, [topicId, currentUser, showToast, posts, pinnedFirstPost, currentPage, ITEMS_PER_PAGE, isTopicFirstPost, buildAuthorDTO, mutationEditPost, setPosts, setPinnedFirstPost, setTopic, topic, isMountedRef, modalState, t]);
+  }, [topicId, currentUser, showToast, posts, pinnedFirstPost, currentPage, ITEMS_PER_PAGE, isTopicFirstPost, buildAuthorDTO, mutationEditPost, setPosts, setPinnedFirstPost, setTopic, topic, isMountedRef, modalState, scheduleForumStateRefresh, t]);
 
 
   const handleConfirmDeleteTopic = async () => {
