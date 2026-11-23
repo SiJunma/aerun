@@ -1135,14 +1135,6 @@
   border: 1px solid var(--success-border);
 }
 
-/* Large badge: the vote value in the Reputation Vote modal, same size as
-   main's fs-3 px-4 py-2 badge. The default badge is too small there. */
-.topic-badge--lg {
-  padding: 0.5rem 1.5rem;
-  font-size: 1.75rem;
-  border-radius: 0.5rem;
-}
-
 /* Reputation vote direction toggle: one joined control, not two loose
    buttons. The active half takes the badge's own colors (success for +,
    danger for −), so the toggle and the value badge below it read as one. */

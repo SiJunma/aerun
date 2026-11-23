@@ -174,9 +174,6 @@ export const TopicModalsContainer = ({
               </button>
             </div>
           )}
-          <span className={`topic-badge topic-badge--lg topic-badge--${repValue > 0 ? 'success' : 'danger'}`}>
-            {repValue > 0 ? `+${repValue}` : repValue}
-          </span>
           <div className="topic-text-sm topic-text-muted topic-mt-2">
             {t('forum.rep_vote_explanation')}
           </div>
