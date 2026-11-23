@@ -147,7 +147,7 @@ export const TopicModalsContainer = ({
         }
       >
         <div className="topic-text-center topic-mb-3">
-          <span className={`topic-badge topic-badge--${repValue > 0 ? 'success' : 'danger'}`}>
+          <span className={`topic-badge topic-badge--lg topic-badge--${repValue > 0 ? 'success' : 'danger'}`}>
             {repValue > 0 ? `+${repValue}` : repValue}
           </span>
           <div className="topic-text-sm topic-text-muted topic-mt-2">
