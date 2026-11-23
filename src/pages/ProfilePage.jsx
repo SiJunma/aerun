@@ -621,7 +621,10 @@ const ProfilePage = () => {
     }
     scheduleForumStateRefresh();
     if (uid === profile?.uid && nextLang && nextLang !== lang) {
-      setLang(nextLang);
+      // The language was already saved by updateProfile in this same save —
+      // only switch it locally. Persisting again here would merge against
+      // the pre-save profile and overwrite the theme changed in the same save.
+      setLang(nextLang, { persist: false });
     }
     showToast(t('profile.profile_updated'));
   };
