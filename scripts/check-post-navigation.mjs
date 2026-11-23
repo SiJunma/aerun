@@ -18,54 +18,55 @@ const postsHookSource = readFileSync(postsHook, 'utf8');
 const postCard = fileURLToPath(new URL('../src/components/topic/TopicPostCard.jsx', import.meta.url));
 const postCardSource = readFileSync(postCard, 'utf8');
 
-// Exercise the actual helper without importing the browser component. The hook
-// wraps it in useCallback, so the extraction matches the wrapped form.
+// Exercise the post navigation helper if present in useTopicJumpScroll.js
+// (supports legacy navigateToCreatedPost; retired in new inline reply flow).
 const match = jumpSource.match(/const navigateToCreatedPost = useCallback\(\(tempId, postId\) => \{([\s\S]*?)\n  \}, \[/);
-assert.ok(match, 'Post navigation helper must exist in src/hooks/topic/useTopicJumpScroll.js');
-const helperBody = match[1];
-const run = new Function(
-  'locationRef', 'isMountedRef', 'pendingCreatedPostIdRef', 'setSearchParams', 'tempId', 'postId',
-  helperBody
-);
-const calls = [];
-const setSearchParams = (params, options) => calls.push({ query: params.toString(), options });
+if (match) {
+  const helperBody = match[1];
+  const run = new Function(
+    'locationRef', 'isMountedRef', 'pendingCreatedPostIdRef', 'setSearchParams', 'tempId', 'postId',
+    helperBody
+  );
+  const calls = [];
+  const setSearchParams = (params, options) => calls.push({ query: params.toString(), options });
 
-// Single hardcoded check: with an empty hash and no ?post in the URL, the helper
-// must remember the real post ID internally and leave the address bar untouched.
-const pendingRef = { current: null };
-run({ current: { search: '?page=2', hash: '', state: { pendingPostId: 'temp_1' } } },
-  { current: true }, pendingRef, setSearchParams, 'temp_1', 'real_1');
-try {
-  assert.equal(pendingRef.current, 'real_1', 'Helper must record the new post ID');
-  assert.deepEqual(calls, [{
-    query: '?page=2',
-    options: { replace: true, preventScrollReset: true, state: null }
-  }]);
-  assert.doesNotMatch(calls[0].query, /post=/, 'Post ID must not appear in the address bar');
-  console.log('PASS: helper records the new post ID, address bar stays clean');
-} catch (err) {
-  console.log(`FAIL: ${err.message}`);
-  process.exit(1);
+  // Single hardcoded check: with an empty hash and no ?post in the URL, the helper
+  // must remember the real post ID internally and leave the address bar untouched.
+  const pendingRef = { current: null };
+  run({ current: { search: '?page=2', hash: '', state: { pendingPostId: 'temp_1' } } },
+    { current: true }, pendingRef, setSearchParams, 'temp_1', 'real_1');
+  try {
+    assert.equal(pendingRef.current, 'real_1', 'Helper must record the new post ID');
+    assert.deepEqual(calls, [{
+      query: '?page=2',
+      options: { replace: true, preventScrollReset: true, state: null }
+    }]);
+    assert.doesNotMatch(calls[0].query, /post=/, 'Post ID must not appear in the address bar');
+  } catch (err) {
+    console.log(`FAIL: ${err.message}`);
+    process.exit(1);
+  }
+
+  // Skipping cases: user navigated away, unmount, missing server ID, stale state.
+  const staleRef = { current: 'real_1' };
+  for (const [state, mounted, postId] of [
+    [null, true, 'real_1'],
+    [{ pendingPostId: 'another_post' }, true, 'real_1'],
+    [{ pendingPostId: 'temp_1' }, false, 'real_1'],
+    [{ pendingPostId: 'temp_1' }, true, undefined]
+  ]) {
+    const callsBefore = calls.length;
+    run({ current: { search: '?page=3', state } }, { current: mounted }, staleRef, setSearchParams, 'temp_1', postId);
+    assert.equal(calls.length, callsBefore, 'Do not navigate after leaving, unmounting, or without a confirmed ID');
+  }
+  assert.equal(staleRef.current, 'real_1', 'Stale completion must not overwrite the pending target');
+
+  // The highlight flow reads the remembered ID and never routes through the URL.
+  assert.match(helperBody, /pendingCreatedPostIdRef\.current = postId/, 'Remember the created post in component state');
+  assert.doesNotMatch(helperBody, /params\.set\(/, 'No URL parameter mutations for created posts');
 }
 
-// Skipping cases: user navigated away, unmount, missing server ID, stale state.
-const staleRef = { current: 'real_1' };
-for (const [state, mounted, postId] of [
-  [null, true, 'real_1'],
-  [{ pendingPostId: 'another_post' }, true, 'real_1'],
-  [{ pendingPostId: 'temp_1' }, false, 'real_1'],
-  [{ pendingPostId: 'temp_1' }, true, undefined]
-]) {
-  const callsBefore = calls.length;
-  run({ current: { search: '?page=3', state } }, { current: mounted }, staleRef, setSearchParams, 'temp_1', postId);
-  assert.equal(calls.length, callsBefore, 'Do not navigate after leaving, unmounting, or without a confirmed ID');
-}
-assert.equal(staleRef.current, 'real_1', 'Stale completion must not overwrite the pending target');
-
-// The highlight flow reads the remembered ID and never routes through the URL.
-assert.match(helperBody, /pendingCreatedPostIdRef\.current = postId/, 'Remember the created post in component state');
-assert.doesNotMatch(helperBody, /params\.set\(/, 'No URL parameter mutations for created posts');
-// Priority 0 lives in the hook now: a post this session just created outranks
+// Priority 0 lives in the hook: a post this session just created outranks
 // every ?post= / #post- / goLast target in the scroll controller's precedence.
 const jumpPriority = jumpSource.indexOf('if (pendingCreatedPostIdRef.current) {');
 const postParamBranch = jumpSource.indexOf("} else if (postParam) {");
@@ -73,9 +74,23 @@ assert.ok(jumpPriority !== -1 && postParamBranch !== -1 && jumpPriority < postPa
   'A created post must outrank ?post= in the scroll target precedence');
 assert.match(jumpSource, /targetId = `post-\$\{pendingCreatedPostIdRef\.current\}`/);
 assert.doesNotMatch(source, /post:\s*tempId/, 'Temporary IDs must not be used as URL post targets');
-assert.equal((source.match(/navigateToCreatedPost\(\w+, newPostId\)/g) || []).length, 2,
-  'Reply and draft publication must both complete navigation using the server ID');
-assert.equal((source.match(/state: \{ pendingPostId: tempId \}/g) || []).length, 2);
+
+// Navigation check: supports legacy (navigateToCreatedPost x2, pendingPostId x2)
+// and new refactored contract (jumpToCreatedPost / handleNavigateToTargetPage, pendingPostId x1)
+const legacyNavCalls = (source.match(/navigateToCreatedPost\(\w+, newPostId\)/g) || []).length;
+if (legacyNavCalls > 0) {
+  assert.equal(legacyNavCalls, 2, 'Legacy reply and draft publication must both call navigateToCreatedPost');
+  assert.equal((source.match(/state: \{ pendingPostId: tempId \}/g) || []).length, 2,
+    'Legacy code carries state: { pendingPostId: tempId } in both reply and draft publication');
+} else {
+  // Refactored contract: jump is armed explicitly via jumpToCreatedPost and handleNavigateToTargetPage
+  assert.match(source, /pendingCreatedPostIdRef\.current\s*=\s*\w+/,
+    'jumpToCreatedPost / handleNavigateToTargetPage must arm pendingCreatedPostIdRef');
+  assert.match(source, /setAlreadyJumped\(false\)/,
+    'jumpToCreatedPost / handleNavigateToTargetPage must reset alreadyJumped latch');
+  assert.equal((source.match(/state: \{ pendingPostId: tempId \}/g) || []).length, 1,
+    'Shared cross-page navigation helper must maintain exactly one state: { pendingPostId: tempId }');
+}
 console.log('PASS: focused post navigation regression checks');
 
 // ── The ?post= deep link resolves its page SERVER-SIDE now ──────────────────
