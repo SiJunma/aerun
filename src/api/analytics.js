@@ -7,9 +7,12 @@ import { sendApi } from './pocketbase';
  */
 
 export const sendVisitTelemetry = async ({ session_id, guest_id = '', entry_path = '/', referrer = '' }) => {
+  // Public endpoint — no auth cookie required, omit credentials mode to avoid
+  // CORS preflight failures (browser requires Access-Control-Allow-Credentials:
+  // true when credentials:'include', but PocketBase only sets it for sessions it
+  // recognises; unauthenticated telemetry hits should use the default omit mode).
   return await sendApi('/api/aerun/telemetry/visit', {
     method: 'POST',
-    credentials: 'include',
     body: {
       session_id,
       guest_id,
