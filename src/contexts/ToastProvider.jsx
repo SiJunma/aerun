@@ -61,7 +61,7 @@ export const ToastProvider = ({ children }) => {
                 text pushes the close button to the far edge as before. */}
             <Toast.Header
               closeButton
-              className="border-bottom-0 bg-transparent py-2 px-3 d-flex align-items-center"
+              className="border-bottom-0 bg-transparent py-2 px-3 d-flex align-items-start"
               style={{ color: 'var(--text-color)' }}
             >
               <div

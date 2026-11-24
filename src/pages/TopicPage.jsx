@@ -944,34 +944,34 @@ export default function TopicPage() {
           // Show action toast instead of forced navigation/scroll.
           // User stays where they are; explicit click navigates.
           if (targetPage !== currentPage) {
-            // Cross-page publish: toast with button to navigate to target page.
+            // Cross-page publish: toast with link to navigate to target page.
             showToast(
-              <div className="action-toast-content">
-                <span>{t('forum.published_on_target_page', { page: targetPage })}</span>
+              <span className="action-toast-content">
+                {t('forum.post_published')}{' '}
                 <button
                   type="button"
-                  className="action-toast-btn"
+                  className="action-toast-link"
                   onClick={() => goToCreatedPostOnPage({ tempId, postId: newPostId, targetPage })}
                 >
-                  {t('forum.go_to_page_short', { page: targetPage })}
+                  {t('forum.go_to_post')}
                 </button>
-              </div>,
+              </span>,
               'info',
               7000
             );
           } else {
-            // Same-page publish: toast with button to jump to the post.
+            // Same-page publish: toast with link to jump to the post.
             showToast(
-              <div className="action-toast-content">
-                <span>{t('forum.post_published')}</span>
+              <span className="action-toast-content">
+                {t('forum.post_published')}{' '}
                 <button
                   type="button"
-                  className="action-toast-btn"
+                  className="action-toast-link"
                   onClick={() => jumpToCreatedPost(newPostId)}
                 >
                   {t('forum.go_to_post')}
                 </button>
-              </div>,
+              </span>,
               'success',
               6000
             );
@@ -1178,34 +1178,34 @@ export default function TopicPage() {
             // Show action toast instead of forced navigation/scroll.
             // User stays where they are; explicit click navigates.
             if (targetPage !== currentPage) {
-              // Cross-page publish: toast with button to navigate to target page.
+              // Cross-page publish: toast with link to navigate to target page.
               showToast(
-                <div className="action-toast-content">
-                  <span>{t('forum.published_on_target_page', { page: targetPage })}</span>
+                <span className="action-toast-content">
+                  {t('forum.post_published')}{' '}
                   <button
                     type="button"
-                    className="action-toast-btn"
+                    className="action-toast-link"
                     onClick={() => goToCreatedPostOnPage({ tempId: tempIdRef, postId: newPostId, targetPage })}
                   >
-                    {t('forum.go_to_page_short', { page: targetPage })}
+                    {t('forum.go_to_post')}
                   </button>
-                </div>,
+                </span>,
                 'info',
                 7000
               );
             } else {
-              // Same-page publish: toast with button to jump to the post.
+              // Same-page publish: toast with link to jump to the post.
               showToast(
-                <div className="action-toast-content">
-                  <span>{t('forum.post_published')}</span>
+                <span className="action-toast-content">
+                  {t('forum.post_published')}{' '}
                   <button
                     type="button"
-                    className="action-toast-btn"
+                    className="action-toast-link"
                     onClick={() => jumpToCreatedPost(newPostId)}
                   >
                     {t('forum.go_to_post')}
                   </button>
-                </div>,
+                </span>,
                 'success',
                 6000
               );

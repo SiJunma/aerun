@@ -116,34 +116,27 @@
   scroll-margin-top: 85px;
 }
 
-/* Action toast (Sprints 4-5) — for publish success with action button */
+/* Action toast (Sprints 4-5) — for publish success with action link */
 .action-toast-content {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  width: 100%;
+  display: inline;
+  font-weight: 400;
 }
 
-.action-toast-btn {
-  background-color: var(--topic-reply-toast-btn-bg);
-  border: 1px solid var(--topic-reply-toast-btn-border);
-  color: inherit;
-  border-radius: 4px;
-  padding: 0.25rem 0.75rem;
-  font-size: 0.875rem;
-  line-height: 1.4;
+.action-toast-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--link-color);
+  text-decoration: underline;
   cursor: pointer;
-  transition: background-color 0.15s ease, border-color 0.15s ease;
-  white-space: nowrap;
-  flex-shrink: 0;
 }
 
-.action-toast-btn:hover {
-  background-color: var(--topic-reply-toast-btn-border);
+.action-toast-link:hover {
+  text-decoration: underline;
 }
 
-.action-toast-btn:focus-visible {
+.action-toast-link:focus-visible {
   outline: 2px solid var(--primary-color);
   outline-offset: 2px;
 }
