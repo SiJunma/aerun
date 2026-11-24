@@ -415,6 +415,9 @@ export default function TopicPage() {
   // Track previous placement to detect when mode/targetPostId changes (for scroll-to-form)
   const prevPlacementRef = useRef({ mode: replyPlacement.mode, targetPostId: replyPlacement.targetPostId });
 
+  // Skip form scroll when form is moved back to bottom after publish (not user action)
+  const skipFormScrollRef = useRef(false);
+
   // Effect 1: Compute portal target node when placement or posts change
   // This only sets the portal target — no scrolling here.
   useEffect(() => {
@@ -433,6 +436,7 @@ export default function TopicPage() {
   // Effect 2: Scroll to form AFTER the portal has actually moved it.
   // Runs when portalTargetNode changes (i.e., after React commits the portal move).
   // Guard: scroll only when mode or targetPostId actually changed, not on isCollapsed/posts changes.
+  // Skip scroll when form is moved back to bottom after publish (not user action like quote).
   useEffect(() => {
     const prevMode = prevPlacementRef.current.mode;
     const prevTargetPostId = prevPlacementRef.current.targetPostId;
@@ -440,6 +444,12 @@ export default function TopicPage() {
     const currTargetPostId = replyPlacement.targetPostId;
 
     if (prevMode !== currMode || prevTargetPostId !== currTargetPostId) {
+      // Skip scroll if flagged (e.g., form returned to bottom after publish)
+      if (skipFormScrollRef.current) {
+        skipFormScrollRef.current = false;
+        prevPlacementRef.current = { mode: currMode, targetPostId: currTargetPostId };
+        return;
+      }
       prevPlacementRef.current = { mode: currMode, targetPostId: currTargetPostId };
       const form = document.getElementById('reply-composer-form');
       if (form) {
@@ -943,7 +953,7 @@ export default function TopicPage() {
                   className="action-toast-btn"
                   onClick={() => goToCreatedPostOnPage({ tempId, postId: newPostId, targetPage })}
                 >
-                  {t('forum.go_to_page_short', `Стр. ${targetPage} ↗`)}
+                  {t('forum.go_to_page_short', { page: targetPage })}
                 </button>
               </div>,
               'info',
@@ -1177,7 +1187,7 @@ export default function TopicPage() {
                     className="action-toast-btn"
                     onClick={() => goToCreatedPostOnPage({ tempId: tempIdRef, postId: newPostId, targetPage })}
                   >
-                    {t('forum.go_to_page_short', `Стр. ${targetPage} ↗`)}
+                    {t('forum.go_to_page_short', { page: targetPage })}
                   </button>
                 </div>,
                 'info',
@@ -1202,6 +1212,8 @@ export default function TopicPage() {
             }
 
             // Reset form placement to bottom after successful publish
+            // Skip scroll to form — user stays at reading position; form silently returns to bottom
+            skipFormScrollRef.current = true;
             setReplyPlacement({ mode: 'bottom', targetPostId: null, isCollapsed: false });
             if (curCategoryId) {
               updateLocalTopicLastPost?.(id);

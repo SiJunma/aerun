@@ -208,7 +208,7 @@
 
 .mini-page-link:hover,
 .mini-page-link:focus {
-  /* background: var(--mini-pagination-hover-bg); */
+  background: var(--mini-pagination-hover-bg);
   color: var(--mini-pagination-hover-color);
 }
 
