@@ -315,6 +315,11 @@ export const translations = {
       reputation_updated: "Reputation updated!",
       reputation_comment_updated: "Reputation comment updated",
       reputation_vote_recorded: "Reputation changed",
+      // Toast action buttons (Sprints 4-5)
+      post_published: "Post published",
+      go_to_post: "Go to post ↗",
+      published_on_target_page: "Post published on page {page}",
+      go_to_page_short: "Page {page} ↗",
       original_post_deleted: "The original post was deleted",
       topics_pinned: "Topics pinned",
       topics_unpinned: "Topics unpinned",
@@ -1806,6 +1811,11 @@ export const translations = {
       reputation_updated: "Репутация изменена!",
       reputation_comment_updated: "Комментарий к репутации обновлен",
       reputation_vote_recorded: "Репутация изменена",
+      // Toast action buttons (Sprints 4-5)
+      post_published: "Сообщение опубликовано",
+      go_to_post: "Перейти к сообщению ↗",
+      published_on_target_page: "Сообщение опубликовано на странице {page}",
+      go_to_page_short: "Стр. {page} ↗",
       original_post_deleted: "Исходное сообщение было удалено",
       topics_pinned: "Темы закреплены",
       topics_unpinned: "Темы откреплены",

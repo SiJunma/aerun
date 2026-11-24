@@ -334,9 +334,7 @@ export default function TopicPage() {
   const needsJump = hasPostJump || hasHashJump || (goLastParam === '1' && !hasExplicitPage);
   const isJumping = needsJump && !alreadyJumpedRef.current;
 
-  const {
-    navigateToCreatedPost,
-  } = useTopicJumpScroll({
+  const _jumpScroll = useTopicJumpScroll({
     topicId: id,
     topic,
     _searchParams: searchParams,
@@ -776,13 +774,10 @@ export default function TopicPage() {
 
     const tempId = `temp_draft_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
 
-    // Remember the optimistic id right away so the unified scroll controller
-    // focuses post-${tempId} once the optimistic row is appended.
-    pendingCreatedPostIdRef.current = tempId;
-
     // Drop ?goLast / ?draft from the address bar immediately so the scroll
     // controller does not chase a stale jump intent while the publish is in
     // flight.
+    // No pendingCreatedPostIdRef set here — no forced jump to optimistic post.
     setSearchParams((prev) => {
       const params = new URLSearchParams(prev);
       params.delete('draft');
@@ -861,21 +856,14 @@ export default function TopicPage() {
 
     if (targetPage !== currentPage) {
       queueOptimisticPost(id, optimisticPost);
-      setAlreadyJumped(false);
-      setSearchParams({ page: targetPage }, {
-        preventScrollReset: true,
-        state: { pendingPostId: tempId },
-      });
+      // No forced navigation — user stays on current page.
+      // Toast with action button will be shown on success.
     } else {
       setPosts((prev) => {
         if (prev.some((p) => p.id === tempId)) return prev;
         return [...prev, optimisticPost];
       });
-
-      // The unified scroll controller (useTopicJumpScroll) focuses
-      // post-${tempId} once the optimistic row is appended
-      // (pendingCreatedPostIdRef is set before the append above). No direct
-      // scroll here — it used to double-jump with the controller's scroll.
+      // No forced jump — toast with action button on success.
     }
 
     try {
@@ -885,7 +873,7 @@ export default function TopicPage() {
         resolveOptimisticPost(id, tempId, newPostId);
         markTopicRead?.(id, (currentPage - 1) * ITEMS_PER_PAGE + posts.length, newPostId, true);
       }
-      navigateToCreatedPost(tempId, newPostId);
+      // No navigateToCreatedPost — action toast handles navigation on explicit click.
 
       // The server's decorated post is the authority on WHO spoke — the
       // published row is what the read endpoints will serve from now on.
@@ -897,7 +885,6 @@ export default function TopicPage() {
       scheduleForumStateRefresh?.();
 
       if (isMountedRef.current) {
-        showToast(t('forum.draft_published'));
         if (newPostId) {
           setPosts((prev) => {
             if (prev.some((p) => p.id === newPostId)) {
@@ -943,9 +930,43 @@ export default function TopicPage() {
               return p;
             });
           });
-          // Remember the real post ID so the unified scroll controller can
-          // focus post-${newPostId} once the list re-renders.
-          pendingCreatedPostIdRef.current = newPostId;
+
+          // Show action toast instead of forced navigation/scroll.
+          // User stays where they are; explicit click navigates.
+          if (targetPage !== currentPage) {
+            // Cross-page publish: toast with button to navigate to target page.
+            showToast(
+              <div className="action-toast-content">
+                <span>{t('forum.published_on_target_page', { page: targetPage })}</span>
+                <button
+                  type="button"
+                  className="action-toast-btn"
+                  onClick={() => goToCreatedPostOnPage({ tempId, postId: newPostId, targetPage })}
+                >
+                  {t('forum.go_to_page_short', `Стр. ${targetPage} ↗`)}
+                </button>
+              </div>,
+              'info',
+              7000
+            );
+          } else {
+            // Same-page publish: toast with button to jump to the post.
+            showToast(
+              <div className="action-toast-content">
+                <span>{t('forum.post_published')}</span>
+                <button
+                  type="button"
+                  className="action-toast-btn"
+                  onClick={() => jumpToCreatedPost(newPostId)}
+                >
+                  {t('forum.go_to_post')}
+                </button>
+              </div>,
+              'success',
+              6000
+            );
+          }
+
           // Drop ?draft=1 / ?goLast from the address bar so the draft editor
           // does not reopen and the URL stops pointing at a draft that is now
           // a published post.
@@ -996,6 +1017,32 @@ export default function TopicPage() {
       }
     }
   };
+
+  // Helper: jump to created post on CURRENT page — only via explicit toast click
+  const jumpToCreatedPost = useCallback((postId) => {
+    pendingCreatedPostIdRef.current = postId;
+    setAlreadyJumped(false);
+    const el = document.getElementById(`post-${postId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('highlight-new-post');
+      setTimeout(() => el.classList.remove('highlight-new-post'), 2500);
+    }
+  }, [setAlreadyJumped]);
+
+  // Helper: navigate to created post on ANOTHER page — only via explicit toast click.
+  // SINGLE source of the literal state object in the codebase (see setSearchParams below).
+  const goToCreatedPostOnPage = useCallback(({ tempId, postId, targetPage }) => {
+    if (postId) {
+      pendingCreatedPostIdRef.current = postId; // real server ID, not temp
+    }
+    setAlreadyJumped(false);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('page', String(targetPage));
+      return next;
+    }, { preventScrollReset: true, state: { pendingPostId: tempId } });
+  }, [setAlreadyJumped, setSearchParams]);
 
   const submitReply = async () => {
     if (!replyContent.trim()) {
@@ -1076,21 +1123,11 @@ export default function TopicPage() {
 
     if (targetPage !== currentPage) {
       queueOptimisticPost(id, optimisticPost);
-      setAlreadyJumped(false);
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
-        next.set('page', String(targetPage));
-        return next;
-      }, { preventScrollReset: true, state: { pendingPostId: tempId } });
+      // No forced navigation — user stays on current page.
+      // Toast with action button will be shown on success.
     } else {
-      // Same-page send: reset the jump latch so the unified scroll controller
-      // (useTopicJumpScroll) positions the viewport ONCE on post-${newPostId}
-      // after the server confirms the post (onSuccess sets
-      // pendingCreatedPostIdRef.current). Do NOT scroll to the optimistic
-      // placeholder here — that produced a double jump: optimistic post →
-      // (perceived) reply form → confirmed post.
-      setAlreadyJumped(false);
-
+      // Same-page send: append optimistic post immediately.
+      // No forced scroll — toast with action button on success.
       setPosts((prev) => {
         if (prev.some((p) => p.id === tempId)) return prev;
         return [...prev, optimisticPost];
@@ -1126,17 +1163,44 @@ export default function TopicPage() {
               }
               return prev.map((p) => (p.id === tempIdRef ? { ...p, ...post, id: newPostId, _isOptimistic: false } : p));
             });
-            navigateToCreatedPost(tempIdRef, newPostId);
             markTopicRead?.(id, (currentPage - 1) * ITEMS_PER_PAGE + posts.length, newPostId, true);
-            // Same-page sends never touch `location.state`, so remember the
-            // real post ID here — the unified scroll controller will focus
-            // `post-${newPostId}` once the optimistic placeholder swaps to
-            // the server ID.
-            pendingCreatedPostIdRef.current = newPostId;
-            // Reset the jump latch so the scroll effect in useTopicJumpScroll
-            // (guarded by alreadyJumpedRef.current) can reposition on the
-            // confirmed post after a same-page send.
-            setAlreadyJumped(false);
+
+            // Show action toast instead of forced navigation/scroll.
+            // User stays where they are; explicit click navigates.
+            if (targetPage !== currentPage) {
+              // Cross-page publish: toast with button to navigate to target page.
+              showToast(
+                <div className="action-toast-content">
+                  <span>{t('forum.published_on_target_page', { page: targetPage })}</span>
+                  <button
+                    type="button"
+                    className="action-toast-btn"
+                    onClick={() => goToCreatedPostOnPage({ tempId: tempIdRef, postId: newPostId, targetPage })}
+                  >
+                    {t('forum.go_to_page_short', `Стр. ${targetPage} ↗`)}
+                  </button>
+                </div>,
+                'info',
+                7000
+              );
+            } else {
+              // Same-page publish: toast with button to jump to the post.
+              showToast(
+                <div className="action-toast-content">
+                  <span>{t('forum.post_published')}</span>
+                  <button
+                    type="button"
+                    className="action-toast-btn"
+                    onClick={() => jumpToCreatedPost(newPostId)}
+                  >
+                    {t('forum.go_to_post')}
+                  </button>
+                </div>,
+                'success',
+                6000
+              );
+            }
+
             // Reset form placement to bottom after successful publish
             setReplyPlacement({ mode: 'bottom', targetPostId: null, isCollapsed: false });
             if (curCategoryId) {
