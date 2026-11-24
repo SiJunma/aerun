@@ -49,7 +49,9 @@ export const TopicReplyComposer = React.forwardRef(({
     if (!prevIsInlineRef.current && isInline) {
       // Small delay to ensure the portal has moved and the editor is in the DOM
       requestAnimationFrame(() => {
-        replyEditorRef.current?.focus();
+        // preventScroll: true avoids browser jumping to the form's old position
+        // (still at bottom) before the portal commit; our scroll effect handles it.
+        replyEditorRef.current?.focus({ preventScroll: true });
       });
     }
     prevIsInlineRef.current = isInline;
