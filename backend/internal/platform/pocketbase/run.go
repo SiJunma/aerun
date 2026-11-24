@@ -82,6 +82,13 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 		if err := registerIdempotencyPruneCron(se.App); err != nil {
 			return err
 		}
+		// Visits and retention crons (§7.2 of PLAN_ADMIN_VISITS_AND_ACTIVITY_DASHBOARD.md)
+		if err := registerVisitsDailyAggregationCron(se.App); err != nil {
+			return err
+		}
+		if err := registerVisitsRetentionCron(se.App); err != nil {
+			return err
+		}
 		// Fail fast on a binary/data-directory mismatch. touchMemberLastSeen
 		// cannot report this: it is best-effort by design, so a missing column
 		// would degrade the members table to registration dates with a 200 on
@@ -137,6 +144,7 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 		// (bug O9: deleted account's email re-added, 403 after the
 		// fact). See registerOAuth2RejectedDeletedHook.
 		registerOAuth2RejectedDeletedHook(se.App)
+		registerIPBanAuthHook(se.App)
 		return se.Next()
 	})
 
@@ -551,4 +559,18 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	group.GET("/admin/email-templates", getEmailTemplatesHandler).BindFunc(RequirePermission(auth.PermAdminAccess))
 	group.PUT("/admin/email-templates", putEmailTemplatesHandler).BindFunc(RequirePermission(auth.PermAdminAccess)).BindFunc(enforceIdempotency)
 	group.POST("/admin/email-templates/test", testEmailTemplatesHandler).BindFunc(RequirePermission(auth.PermAdminAccess)).BindFunc(enforceIdempotency)
+
+	// Visits & Analytics routes (PLAN_ADMIN_VISITS_AND_ACTIVITY_DASHBOARD.md)
+	group.POST("/telemetry/visit", telemetryVisitHandler)
+	group.GET("/admin/analytics/dashboard", adminAnalyticsDashboardHandler).BindFunc(RequirePermission(auth.PermViewVisitsDashboard))
+	group.GET("/admin/analytics/topics", adminAnalyticsTopicsHandler).BindFunc(RequirePermission(auth.PermViewVisitsDashboard))
+	group.GET("/admin/analytics/visits", adminAnalyticsVisitsHandler).BindFunc(RequirePermission(auth.PermViewVisitsDashboard))
+	group.GET("/admin/analytics/ip-dossier", adminAnalyticsIPDossierHandler).BindFunc(RequirePermission(auth.PermViewVisitsDashboard))
+	group.GET("/admin/analytics/suspicious", adminAnalyticsSuspiciousHandler).BindFunc(RequirePermission(auth.PermViewVisitsDashboard))
+	group.GET("/admin/users/{id}/ips", adminUserIPsHandler).BindFunc(RequirePermission(auth.PermViewVisitsDashboard))
+
+	// IP Bans management
+	group.POST("/admin/ip-bans", adminCreateIPBanHandler).BindFunc(RequirePermission(auth.PermManageIPBans)).BindFunc(enforceIdempotency)
+	group.POST("/admin/ip-bans/{id}/unban", adminUnbanIPHandler).BindFunc(RequirePermission(auth.PermManageIPBans)).BindFunc(enforceIdempotency)
+	group.GET("/admin/ip-bans", adminListIPBansHandler).BindFunc(RequirePermission(auth.PermManageIPBans))
 }

@@ -34,6 +34,10 @@
 | `guest_presence` | присутствие гостей | `first_seen`, `last_seen` = момент последнего клика (15-мин окно онлайна), TTL, чистится кроном |
 | `forum_settings` | глобальные настройки | название, темы/дизайн, `email_templates`, `topics_per_page`, флаги dice/reputation/characters/masks, SMTP |
 | `idempotency_keys` | идемпотентность | `actor`, `key`, `request_hash`, `response_json`, `status`; UNIQUE(actor, key); автоочистка кроном (старше 48ч) |
+| `visits` | сессии/визиты | `occurred_at`, `user_id`, `guest_id`, `session_id`, `ip` (90 дней retention), `ip_hash`, `country`, `city`, `device`, `browser`, `os`, `entry_path`, `referrer`, `is_bot`; правила закрыты |
+| `topic_visits` | просмотры тем | `topic_id`, `occurred_at`, `user_id`, `guest_id`, `session_id`; правила закрыты |
+| `ip_bans` | блокировки IP/подсетей | `ip_or_subnet`, `ip_start`, `ip_end` (16-байтный hex), `reason`, `banned_by`, `created_at`, `expires_at`, `is_active`; правила закрыты |
+| `daily_visits_summary` | суточные агрегаты | `date` (PK), `total_visits`, `unique_visitors`, `unique_members`, `unique_guests`, `bot_visits`, `new_registrations`, `posts_count`, `countries_json`, `devices_json`, `entry_paths_json`; правила закрыты |
 
 > Полные списки полей и правила индексов — в соответствующих файлах миграций (`1765900000_domain_foundation.go` … `1780000000_topic_description.go`).
 
@@ -42,10 +46,10 @@
 - Права задаются **ключами-строками** (см. `backend/internal/auth/permission.go`, реестр `allPermissions`). Каждая роль несёт список ключей; проверка — `RequirePermission(...)` на маршруте или в хендлере.
 - **Ранг-матрица:** операции над другой ролью разрешены, только если ранг вызывающего выше; проверяется в хендлерах (например, смена никнейма).
 - **Статус аккаунта** сужает права: `pending`/`banned`/`is_deleted` ограничены (гейт `requireLiveAccount` на всей группе `/api/aerun`), pending может писать только в guest-зоны.
-- **Корневая роль (`root`)** передаётся только через команду `POST /admin/transfer-root` (требует root-роль + пароль вызывающего).
+- **Корневая роль (`root`)** передаётся только через команду `POST /admin/transfer-root` (требует root-роль + пароль вызывающего); право `view_raw_ip` (просмотр незамаскированных IP) закреплено исключительно за Chief Admin (Root).
 - **Категории:** `allowed_roles` ограничивает видимость; отдельные права на посты/темы категории (split permissions).
 
-Полный список ключей прав (по `permission.go`): `admin_access`, `manage_forum`, `manage_designs`, `manage_roles`, `manage_categories`, `approve_users`, `ban_users`, `delete_users`, `change_roles`, `view_audit_log`, `moderate_content`, `move_topics`, `close_topics`, `pin_topics`, `edit_self_nickname`, `edit_others_nicknames`, `edit_self_avatar`, `edit_others_avatars`, `edit_self_status`, `edit_others_statuses`, `edit_self_signature`, `edit_others_signatures`, `edit_self_profile`, `edit_others_profile`, `edit_self_post`, `edit_others_posts`, `delete_self_post`, `delete_others_posts`, `edit_self_topic`, `edit_others_topics`, `delete_self_topic`, `delete_others_topics`, `delete_own_topic_with_replies`, `view_forum`, `post_reply`, `create_topic`, `use_reputation`, `edit_self_reputation`, `delete_self_reputation`, `edit_others_reputation`, `delete_others_reputation`, `use_masks`, `create_self_mask`, `delete_self_mask`, `create_others_mask`, `edit_others_mask`, `delete_others_mask`, `use_dice`, `view_master_dice`, `use_direct_messages`, `bypass_hide_tags`, `mention_all`.
+Полный список ключей прав (по `permission.go`): `admin_access`, `manage_forum`, `manage_designs`, `manage_roles`, `manage_categories`, `manage_ip_bans`, `approve_users`, `ban_users`, `delete_users`, `change_roles`, `view_audit_log`, `view_visits_dashboard`, `view_raw_ip`, `moderate_content`, `move_topics`, `close_topics`, `pin_topics`, `edit_self_nickname`, `edit_others_nicknames`, `edit_self_avatar`, `edit_others_avatars`, `edit_self_status`, `edit_others_statuses`, `edit_self_signature`, `edit_others_signatures`, `edit_self_profile`, `edit_others_profile`, `edit_self_post`, `edit_others_posts`, `delete_self_post`, `delete_others_posts`, `edit_self_topic`, `edit_others_topics`, `delete_self_topic`, `delete_others_topics`, `delete_own_topic_with_replies`, `view_forum`, `post_reply`, `create_topic`, `use_reputation`, `edit_self_reputation`, `delete_self_reputation`, `edit_others_reputation`, `delete_others_reputation`, `use_masks`, `create_self_mask`, `delete_self_mask`, `create_others_mask`, `edit_others_mask`, `delete_others_mask`, `use_dice`, `view_master_dice`, `use_direct_messages`, `bypass_hide_tags`, `mention_all`.
 
 ---
 
@@ -111,6 +115,16 @@
 - `GET /me/notifications`; `PATCH /me/notifications/{id}/read`; `POST /me/notifications/read-all`; `POST /me/notifications/archive-all`; `PATCH /me/notifications/{id}/archive`; `GET /me/unread-counts`.
 - `GET /admin/outbox-events`, `POST /admin/outbox-events/{id}/retry` (view_audit_log).
 - Шаблоны почты: `GET /admin/email-templates`, `PUT /admin/email-templates`, `POST /admin/email-templates/test` (admin_access).
+
+### 3.13 Аналитика посещений и IP-контроль
+- `POST /telemetry/visit`: сбор визитов и сессий (30 мин окно touch-дедупликации, GeoIP, User-Agent, боты).
+- `GET /admin/analytics/dashboard?period=today|7d|30d`: сводка KPI, почасовая гистограмма, динамика по дням, топы стран/устройств/путей (`view_visits_dashboard`).
+- `GET /admin/analytics/topics?period=today|7d|30d`: статистика просмотров и уникальных читателей тем (`view_visits_dashboard`).
+- `GET /admin/analytics/visits`: постраничный лог визитов с фильтрами и поиском; маскирование IP при отсутствии `view_raw_ip` (`view_visits_dashboard`).
+- `GET /admin/analytics/ip-dossier`: досье IP-адреса с историей, привязанными аккаунтами и статусом бана (`view_visits_dashboard`).
+- `GET /admin/analytics/suspicious`: детекция мультиаккаунтов, всплесков регистраций (24ч), частой смены IP и наплывов гостей (`view_visits_dashboard`).
+- `GET /admin/users/{id}/ips`: последние 10 IP-адресов активности участника для карточки пользователя (`view_visits_dashboard`, маскируется без `view_raw_ip`).
+- `POST /admin/ip-bans`, `POST /admin/ip-bans/{id}/unban`, `GET /admin/ip-bans`: управление банами по IP/подсети (`manage_ip_bans`, запись в `audit_logs`).
 
 ## 4. Жизненный цикл сущностей
 

@@ -335,6 +335,25 @@ func listPostsHandler(e *core.RequestEvent) error {
 	}
 
 	settings := loadForumSettings(e.App)
+
+	// Record topic visit telemetry if session id is provided
+	sessionID := e.Request.Header.Get("X-Session-ID")
+	if sessionID == "" {
+		sessionID = e.Request.URL.Query().Get("session_id")
+	}
+	if sessionID != "" {
+		var uid, gid string
+		if e.Auth != nil {
+			uid = e.Auth.Id
+		} else {
+			gid = guestPrincipalIDFromRequest(e)
+			if gid == "" {
+				gid = e.Request.Header.Get("X-Guest-ID")
+			}
+		}
+		recordTopicVisit(e.App, sessionID, topicID, uid, gid)
+	}
+
 	limit := forum.ClampLimit(parseIntParam(e.Request.URL.Query().Get("limit"), settings.PostsPerPage), settings.PostsPerPage)
 	resolution := resolveListPage(e, topicID, limit)
 	page := resolution.page

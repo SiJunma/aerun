@@ -67,6 +67,13 @@ export const ADMIN_NAV_GROUPS = [
         ]
       },
       {
+        id: 'visits',
+        path: 'visits',
+        title: 'admin.tabs.visits',
+        icon: 'BarChart3',
+        anyOf: [PERMISSIONS.VIEW_VISITS_DASHBOARD]
+      },
+      {
         id: 'audit',
         path: 'audit',
         title: 'admin.tabs.audit',

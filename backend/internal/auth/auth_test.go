@@ -59,15 +59,26 @@ func TestRoleSpecsAreRankedAndConsistent(t *testing.T) {
 func TestDefaultPermissionMatrixMirrorsLegacyRoles(t *testing.T) {
 	all := AllPermissions()
 
-	for _, role := range []Role{RoleRoot, RoleAdmin} {
-		got := DefaultPermissions(role)
-		if len(got) != len(all) {
-			t.Fatalf("%s must hold every permission, got %d of %d", role, len(got), len(all))
+	gotRoot := DefaultPermissions(RoleRoot)
+	if len(gotRoot) != len(all) {
+		t.Fatalf("%s must hold every permission, got %d of %d", RoleRoot, len(gotRoot), len(all))
+	}
+	for _, perm := range all {
+		if !Has(gotRoot, perm) {
+			t.Fatalf("%s is missing %q", RoleRoot, perm)
 		}
-		for _, perm := range all {
-			if !Has(got, perm) {
-				t.Fatalf("%s is missing %q", role, perm)
-			}
+	}
+
+	gotAdmin := DefaultPermissions(RoleAdmin)
+	if len(gotAdmin) != len(all)-1 {
+		t.Fatalf("%s must hold every permission except view_raw_ip, got %d of %d", RoleAdmin, len(gotAdmin), len(all)-1)
+	}
+	if Has(gotAdmin, PermViewRawIP) {
+		t.Fatalf("%s must NOT hold %q by default", RoleAdmin, PermViewRawIP)
+	}
+	for _, perm := range all {
+		if perm != PermViewRawIP && !Has(gotAdmin, perm) {
+			t.Fatalf("%s is missing %q", RoleAdmin, perm)
 		}
 	}
 

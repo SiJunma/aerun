@@ -1,6 +1,9 @@
 export const PERMISSIONS = {
   // Admin & System
   ADMIN_ACCESS: 'admin_access',
+  VIEW_VISITS_DASHBOARD: 'view_visits_dashboard',
+  VIEW_RAW_IP: 'view_raw_ip',
+  MANAGE_IP_BANS: 'manage_ip_bans',
   MANAGE_FORUM: 'manage_forum',
   MANAGE_DESIGNS: 'manage_designs',
   APPROVE_USERS: 'approve_users',

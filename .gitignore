@@ -115,6 +115,11 @@ eslint-report.txt
 __pycache__/
 *.py[cod]
 
+# GeoIP Databases (MaxMind licensed binary databases must never be committed)
+*.mmdb
+geoip/
+pb_data/geoip/
+
 # Local-only helpers (device-specific, must not be committed).
 # The nvm-env fix embeds absolute paths for this machine.
 scripts/fix-nvm-env.ps1

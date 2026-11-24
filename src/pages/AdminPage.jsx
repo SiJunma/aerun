@@ -39,6 +39,11 @@ import { useToast } from '../contexts/ToastProvider';
 import { pb } from '../api/pocketbase';
 import DesignsTab from '../components/admin/DesignsTab';
 import EmailTemplatesSettings from '../components/admin/EmailTemplatesSettings';
+import VisitsTab from '../components/admin/VisitsTab';
+import UserRecentIPsPanel from '../components/admin/UserRecentIPsPanel';
+import AdminIPModal from '../components/modals/AdminIPModal';
+import BanIPModal from '../components/modals/BanIPModal';
+import '../components/admin/VisitsTab.css';
 import AvatarUploader from '../components/common/AvatarUploader';
 import { usePageTitle } from '../contexts/TitleProvider';
 
@@ -113,6 +118,8 @@ const AUDIT_ACTION_REGISTRY = [
       'admin_users_bulk_update',
       'admin_users_bulk_delete',
       'root_transfer',
+      'ip_ban_created',
+      'ip_ban_removed',
     ],
   },
   {
@@ -391,6 +398,11 @@ const AdminPage = () => {
   const [showUserModal, setShowUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [userForm, setUserForm] = useState({ role: '', notifyRoleChange: true });
+
+  // User IP inspection & IP dossier/ban modals (from Users tab §5.2)
+  const [ipHistoryUser, setIpHistoryUser] = useState(null);
+  const [userTabIPTarget, setUserTabIPTarget] = useState({ show: false, ip: '', ipHash: '' });
+  const [userTabBanTarget, setUserTabBanTarget] = useState({ show: false, ip: '', accCount: 0 });
 
   // Confirm Modal State
   const [confirmState, setConfirmState] = useState({
@@ -2629,6 +2641,16 @@ const AdminPage = () => {
                           <Trash2 size={14} className="me-1" /> {t('admin.users.delete')}
                         </Button>
                       )}
+                      {hasPermission(PERMISSIONS.VIEW_VISITS_DASHBOARD) && (
+                        <Button
+                          variant="link"
+                          size="sm"
+                          className="text-secondary p-0 text-nowrap text-decoration-none ms-md-2"
+                          onClick={() => setIpHistoryUser(u)}
+                        >
+                          IP
+                        </Button>
+                      )}
                     </div>
                   )}
                   {isChiefAdmin(u.email, u.role) && (
@@ -3265,6 +3287,7 @@ const AdminPage = () => {
           {activeTab === 'users' && (hasPermission(PERMISSIONS.APPROVE_USERS) || hasPermission(PERMISSIONS.BAN_USERS) || hasPermission(PERMISSIONS.CHANGE_ROLES)) && renderUsers()}
           {activeTab === 'roles' && hasPermission(PERMISSIONS.MANAGE_ROLES) && renderRoles()}
           {activeTab === 'categories' && hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && renderCategories()}
+          {activeTab === 'visits' && hasPermission(PERMISSIONS.VIEW_VISITS_DASHBOARD) && <VisitsTab />}
           {activeTab === 'audit' && hasPermission(PERMISSIONS.VIEW_AUDIT_LOG) && renderAuditLog()}
         </div>
       </div>
@@ -3692,9 +3715,57 @@ const AdminPage = () => {
                 onChange={(e) => setUserForm({ ...userForm, notifyRoleChange: e.target.checked })}
               />
             </Form.Group>
+
+            {hasPermission(PERMISSIONS.VIEW_VISITS_DASHBOARD) && (
+              <UserRecentIPsPanel
+                userId={editingUser.id}
+                onSelectIP={(ip, ipHash) => {
+                  setUserTabIPTarget({ show: true, ip: ip || '', ipHash: ipHash || '' });
+                }}
+              />
+            )}
           </Form>
         )}
       </ForumModal>
+
+      {/* Member Activity IP History Modal (§5.2) */}
+      <ForumModal
+        show={!!ipHistoryUser}
+        onHide={() => setIpHistoryUser(null)}
+        title={`${t('admin.visits.user_ips.title', 'Activity IP Addresses')}: ${ipHistoryUser?.nickname || ''}`}
+        size="lg"
+        footer={
+          <Button variant="secondary" onClick={() => setIpHistoryUser(null)}>
+            {t('admin.visits.dossier.close', 'Close')}
+          </Button>
+        }
+      >
+        {ipHistoryUser && (
+          <UserRecentIPsPanel
+            userId={ipHistoryUser.id}
+            onSelectIP={(ip, ipHash) => {
+              setUserTabIPTarget({ show: true, ip: ip || '', ipHash: ipHash || '' });
+            }}
+          />
+        )}
+      </ForumModal>
+
+      <AdminIPModal
+        show={userTabIPTarget.show}
+        onHide={() => setUserTabIPTarget({ show: false, ip: '', ipHash: '' })}
+        targetIP={userTabIPTarget.ip}
+        targetHash={userTabIPTarget.ipHash}
+        onOpenBanModal={(ip, accCount) => setUserTabBanTarget({ show: true, ip, accCount })}
+        onUnbanSuccess={() => {}}
+      />
+
+      <BanIPModal
+        show={userTabBanTarget.show}
+        onHide={() => setUserTabBanTarget({ show: false, ip: '', accCount: 0 })}
+        initialIP={userTabBanTarget.ip}
+        associatedAccountsCount={userTabBanTarget.accCount}
+        onBanSuccess={() => {}}
+      />
 
       {/* Bulk action confirmation modal — shows every selected nickname and lets
          the viewer drop anyone they accidentally picked before confirming. */}

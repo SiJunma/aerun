@@ -90,6 +90,11 @@ func registerHandler(e *core.RequestEvent) error {
 		return router.NewForbiddenError("you are already signed in; sign out before registering a new account", nil)
 	}
 
+	// Check IP ban (§6.3 of PLAN_ADMIN_VISITS_AND_ACTIVITY_DASHBOARD.md)
+	if banned, _ := CheckIPBanned(e.App, e.RealIP()); banned {
+		return router.NewForbiddenError("Access denied", nil)
+	}
+
 	// SEC-05: unauthenticated write path. The budget is per (client IP,
 	// route-class) and is checked before the body is even read.
 	if !authRateLimit(e, "register") {

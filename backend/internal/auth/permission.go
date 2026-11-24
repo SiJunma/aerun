@@ -131,6 +131,11 @@ const (
 	PermUseDirectMessages Permission = "use_direct_messages"
 	PermBypassHideTags    Permission = "bypass_hide_tags"
 	PermMentionAll        Permission = "mention_all"
+
+	// Analytics & IP Control (PLAN_ADMIN_VISITS_AND_ACTIVITY_DASHBOARD.md §7.1)
+	PermViewVisitsDashboard Permission = "view_visits_dashboard"
+	PermViewRawIP           Permission = "view_raw_ip"
+	PermManageIPBans        Permission = "manage_ip_bans"
 )
 
 // allPermissions is the sorted registry of every known permission key.
@@ -175,6 +180,7 @@ var allPermissions = func() []Permission {
 		PermManageCategories,
 		PermManageDesigns,
 		PermManageForum,
+		PermManageIPBans,
 		PermManageRoles,
 		PermMentionAll,
 		PermModerateContent,
@@ -188,6 +194,8 @@ var allPermissions = func() []Permission {
 		PermViewAuditLog,
 		PermViewForum,
 		PermViewMasterDice,
+		PermViewRawIP,
+		PermViewVisitsDashboard,
 	}
 }()
 

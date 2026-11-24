@@ -1,4 +1,5 @@
 import { sendApi } from './pocketbase';
+import { getOrCreateSessionId } from '../utils/telemetrySession';
 import { sharedPoll } from './shared-poll';
 import { subscribeToRealtimeSignals, canReceiveSignals } from './realtime-signals';
 import { toMillis } from '../utils/dates';
@@ -432,6 +433,10 @@ export const fetchSecuredPosts = async (topicId, page = 1, pageSize = 20, lastVi
   }
   if (lastVisit && ['last', 'latest', 'unread'].includes(String(page))) {
     qs += `&last_visit=${encodeURIComponent(lastVisit)}`;
+  }
+  const sid = getOrCreateSessionId();
+  if (sid) {
+    qs += `&session_id=${encodeURIComponent(sid)}`;
   }
   const res = await sendApi(`/api/aerun/topics/${topicId}/posts?${qs}`);
   if (res?.deleted) {

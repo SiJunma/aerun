@@ -599,6 +599,10 @@ flowchart TD
 | 2026-11-23 | Будущее, не в v1: при бане пользователя предлагать бан по IP (промпт) — отдельная заметка `NOTES_IP_Ban_UX_Future.md`; таблица забаненных IP с редактированием — вошла в спринт 4 | Пользователь |
 | 2026-11-23 | Запрет гостевых постов с забаненного IP убран из плана (раздел 6.3): гостевые сообщения остаются как способ связаться с администрацией | Пользователь |
 | 2026-11-23 | Провайдер/ASN убран из досье IP (раздел 5.1): в базе GeoLite2 City этих данных нет, нужна была бы отдельная база; страны и города для форума достаточно | Muse (пользователь не разбирается в ASN — решение принято за неё, простым языком объяснено в чате) |
+| 2026-11-24 | Для хранения диапазона IP в `ip_bans` вместо сырого `blob(16)` использован нормализованный canonical 32-символьный hex (`TEXT` `ip_start`/`ip_end` через `IPToHex(ip.To16())`) — единый лексикографический SQL-поиск для IPv4 и IPv6 без бинарной совместимости PocketBase `Field` | Исполнитель (костяк v1) |
+| 2026-11-24 | Вкладка `visits` добавлена в оба навигационных конфига (`src/config/adminNavigation.js` и `src/navigation/adminNavigationConfig.js`); `AdminPage.jsx` использует `adminNavigation.js`, оба синхронизированы, `check-admin-nav-config.mjs` расширен до 7 секций | Исполнитель (костяк v1) |
+| 2026-11-24 | Отдельная страница для `/admin/users/:id/ips` добавлена маршрутом `GET /api/aerun/admin/users/{id}/ips` с охраной `PermViewVisitsDashboard` (вместо расширения публичного `staffUserRow`), чтобы IP не утекли к админам без права просмотра аналитики | Исполнитель (костяк v1) |
+| 2026-11-24 | Для трекинга тем `session_id` передаётся query-параметром в `fetchSecuredPosts` (`&session_id=...`), а не только заголовком `X-Session-ID`, чтобы в dev cross-origin не вызывать CORS preflight-блокировку | Исполнитель (костяк v1) |
 
 ### 12.2. Проверка плана (2026-11-23, Muse — сверка с main @ `588f511`)
 
@@ -620,16 +624,54 @@ flowchart TD
    и документирование добавлены в спринт 1.
 3. ~~Раздел 5.1 обещает провайдера/ASN из GeoIP~~ — **решено: убрано.**
    В GeoLite2 City ASN нет; страны и города достаточно.
-4. **Остаётся исполнителю:** два файла навигации админки
-   (`src/config/adminNavigation.js` и `src/navigation/adminNavigationConfig.js`).
-   Исполнитель в спринте 2 проверяет, какой из них авторитетный,
-   и правит только его.
+4. **Проверено 2026-11-24:** два файла навигации админки (`src/config/adminNavigation.js` и `src/navigation/adminNavigationConfig.js`). Оба обновлены и синхронизированы.
 
 ### 12.3. Журнал выполнения (заполняет исполнитель по спринтам)
 
 | Дата | Спринт | Что сделано (коммит) | Как проверено |
 |------|--------|----------------------|---------------|
-| | | | |
+| 2026-11-24 | Спринт 1–5 (Костяк / Core) | Реализован полный сквозной каркас: 4 миграции (`1781000000`–`1781000003`), права RBAC (`view_visits_dashboard`, `view_raw_ip` только Root, `manage_ip_bans`), GeoIP (`geoip.go`), UA/bot парсер (`user_agent.go`), телеметрия с апгрейдом guest→member в 30-мин сессии (`visits_telemetry.go`, `telemetrySession.js`, `App.jsx`, `forum_posts.go`, `forum.js`), SQL-аналитика и расследования (`admin_analytics.go`, `admin_ip_investigation.go`), IP-баны с CIDR-safelist и транзакционным аудитом + идемпотентностью (`ip_ban.go`, `register.go`), cron-агрегация и retention (`visits_retention.go`), API-обёртка (`src/api/analytics.js`), UI (`VisitsTab.jsx`, `VisitsTab.css`, графики, таблицы, `AdminIPModal`, `BanIPModal`, `UserRecentIPsPanel` в `AdminPage.jsx`), i18n EN+RU, обновлены `PROJECT_SPEC.md`, `PROJECT_CONTEXT.md`, `DEPLOY.md` (uncommitted, перед передачей на тестирование). | `go build ./...`, `go vet ./...`, `go test ./internal/auth/... ./internal/config/... ./internal/forum/... ./internal/migrations/...`, `TestParseIPRange/TestIsSafeListed*/TestIPToHex/TestCheckIPBanned` (`ip_ban_test.go`), `npm test` (ESLint + audit-action-labels + admin-nav-config). |
+
+### 12.4. Находки при сборке и аудите костяка (2026-11-24)
+
+1. **Формат дат PocketBase SQLite (`pbDateFormat = "2006-01-02 15:04:05.000Z"`):** Встроенные `DateField` и `created`/`last_seen` хранятся в SQLite с пробелом вместо `T`. Первоначальные запросы с `time.RFC3339` (`T`) ломали лексикографическое сравнение в SQLite (`' ' < 'T'`) и `time.Parse(RFC3339, ...)` в кеше банов. Исправлено везде на `pbDateFormat` и `r.GetDateTime("expires_at")`.
+2. **Пустые строки PocketBase `TextField` vs SQL `NULL`:** PocketBase сохраняет пустые текстовые поля как `""`, а не `NULL`. Запросы `COALESCE(user_id, guest_id)` схлопывали всех гостей в один пустой ID `""`, а retention `SET ip = NULL` мог падать на `NOT NULL` колонке. Исправлено на `COALESCE(NULLIF(user_id, ''), NULLIF(guest_id, ''))` и `SET ip = '' WHERE ip != ''`.
+3. **Авторизация клиентских запросов в админке:** Прямой `fetch(..., { credentials: 'include' })` не передавал `Authorization` токен PocketBase (`pb.authStore.token`), не учитывал `pbUrl` и слал неверный заголовок `X-Idempotency-Key`. Всё переведено на `sendApi()` в `src/api/analytics.js`.
+4. **Апгрейд гостевой сессии при логине:** Если пользователь заходил как гость (создавалась строка `visits` с `session_id`) и логинился в течение 30 минут, повторный визит отсекался кешем без привязки `user_id`. Добавлен апгрейд активной строки сессии и отслеживание `user?.uid` в `ActivityTracker`.
+5. **CIDR Safelist:** Добавлена функция `IsSafeListedRange` для блокировки попыток забанить `0.0.0.0/0`, `::/0` или `127.0.0.0/8`.
+6. **Оракул поиска и маскированные IP:** Без `view_raw_ip` поиск в `RecentVisitsTable` больше не ищет по сырой колонке `ip`, а `adminAnalyticsIPDossierHandler` игнорирует маскированные значения со `*` и резолвит `is_banned` на сервере по `ip_hash`, скрывая `ban_info.ip_or_subnet` маской.
+
+### 12.5. План доработки, тестов и отладки (для передачи следующим агентам)
+
+Ниже — чёткий перечень задач по тестированию, отладке и финальной верификации, которые остались после реализации основного костяка:
+
+1. **Интеграционные Go-тесты (Backend):**
+   - `backend/internal/platform/pocketbase/visits_telemetry_test.go`:
+     - `POST /api/aerun/telemetry/visit`: создание строки `visits`, дедупликация в окне 30 минут (`"touched"`), апгрейд `guest -> user` внутри одной сессии (`"upgraded"`), определение ботов по User-Agent (`Googlebot` → `is_bot=true, device="bot"`), проверка `ResolveLocation` на loopback/invalid IP и при отсутствии `.mmdb`.
+     - `GET /api/aerun/topics/{id}/posts?session_id=...`: запись `topic_visits` и дедупликация повторных страниц одной сессии.
+   - `backend/internal/platform/pocketbase/admin_analytics_test.go`:
+     - Права доступа: гость и `player` получают `403`, `admin` (без `view_raw_ip`) получает маскированный IP (`192.168.***.***`), `root` получает сырой IP; поиск по сырому IP не работает без `view_raw_ip`.
+     - Точность подсчёта `unique_visitors` (боты исключены; 1 участник + 2 разных гостя с одинаковыми/пустыми полями считаются корректно).
+     - `GET /api/aerun/admin/analytics/topics`, `/suspicious` (включая `registration_bursts`), `/admin/users/{id}/ips`.
+   - `backend/internal/platform/pocketbase/ip_bans_integration_test.go`:
+     - Интеграция с HTTP-маршрутами: `POST /admin/ip-bans` → `POST /auth/register` и `POST /api/collections/users/auth-with-password` возвращают `403 Access denied`, тогда как гостевое чтение `GET /topics` и гостевые посты остаются доступны (`200`/`201`).
+     - Проверка Chief Admin Immunity (попытка Root забанить собственный `e.RealIP()` возвращает `400`), проверка идемпотентности и появления записей `ip_ban_created` / `ip_ban_removed` в `audit_logs`.
+   - `backend/internal/platform/pocketbase/visits_retention_test.go`:
+     - Прямой вызов `runVisitsDailyAggregation(app)` и `runVisitsRetentionCleanup(app)`: проверка создания `daily_visits_summary`, затирания `visits.ip = ''` для записей > 90 дней (при сохранении свежих < 90 дней) и удаления старых `topic_visits`.
+2. **Полный прогон Go test suite и CI:**
+   - Выполнить в `backend/`: `gofmt -l ./internal`, `go vet ./...`, `go test ./...` (выделить время на полный прогон `pocketbase`).
+   - После пуша проверить `git fetch origin ci-report && git show origin/ci-report:report.json` согласно `.agent/rules/AGENTS.md`.
+3. **Frontend / E2E / Визуальная отладка (в браузере):**
+   - Запустить dev-стек (`npm run dev` + `backend`) и проверить вживую вкладку `/admin?tab=visits`:
+     - Отображение KPI, графиков (SVG по дням, 24 часа, 7 дней недели), топов стран/устройств/браузеров/ОС/путей.
+     - Смену периодов (`today`, `7d`, `30d`), пагинацию и поиск в таблице недавних визитов, клик по IP → `AdminIPModal` → `BanIPModal` (проверить NAT-алерт при `> 3` аккаунтов) → разбан из таблицы банов и из досье.
+     - Проверка раздела `IP` в таблице пользователей (вкладка «Пользователи» → кнопка `IP` и окно редактирования роли).
+     - Проверка UX при бане IP: попытка входа/регистрации с забаненного IP показывает нейтральную ошибку без утечки причины бана.
+   - Адаптивная и темновая вёрстка: проверить ширины **360px**, **768px**, **1280px** в темах **Light / Dark / Neutral** — отсутствие горизонтального скролла страницы, читаемость всех подписей ($\ge$ 14px), корректность цветов SVG.
+4. **Операционный шаг (на VPS при релизе):**
+   - Скачать `GeoLite2-City.mmdb` по лицензии MaxMind и разместить на VPS в `~/project/pb_data/geoip/GeoLite2-City.mmdb` (инструкция добавлена в `DEPLOY.md`).
+   - Добавить текст пункта политики конфиденциальности (из раздела 7.3 этого плана) в правила форума, если требуется на уровне контента.
+   - После закрытия пунктов 1–3 зачекинить чек-лист Раздела 11 и обновить таблицу 12.3.
 
 Правила: запись после каждого спринта — что сделано, коммит, как
 проверено (тесты, проверка глазами, ширины/темы). Незакрытый спринт

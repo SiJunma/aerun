@@ -65,3 +65,24 @@
 | `203/EXEC` в журнале сервиса | на VPS попал Windows-бинарник — запусти `deploy --only backend` заново, ELF-проверка не пропустит битый файл |
 | Порт `8090` занят локально | `npm run dev:backend:stop`, потом `npm run dev:backend` |
 | Заливка оборвалась на середине | запусти ту же команду ещё раз — чанки докачаются, а не зальются заново |
+
+## GeoIP для дашборда посещаемости
+
+Дашборд визитов использует MaxMind GeoLite2 для геолокации IP-адресов.
+Без базы GeoIP всё работает, но страна/город всегда будут `XX / Unknown`.
+
+**Первоначальная настройка (один раз на VPS):**
+
+1. Зарегистрируйся на [maxmind.com](https://www.maxmind.com) и скачай `GeoLite2-City.mmdb` (бесплатно).
+2. Положи файл на VPS: `~/project/pb_data/geoip/GeoLite2-City.mmdb`.
+3. Убедись, что файл читаем пользователем `deploy`.
+4. Перезапусти сервис: `python deploy.py restart`.
+
+**Альтернативный путь** — задай переменную окружения `AERUN_GEOIP_PATH=/путь/к/GeoLite2-City.mmdb` в `/home/deploy/project/.env`.
+
+**Обновление базы** — MaxMind обновляет GeoLite2 еженедельно; рекомендуется `geoipupdate` по cron:
+```bash
+# /etc/cron.weekly/geoipupdate
+geoipupdate && systemctl reload aerun.service
+```
+Файл `.mmdb` исключён из git (`.gitignore`), его нужно провизионировать на VPS вручную.

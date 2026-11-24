@@ -12,6 +12,7 @@ import {
   FileText,
   ChevronDown,
   Menu,
+  BarChart3,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
@@ -49,6 +50,7 @@ const ICON_MAP = {
   FileText,
   ChevronDown,
   Menu,
+  BarChart3,
 };
 
 /** Renders the icon named by the navigation config, if it is a known one. */

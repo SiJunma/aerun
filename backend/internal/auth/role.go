@@ -70,6 +70,18 @@ type RoleSpec struct {
 	Permissions []Permission
 }
 
+func adminDefaultPermissions() []Permission {
+	all := AllPermissions()
+	perms := make([]Permission, 0, len(all)-1)
+	for _, p := range all {
+		// PermViewRawIP is reserved strictly for Chief Admin (Root)
+		if p != PermViewRawIP {
+			perms = append(perms, p)
+		}
+	}
+	return perms
+}
+
 var roleSpecs = []RoleSpec{
 	{
 		Role:        RoleRoot,
@@ -85,7 +97,7 @@ var roleSpecs = []RoleSpec{
 		Rank:        800,
 		Color:       "danger",
 		IsSystem:    true,
-		Permissions: AllPermissions(),
+		Permissions: adminDefaultPermissions(),
 	},
 	{
 		Role:     RoleModerator,

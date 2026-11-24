@@ -26,25 +26,28 @@ import { useAuth } from './contexts/AuthProvider';
 import GlobalModals from './components/common/GlobalModals';
 import UnsentReplyNotice from './components/common/UnsentReplyNotice';
 import RealtimeStatusBanner from './components/common/RealtimeStatusBanner';
+import { sendTelemetryVisit } from './utils/telemetrySession';
 
 /**
- * ActivityTracker — records every route change as user activity.
+ * ActivityTracker — records every route change as user activity and sends visit telemetry.
  * Mounted once inside the Router so it has access to useLocation.
- * Skips the mount render: the presence loop already beats on cold start, so a
- * mount-beat here is a guaranteed duplicate.
  */
 const ActivityTracker = () => {
   const location = useLocation();
-  const { recordActivity } = useAuth();
+  const { user, recordActivity } = useAuth();
   const mountedRef = React.useRef(false);
 
   useEffect(() => {
+    sendTelemetryVisit({
+      entryPath: location.pathname + location.search,
+      userId: user?.uid || '',
+    });
     if (!mountedRef.current) {
       mountedRef.current = true;
       return;
     }
     if (recordActivity) recordActivity();
-  }, [location.pathname, recordActivity]);
+  }, [location.pathname, location.search, user?.uid, recordActivity]);
 
   return null;
 };
