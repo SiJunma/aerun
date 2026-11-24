@@ -417,19 +417,25 @@ export default function TopicPage() {
   // Track previous placement to detect when mode/targetPostId changes (for scroll-to-form)
   const prevPlacementRef = useRef({ mode: replyPlacement.mode, targetPostId: replyPlacement.targetPostId });
 
+  // Effect 1: Compute portal target node when placement or posts change
+  // This only sets the portal target — no scrolling here.
   useEffect(() => {
     let target = null;
     if (replyPlacement.mode === 'inline' && replyPlacement.targetPostId) {
       target = document.getElementById(`inline-reply-slot-${replyPlacement.targetPostId}`);
     }
 
-    // Fallback: дефолтный слот внизу темы
+    // Fallback: default slot at the bottom of the topic
     if (!target) {
       target = document.getElementById('bottom-reply-slot');
     }
     setPortalTargetNode(target);
+  }, [replyPlacement, posts]);
 
-    // Scroll to form when placement mode or targetPostId changes (not on posts/isCollapsed changes)
+  // Effect 2: Scroll to form AFTER the portal has actually moved it.
+  // Runs when portalTargetNode changes (i.e., after React commits the portal move).
+  // Guard: scroll only when mode or targetPostId actually changed, not on isCollapsed/posts changes.
+  useEffect(() => {
     const prevMode = prevPlacementRef.current.mode;
     const prevTargetPostId = prevPlacementRef.current.targetPostId;
     const currMode = replyPlacement.mode;
@@ -437,15 +443,13 @@ export default function TopicPage() {
 
     if (prevMode !== currMode || prevTargetPostId !== currTargetPostId) {
       prevPlacementRef.current = { mode: currMode, targetPostId: currTargetPostId };
-      // Use requestAnimationFrame to ensure portal has moved the form first
-      requestAnimationFrame(() => {
-        const form = document.getElementById('reply-composer-form');
-        if (form) {
-          form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        }
-      });
+      const form = document.getElementById('reply-composer-form');
+      if (form) {
+        form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
     }
-  }, [replyPlacement, posts]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- portalTargetNode is the correct dependency; it changes whenever replyPlacement changes (via Effect 1). We read current replyPlacement values but use prevPlacementRef to guard against scroll on isCollapsed/posts changes.
+  }, [portalTargetNode]);
 
   // Mask initialization & selection (contract: check-last-selected-mask.mjs)
   useEffect(() => {

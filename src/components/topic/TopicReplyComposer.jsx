@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useImperativeHandle, useEffect, useRef } from 'react';
 import { User, Keyboard, FilePen, Lock, MessageSquareOff, Minimize2, ArrowDownToLine } from 'lucide-react';
 import RichEditor from '../common/RichEditor';
 import MaskPicker from './MaskPicker';
@@ -36,6 +36,24 @@ export const TopicReplyComposer = React.forwardRef(({
   onToggleCollapse,
 }, ref) => {
   const replyEditorRef = React.useRef(null);
+
+  // Expose focus method to parent via ref
+  useImperativeHandle(ref, () => ({
+    focus: () => replyEditorRef.current?.focus(),
+  }));
+
+  // Auto-focus editor when form moves to inline mode (e.g., after clicking "Quote")
+  const prevIsInlineRef = useRef(false);
+  useEffect(() => {
+    const isInline = placement?.mode === 'inline';
+    if (!prevIsInlineRef.current && isInline) {
+      // Small delay to ensure the portal has moved and the editor is in the DOM
+      requestAnimationFrame(() => {
+        replyEditorRef.current?.focus();
+      });
+    }
+    prevIsInlineRef.current = isInline;
+  }, [placement?.mode]);
 
   // Spectator mode / no permission
   if (!hasPermission(PERMISSIONS.POST_REPLY, { category })) {

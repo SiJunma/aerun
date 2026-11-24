@@ -97,7 +97,15 @@ const RichEditor = forwardRef(({
 
   useImperativeHandle(ref, () => ({
     openHotkeysModal: () => setShowHotkeysModal(true),
-    focus: () => textareaRef.current?.focus()
+    focus: () => {
+      const el = textareaRef.current;
+      if (el) {
+        el.focus();
+        // Move cursor to end of content
+        const len = el.value.length;
+        el.setSelectionRange(len, len);
+      }
+    }
   }));
 
   const adjustTextareaHeight = useCallback(() => {
