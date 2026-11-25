@@ -71,18 +71,14 @@
 Дашборд визитов использует MaxMind GeoLite2 для геолокации IP-адресов.
 Без базы GeoIP всё работает, но страна/город всегда будут `XX / Unknown`.
 
-**Первоначальная настройка (один раз на VPS):**
+**Настройка через админку форума (рекомендуется, ключ хранится только в БД):**
 
-1. Зарегистрируйся на [maxmind.com](https://www.maxmind.com) и скачай `GeoLite2-City.mmdb` (бесплатно).
-2. Положи файл на VPS: `~/project/pb_data/geoip/GeoLite2-City.mmdb`.
-3. Убедись, что файл читаем пользователем `deploy`.
-4. Перезапусти сервис: `python deploy.py restart`.
+1. Зарегистрируйся на [maxmind.com](https://www.maxmind.com) и создай бесплатный лицензионный ключ.
+2. Открой на форуме **Админка → Настройки → Секреты и интеграции**.
+3. Вставь лицензионный ключ MaxMind и нажми **Сохранить секреты**.
+4. Нажми **Скачать / обновить базу GeoIP** — сервер сам скачает `GeoLite2-City.mmdb` в `pb_data/geoip/GeoLite2-City.mmdb` и активирует её без перезапуска.
 
-**Альтернативный путь** — задай переменную окружения `AERUN_GEOIP_PATH=/путь/к/GeoLite2-City.mmdb` в `/home/deploy/project/.env`.
+Никакие API-ключи не нужно класть в `.env`-файлы или репозиторий.
 
-**Обновление базы** — MaxMind обновляет GeoLite2 еженедельно; рекомендуется `geoipupdate` по cron:
-```bash
-# /etc/cron.weekly/geoipupdate
-geoipupdate && systemctl reload aerun.service
-```
-Файл `.mmdb` исключён из git (`.gitignore`), его нужно провизионировать на VPS вручную.
+**Альтернатива (ручная установка файла):** положить `GeoLite2-City.mmdb` в `~/project/pb_data/geoip/GeoLite2-City.mmdb` (или указать путь к файлу через `AERUN_GEOIP_PATH`).
+Файл `.mmdb` исключён из git (`.gitignore`).

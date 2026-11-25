@@ -55,6 +55,7 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 	// sees. Raising the timeout alone postpones it; keeping the stream
 	// warm is what stops it.
 	pb.OnServe().BindFunc(func(se *core.ServeEvent) error {
+		setGeoIPDataDir(se.App.DataDir())
 		registerRealtimeKeepalive(se.App)
 		logger.Info("realtime keepalive hook registered")
 		se.Router.BindFunc(assignRequestID)
@@ -316,6 +317,15 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 		BindFunc(RequirePermission(auth.PermAdminAccess)).BindFunc(enforceIdempotency)
 	group.PUT("/admin/settings", updateGlobalSettingsHandler(cfg)).
 		BindFunc(RequirePermission(auth.PermAdminAccess)).BindFunc(enforceIdempotency)
+
+	// Admin secrets & integrations (MaxMind license key, Google OAuth2, SMTP, IP salt).
+	// Strictly gated on PermManageForum; values never appear in public GET /settings.
+	group.GET("/admin/secrets", getAdminSecretsHandler(cfg)).
+		BindFunc(RequirePermission(auth.PermManageForum))
+	group.PATCH("/admin/secrets", updateAdminSecretsHandler(cfg)).
+		BindFunc(RequirePermission(auth.PermManageForum)).BindFunc(enforceIdempotency)
+	group.POST("/admin/geoip/download", downloadGeoIPHandler).
+		BindFunc(RequirePermission(auth.PermManageForum)).BindFunc(enforceIdempotency)
 
 	// Identity placeholder image upload (plan I5/D2). No enforceIdempotency:
 	// that middleware buffers the body and caps it at 512 KB, which a multipart

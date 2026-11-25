@@ -39,6 +39,7 @@ import { useToast } from '../contexts/ToastProvider';
 import { pb } from '../api/pocketbase';
 import DesignsTab from '../components/admin/DesignsTab';
 import EmailTemplatesSettings from '../components/admin/EmailTemplatesSettings';
+import AdminSecretsSettings from '../components/admin/AdminSecretsSettings';
 import VisitsTab from '../components/admin/VisitsTab';
 import UserRecentIPsPanel from '../components/admin/UserRecentIPsPanel';
 import AdminIPModal from '../components/modals/AdminIPModal';
@@ -106,6 +107,8 @@ const AUDIT_ACTION_REGISTRY = [
       'design_updated',
       'design_deleted',
       'settings_updated',
+      'secrets_updated',
+      'geoip_database_updated',
       'email_template_updated',
       'email_template_test_sent',
     ],
@@ -2389,6 +2392,8 @@ const AdminPage = () => {
         </Form>
         </div>
       </div>
+
+    <AdminSecretsSettings />
 
     <EmailTemplatesSettings
       forumName={settings.forumName?.[currentLang] || settings.forumName?.en || 'Aerun'}

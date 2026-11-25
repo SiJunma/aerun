@@ -22,23 +22,41 @@ export const sendVisitTelemetry = async ({ session_id, guest_id = '', entry_path
   });
 };
 
-export const fetchAnalyticsDashboard = async (period = '30d') => {
-  return await sendApi(`/api/aerun/admin/analytics/dashboard?period=${encodeURIComponent(period)}`);
+const buildPeriodParams = (periodOrOpts = '30d', extra = {}) => {
+  const opts = typeof periodOrOpts === 'string' ? { period: periodOrOpts } : (periodOrOpts || {});
+  const params = new URLSearchParams();
+  if (opts.period) params.set('period', opts.period);
+  if (opts.from) params.set('from', opts.from);
+  if (opts.to) params.set('to', opts.to);
+  if (opts.date) params.set('date', opts.date);
+  for (const [k, v] of Object.entries(extra)) {
+    if (v !== undefined && v !== null && v !== '') {
+      params.set(k, String(v));
+    }
+  }
+  return params.toString();
 };
 
-export const fetchAnalyticsTopics = async (period = '30d', limit = 15) => {
-  return await sendApi(
-    `/api/aerun/admin/analytics/topics?period=${encodeURIComponent(period)}&limit=${encodeURIComponent(limit)}`
-  );
+export const fetchAnalyticsDashboard = async (periodOrOpts = '30d') => {
+  const qs = buildPeriodParams(periodOrOpts);
+  return await sendApi(`/api/aerun/admin/analytics/dashboard?${qs}`);
 };
 
-export const fetchAnalyticsVisits = async ({ page = 1, limit = 25, filter = 'all', query = '' } = {}) => {
-  const qs = new URLSearchParams({
-    page: String(page),
-    limit: String(limit),
-    filter,
-    query,
-  }).toString();
+export const fetchAnalyticsTopics = async (periodOrOpts = '30d', limit = 15) => {
+  const qs = buildPeriodParams(periodOrOpts, { limit });
+  return await sendApi(`/api/aerun/admin/analytics/topics?${qs}`);
+};
+
+export const fetchAnalyticsVisits = async ({
+  page = 1,
+  limit = 25,
+  filter = 'all',
+  query = '',
+  period = '',
+  from = '',
+  to = '',
+} = {}) => {
+  const qs = buildPeriodParams({ period, from, to }, { page, limit, filter, query });
   return await sendApi(`/api/aerun/admin/analytics/visits?${qs}`);
 };
 

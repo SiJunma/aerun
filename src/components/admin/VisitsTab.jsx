@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Button, Form } from 'react-bootstrap';
 import { RotateCw, ShieldBan } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
 import { useAuth } from '../../contexts/AuthProvider';
@@ -25,6 +26,14 @@ import AdminIPModal from '../modals/AdminIPModal';
 import BanIPModal from '../modals/BanIPModal';
 import './VisitsTab.css';
 
+const getTodayUTC = () => new Date().toISOString().slice(0, 10);
+
+const shiftDaysUTC = (isoDate, deltaDays) => {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + deltaDays);
+  return d.toISOString().slice(0, 10);
+};
+
 export default function VisitsTab() {
   const { t } = useI18n();
   const { hasPermission } = useAuth();
@@ -32,7 +41,12 @@ export default function VisitsTab() {
 
   const canManageBans = hasPermission(PERMISSIONS.MANAGE_IP_BANS);
 
-  const [period, setPeriod] = useState('30d');
+  const todayStr = getTodayUTC();
+  const [periodMode, setPeriodMode] = useState('30d');
+  const [singleDate, setSingleDate] = useState(() => todayStr);
+  const [rangeFrom, setRangeFrom] = useState(() => shiftDaysUTC(todayStr, -6));
+  const [rangeTo, setRangeTo] = useState(() => todayStr);
+
   const [loading, setLoading] = useState(false);
   const [dashboardError, setDashboardError] = useState(null);
   const [dashboardData, setDashboardData] = useState(null);
@@ -63,13 +77,38 @@ export default function VisitsTab() {
   const [banInitialIP, setBanInitialIP] = useState('');
   const [banAccountCount, setBanAccountCount] = useState(0);
 
+  const dateRangeError = useMemo(() => {
+    const maxDate = getTodayUTC();
+    if (periodMode === 'day') {
+      if (!singleDate) return t('admin.visits.periods.date_required', 'Select a date.');
+      if (singleDate > maxDate) return t('admin.visits.periods.date_in_future', 'Date cannot be in the future.');
+    }
+    if (periodMode === 'custom') {
+      if (!rangeFrom || !rangeTo) return t('admin.visits.periods.range_required', 'Select both start and end dates.');
+      if (rangeFrom > rangeTo) return t('admin.visits.periods.start_after_end', 'Start date cannot be after end date.');
+      if (rangeTo > maxDate) return t('admin.visits.periods.date_in_future', 'End date cannot be in the future.');
+    }
+    return '';
+  }, [periodMode, singleDate, rangeFrom, rangeTo, t]);
+
+  const activePeriodParams = useMemo(() => {
+    if (periodMode === 'day') {
+      return { period: 'custom', from: singleDate, to: singleDate };
+    }
+    if (periodMode === 'custom') {
+      return { period: 'custom', from: rangeFrom, to: rangeTo };
+    }
+    return { period: periodMode };
+  }, [periodMode, singleDate, rangeFrom, rangeTo]);
+
   const fetchDashboard = useCallback(async () => {
+    if (dateRangeError) return;
     setLoading(true);
     setDashboardError(null);
     try {
       const [dashJson, topJson, suspJson] = await Promise.all([
-        fetchAnalyticsDashboard(period),
-        fetchAnalyticsTopics(period, 15),
+        fetchAnalyticsDashboard(activePeriodParams),
+        fetchAnalyticsTopics(activePeriodParams, 15),
         fetchAnalyticsSuspicious(),
       ]);
       setDashboardData(dashJson);
@@ -80,9 +119,10 @@ export default function VisitsTab() {
     } finally {
       setLoading(false);
     }
-  }, [period]);
+  }, [activePeriodParams, dateRangeError]);
 
   const fetchVisits = useCallback(async () => {
+    if (dateRangeError) return;
     setVisitsError(null);
     try {
       const data = await fetchAnalyticsVisits({
@@ -90,13 +130,14 @@ export default function VisitsTab() {
         limit: 25,
         filter: visitsFilter,
         query: visitsQuery,
+        ...activePeriodParams,
       });
       setVisits(data?.items || []);
       setVisitsTotal(data?.total || 0);
     } catch (err) {
       setVisitsError(err);
     }
-  }, [visitsPage, visitsFilter, visitsQuery]);
+  }, [visitsPage, visitsFilter, visitsQuery, activePeriodParams, dateRangeError]);
 
   const loadBans = useCallback(async () => {
     if (!canManageBans) return;
@@ -169,16 +210,81 @@ export default function VisitsTab() {
             { id: 'today', label: t('admin.visits.periods.today', 'Today') },
             { id: '7d', label: t('admin.visits.periods.seven_days', '7 Days') },
             { id: '30d', label: t('admin.visits.periods.thirty_days', '30 Days') },
+            { id: 'day', label: t('admin.visits.periods.single_day', 'Day') },
+            { id: 'custom', label: t('admin.visits.periods.custom_range', 'Range') },
           ].map((p) => (
-            <button
+            <Button
               key={p.id}
               type="button"
-              className={`visits-period-btn ${period === p.id ? 'visits-period-btn--active' : ''}`}
-              onClick={() => setPeriod(p.id)}
+              size="sm"
+              variant={periodMode === p.id ? 'primary' : 'outline-secondary'}
+              onClick={() => {
+                setPeriodMode(p.id);
+                setVisitsPage(1);
+              }}
             >
               {p.label}
-            </button>
+            </Button>
           ))}
+
+          {periodMode === 'day' && (
+            <div className="visits-date-controls">
+              <label className="visits-date-field">
+                <span className="visits-date-label">{t('admin.visits.periods.date_label', 'Date')}:</span>
+                <Form.Control
+                  type="date"
+                  size="sm"
+                  className="visits-date-input"
+                  value={singleDate}
+                  max={todayStr}
+                  onChange={(e) => {
+                    setSingleDate(e.target.value);
+                    setVisitsPage(1);
+                  }}
+                />
+              </label>
+            </div>
+          )}
+
+          {periodMode === 'custom' && (
+            <div className="visits-date-controls">
+              <label className="visits-date-field">
+                <span className="visits-date-label">{t('admin.visits.periods.from_label', 'From')}:</span>
+                <Form.Control
+                  type="date"
+                  size="sm"
+                  className="visits-date-input"
+                  value={rangeFrom}
+                  max={rangeTo || todayStr}
+                  onChange={(e) => {
+                    setRangeFrom(e.target.value);
+                    setVisitsPage(1);
+                  }}
+                />
+              </label>
+              <label className="visits-date-field">
+                <span className="visits-date-label">{t('admin.visits.periods.to_label', 'To')}:</span>
+                <Form.Control
+                  type="date"
+                  size="sm"
+                  className="visits-date-input"
+                  value={rangeTo}
+                  min={rangeFrom || undefined}
+                  max={todayStr}
+                  onChange={(e) => {
+                    setRangeTo(e.target.value);
+                    setVisitsPage(1);
+                  }}
+                />
+              </label>
+            </div>
+          )}
+
+          {dateRangeError && (
+            <div className="visits-date-error" role="alert">
+              {dateRangeError}
+            </div>
+          )}
         </div>
 
         <div className="visits-header-actions">
@@ -300,7 +406,7 @@ export default function VisitsTab() {
       <div className="admin-card">
         <div className="admin-card__header">
           <h3 className="visits-card-title">
-            {t('admin.visits.charts.daily_dynamics', 'Daily Traffic Dynamics')}
+            {t('admin.visits.charts.daily_dynamics', 'Daily Visits Dynamics')}
           </h3>
         </div>
         <div className="admin-card__body">
@@ -314,7 +420,7 @@ export default function VisitsTab() {
           <div className="admin-card">
             <div className="admin-card__header">
               <h3 className="visits-card-title visits-card-title--sm">
-                {t('admin.visits.charts.hourly_distribution', '24h Activity by Hour')}
+                {t('admin.visits.charts.hourly_distribution', '24h Visits by Hour')}
               </h3>
             </div>
             <div className="admin-card__body">
@@ -325,7 +431,7 @@ export default function VisitsTab() {
           <div className="admin-card">
             <div className="admin-card__header">
               <h3 className="visits-card-title visits-card-title--sm">
-                {t('admin.visits.charts.dow_distribution', 'Weekly Distribution')}
+                {t('admin.visits.charts.dow_distribution', 'Visits by Day of Week')}
               </h3>
             </div>
             <div className="admin-card__body">
@@ -336,7 +442,7 @@ export default function VisitsTab() {
           <div className="admin-card">
             <div className="admin-card__header">
               <h3 className="visits-card-title visits-card-title--sm">
-                {t('admin.visits.sections.top_entry_paths', 'Top Entry Paths')}
+                {t('admin.visits.sections.top_entry_paths', 'Top Visit Entry Paths')}
               </h3>
             </div>
             <div className="admin-card__body">
@@ -459,17 +565,18 @@ export default function VisitsTab() {
                 { id: 'active', label: t('admin.visits.ban_table.status_active', 'Active Bans') },
                 { id: 'all', label: t('admin.visits.ban_table.status_all', 'All History') },
               ].map((st) => (
-                <button
+                <Button
                   key={st.id}
                   type="button"
-                  className={`visits-period-btn ${bansStatus === st.id ? 'visits-period-btn--active' : ''}`}
+                  size="sm"
+                  variant={bansStatus === st.id ? 'primary' : 'outline-secondary'}
                   onClick={() => {
                     setBansStatus(st.id);
                     setBansPage(1);
                   }}
                 >
                   {st.label}
-                </button>
+                </Button>
               ))}
             </div>
           </div>
@@ -508,14 +615,15 @@ export default function VisitsTab() {
                           </td>
                           <td>
                             {b.is_active ? (
-                              <button
+                              <Button
                                 type="button"
-                                className="visits-period-btn"
+                                size="sm"
+                                variant="outline-secondary"
                                 disabled={unbanningId === b.id}
                                 onClick={() => handleUnbanRow(b.id)}
                               >
                                 {t('admin.visits.ban_table.unban', 'Unban')}
-                              </button>
+                              </Button>
                             ) : (
                               <span className="visits-text-muted">—</span>
                             )}

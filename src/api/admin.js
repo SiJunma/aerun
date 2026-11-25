@@ -118,6 +118,26 @@ export const uploadIdentityPlaceholder = async (kind, blob, filename = `${kind}.
   return res?.avatar_url || '';
 };
 
+// --- Admin Secrets & Integrations ---
+
+export const fetchAdminSecrets = async () => {
+  return await sendApi('/api/aerun/admin/secrets');
+};
+
+export const updateAdminSecrets = async (payload) => {
+  return await sendApi('/api/aerun/admin/secrets', {
+    method: 'PATCH',
+    body: payload
+  });
+};
+
+export const downloadGeoIPDatabase = async () => {
+  return await sendApi('/api/aerun/admin/geoip/download', {
+    method: 'POST',
+    body: {}
+  });
+};
+
 // --- Root handover ---
 
 /**

@@ -1,6 +1,20 @@
 import React from 'react';
 import { useI18n } from '../../contexts/I18nProvider';
 
+const DEFAULT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function formatDayLabel(isoDate, months) {
+  if (!isoDate || typeof isoDate !== 'string') return '';
+  const parts = isoDate.slice(0, 10).split('-');
+  if (parts.length !== 3) return isoDate;
+  const monthIdx = parseInt(parts[1], 10) - 1;
+  const dayNum = parseInt(parts[2], 10);
+  if (Number.isNaN(monthIdx) || monthIdx < 0 || monthIdx > 11 || Number.isNaN(dayNum)) {
+    return isoDate;
+  }
+  return `${months[monthIdx] || DEFAULT_MONTHS[monthIdx]} ${dayNum}`;
+}
+
 /**
  * Pure SVG Daily Visits & Traffic Dynamics Chart.
  * No third-party bundle weight, theme-token adaptive, fonts >= 14px, zero inline styles.
@@ -16,13 +30,16 @@ export default function DailyVisitsChart({ data = [] }) {
     );
   }
 
+  const rawMonths = t('admin.visits.charts.month_names');
+  const monthNames = Array.isArray(rawMonths) && rawMonths.length === 12 ? rawMonths : DEFAULT_MONTHS;
+
   const height = 240;
   const paddingLeft = 50;
   const paddingRight = 20;
   const paddingTop = 20;
   const paddingBottom = 40;
   const chartHeight = height - paddingTop - paddingBottom;
-  const chartWidth = Math.max(540, data.length * 48);
+  const chartWidth = Math.max(540, data.length * 64);
 
   const maxVal = Math.max(
     ...data.map((d) => Math.max(d.Visits || d.visits || 0, d.Uniques || d.uniques || 0, d.Bots || d.bots || 0)),
@@ -80,11 +97,13 @@ export default function DailyVisitsChart({ data = [] }) {
             const visits = d.Visits || d.visits || 0;
             const uniques = d.Uniques || d.uniques || 0;
             const bots = d.Bots || d.bots || 0;
-            const dayStr = (d.Date || d.day || '').slice(5); // MM-DD
+            const rawDate = d.Date || d.day || d.date || '';
+            const dayStr = formatDayLabel(rawDate, monthNames);
 
-            const barW = Math.max(8, stepX * 0.35);
-            const xVisits = paddingLeft + i * stepX + stepX * 0.15;
-            const xUniques = xVisits + barW + 2;
+            const barW = Math.max(8, Math.min(24, stepX * 0.34));
+            const centerX = paddingLeft + i * stepX + stepX / 2;
+            const xVisits = centerX - barW - 1;
+            const xUniques = centerX + 1;
 
             const hVisits = (visits / maxVal) * chartHeight;
             const yVisits = paddingTop + chartHeight - hVisits;
@@ -102,7 +121,7 @@ export default function DailyVisitsChart({ data = [] }) {
                   rx="3"
                   fill="var(--primary-color)"
                 >
-                  <title>{`${d.Date || d.day}: ${visits} (${bots} bots)`}</title>
+                  <title>{`${dayStr}: ${visits} ${t('admin.visits.charts.visits_unit', 'visits')} (${bots} ${t('admin.visits.charts.bots_unit', 'bots')})`}</title>
                 </rect>
 
                 <rect
@@ -115,11 +134,11 @@ export default function DailyVisitsChart({ data = [] }) {
                   stroke="var(--primary-color)"
                   strokeWidth="1"
                 >
-                  <title>{`${d.Date || d.day}: ${uniques}`}</title>
+                  <title>{`${dayStr}: ${uniques} ${t('admin.visits.charts.uniques', 'Uniques')}`}</title>
                 </rect>
 
                 <text
-                  x={xVisits + barW}
+                  x={centerX}
                   y={height - 10}
                   fill="var(--secondary-color)"
                   fontSize="14"

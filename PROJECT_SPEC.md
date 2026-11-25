@@ -32,7 +32,7 @@
 | `dm_messages` | сообщения ЛС | `conversation_id`, отправитель, `content`, tombstone-удаление |
 | `guest_principals` | cookie-идентичность гостей | гостевой ID, аватар/имя |
 | `guest_presence` | присутствие гостей | `first_seen`, `last_seen` = момент последнего клика (15-мин окно онлайна), TTL, чистится кроном |
-| `forum_settings` | глобальные настройки | название, темы/дизайн, `email_templates`, `topics_per_page`, флаги dice/reputation/characters/masks, SMTP |
+| `forum_settings` | глобальные настройки | название, темы/дизайн, `email_templates`, `topics_per_page`, флаги dice/reputation/characters/masks, админские секреты (`maxmind_license_key`, `geoip_updated_at`, `google_client_id`, `google_client_secret`, `ip_hash_salt`; правила закрыты, не отдаются в публичный `/settings`) |
 | `idempotency_keys` | идемпотентность | `actor`, `key`, `request_hash`, `response_json`, `status`; UNIQUE(actor, key); автоочистка кроном (старше 48ч) |
 | `visits` | сессии/визиты | `occurred_at`, `user_id`, `guest_id`, `session_id`, `ip` (90 дней retention), `ip_hash`, `country`, `city`, `device`, `browser`, `os`, `entry_path`, `referrer`, `is_bot`; правила закрыты |
 | `topic_visits` | просмотры тем | `topic_id`, `occurred_at`, `user_id`, `guest_id`, `session_id`; правила закрыты |
@@ -59,7 +59,8 @@
 
 ### 3.1 Служебные
 - `GET /health` — liveness; `GET /status` — статус + статистика presence.
-- `GET /settings` — публичный снапшот настроек; `PATCH|PUT /admin/settings` (admin_access); `PUT /admin/settings/placeholder/{kind}` — загрузка identity-placeholder (multipart, без idempotency).
+- `GET /settings` — публичный снапшот настроек (без секретов); `PATCH|PUT /admin/settings` (admin_access); `PUT /admin/settings/placeholder/{kind}` — загрузка identity-placeholder (multipart, без idempotency).
+- `GET /admin/secrets`, `PATCH /admin/secrets` (`manage_forum`) — чтение (маскировано) и запись секретов интеграций в БД (MaxMind license key, Google OAuth2, SMTP, IP hash salt); `POST /admin/geoip/download` (`manage_forum`) — скачивание и hot-reload `GeoLite2-City.mmdb` по ключу из БД.
 
 ### 3.2 Аккаунт и профиль
 - `GET /me`; `PUT /me/settings`; `PUT /me/avatar` (multipart); `PATCH /me/nickname`; `PATCH /me/profile`.
@@ -117,10 +118,10 @@
 - Шаблоны почты: `GET /admin/email-templates`, `PUT /admin/email-templates`, `POST /admin/email-templates/test` (admin_access).
 
 ### 3.13 Аналитика посещений и IP-контроль
-- `POST /telemetry/visit`: сбор визитов и сессий (30 мин окно touch-дедупликации, GeoIP, User-Agent, боты).
-- `GET /admin/analytics/dashboard?period=today|7d|30d`: сводка KPI, почасовая гистограмма, динамика по дням, топы стран/устройств/путей (`view_visits_dashboard`).
-- `GET /admin/analytics/topics?period=today|7d|30d`: статистика просмотров и уникальных читателей тем (`view_visits_dashboard`).
-- `GET /admin/analytics/visits`: постраничный лог визитов с фильтрами и поиском; маскирование IP при отсутствии `view_raw_ip` (`view_visits_dashboard`).
+- `POST /telemetry/visit`: сбор визитов и сессий (30 мин окно durable touch-дедупликации в памяти + БД, GeoIP, User-Agent, боты).
+- `GET /admin/analytics/dashboard?period=today|7d|30d|custom&from=YYYY-MM-DD&to=YYYY-MM-DD`: сводка KPI (сравнение с равным по длине предыдущим периодом), почасовая гистограмма, динамика по дням, топы стран/устройств/путей (без `/admin*`) (`view_visits_dashboard`).
+- `GET /admin/analytics/topics?period=today|7d|30d|custom&from=YYYY-MM-DD&to=YYYY-MM-DD`: статистика просмотров и уникальных читателей тем (`view_visits_dashboard`).
+- `GET /admin/analytics/visits`: постраничный лог визитов с фильтрами (вкл. `period`/`from`/`to`) и поиском; маскирование IP при отсутствии `view_raw_ip` (`view_visits_dashboard`).
 - `GET /admin/analytics/ip-dossier`: досье IP-адреса с историей, привязанными аккаунтами и статусом бана (`view_visits_dashboard`).
 - `GET /admin/analytics/suspicious`: детекция мультиаккаунтов, всплесков регистраций (24ч), частой смены IP и наплывов гостей (`view_visits_dashboard`).
 - `GET /admin/users/{id}/ips`: последние 10 IP-адресов активности участника для карточки пользователя (`view_visits_dashboard`, маскируется без `view_raw_ip`).

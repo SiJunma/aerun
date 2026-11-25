@@ -49,7 +49,7 @@ export default function HourlyDistributionChart({ data = [] }) {
                   fill="var(--primary-color)"
                   opacity={isPeak ? 1 : Math.max(0.3, cnt / maxVal)}
                 >
-                  <title>{`${hr}:00 — ${cnt}`}</title>
+                  <title>{`${hr}:00 — ${cnt} ${t('admin.visits.charts.visits_unit', 'visits')}`}</title>
                 </rect>
                 {hr % 4 === 0 && (
                   <text

@@ -30,7 +30,7 @@ func adminAnalyticsIPDossierHandler(e *core.RequestEvent) error {
 	}
 
 	if targetHash == "" && targetIP != "" {
-		targetHash = hashIP(targetIP)
+		targetHash = hashIPWithApp(e.App, targetIP)
 	}
 
 	// 1. Resolve country, city, and stored raw IP from recent visit for this ip_hash.
@@ -149,7 +149,7 @@ func adminAnalyticsIPDossierHandler(e *core.RequestEvent) error {
 		Where(dbx.NewExp("ip_hash = {:hash} AND (user_id IS NULL OR user_id = '')", dbx.Params{"hash": targetHash})).
 		Row(&guestCount)
 
-	// 5. Recent 50 visits
+	// 5. Recent 50 visits (serialized with snake_case keys and enriched user profile)
 	type VisitRow struct {
 		ID         string `db:"id"`
 		OccurredAt string `db:"occurred_at"`
@@ -159,17 +159,45 @@ func adminAnalyticsIPDossierHandler(e *core.RequestEvent) error {
 		Browser    string `db:"browser"`
 		OS         string `db:"os"`
 		EntryPath  string `db:"entry_path"`
+		IsBot      bool   `db:"is_bot"`
 	}
-	recentVisits := []VisitRow{}
+	var visitRows []VisitRow
 	_ = e.App.DB().NewQuery(`
-		SELECT id, occurred_at, user_id, guest_id, device, browser, os, entry_path
+		SELECT id, occurred_at, user_id, guest_id, device, browser, os, entry_path, is_bot
 		FROM visits
 		WHERE ip_hash = {:hash}
 		ORDER BY occurred_at DESC
 		LIMIT 50
-	`).Bind(dbx.Params{"hash": targetHash}).All(&recentVisits)
+	`).Bind(dbx.Params{"hash": targetHash}).All(&visitRows)
 
-	return e.JSON(http.StatusOK, map[string]any{
+	recentVisits := make([]map[string]any, 0, len(visitRows))
+	for _, r := range visitRows {
+		var userProfile any
+		if r.UserID != "" {
+			if u, ok := userMap[r.UserID]; ok {
+				userProfile = map[string]any{
+					"id":       u["id"],
+					"nickname": u["nickname"],
+					"avatar":   u["avatar"],
+					"role":     u["role"],
+				}
+			}
+		}
+		recentVisits = append(recentVisits, map[string]any{
+			"id":          r.ID,
+			"occurred_at": r.OccurredAt,
+			"user_id":     r.UserID,
+			"guest_id":    r.GuestID,
+			"device":      r.Device,
+			"browser":     r.Browser,
+			"os":          r.OS,
+			"entry_path":  r.EntryPath,
+			"is_bot":      r.IsBot,
+			"user":        userProfile,
+		})
+	}
+
+	resp := map[string]any{
 		"ip":                  displayIP,
 		"ip_hash":             targetHash,
 		"can_view_raw":        canViewRawIP,
@@ -177,11 +205,16 @@ func adminAnalyticsIPDossierHandler(e *core.RequestEvent) error {
 		"country":             geo.Country,
 		"city":                geo.City,
 		"is_banned":           isBanned,
-		"ban_info":            banInfo,
+		"ban_info":            nil,
 		"associated_accounts": associatedAccounts,
 		"guest_count":         guestCount,
 		"recent_visits":       recentVisits,
-	})
+	}
+	if isBanned && banInfo != nil {
+		resp["ban_info"] = banInfo
+	}
+
+	return e.JSON(http.StatusOK, resp)
 }
 
 // adminAnalyticsSuspiciousHandler identifies potential abuse, multies, registration bursts, and anomalies.

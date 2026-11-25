@@ -46,7 +46,7 @@ export default function WeeklyDistributionChart({ data = [] }) {
                 fill="var(--primary-color)"
                 opacity={val > 0 ? Math.max(0.45, val / maxVal) : 0.2}
               >
-                <title>{`${dayNames[dowIdx]}: ${val}`}</title>
+                <title>{`${dayNames[dowIdx]}: ${val} ${t('admin.visits.charts.visits_unit', 'visits')}`}</title>
               </rect>
               <text
                 x={pos * colW + colW / 2}

@@ -1,4 +1,5 @@
 import React from 'react';
+import { Button } from 'react-bootstrap';
 import { useI18n } from '../../contexts/I18nProvider';
 
 export default function SuspiciousActivitySection({ anomalies, onSelectIP }) {
@@ -64,13 +65,14 @@ export default function SuspiciousActivitySection({ anomalies, onSelectIP }) {
                       </strong>
                     </td>
                     <td>
-                      <button
+                      <Button
                         type="button"
-                        className="visits-period-btn"
+                        size="sm"
+                        variant="outline-secondary"
                         onClick={() => onSelectIP && onSelectIP(item.ip, item.ip_hash)}
                       >
                         {t('admin.visits.suspicious.inspect_dossier', 'Inspect Dossier')}
-                      </button>
+                      </Button>
                     </td>
                   </tr>
                 ))}
@@ -117,13 +119,14 @@ export default function SuspiciousActivitySection({ anomalies, onSelectIP }) {
                       </strong>
                     </td>
                     <td>
-                      <button
+                      <Button
                         type="button"
-                        className="visits-period-btn"
+                        size="sm"
+                        variant="outline-secondary"
                         onClick={() => onSelectIP && onSelectIP(item.ip, item.ip_hash)}
                       >
                         {t('admin.visits.suspicious.inspect_dossier', 'Inspect Dossier')}
-                      </button>
+                      </Button>
                     </td>
                   </tr>
                 ))}
@@ -201,13 +204,14 @@ export default function SuspiciousActivitySection({ anomalies, onSelectIP }) {
                       </strong>
                     </td>
                     <td>
-                      <button
+                      <Button
                         type="button"
-                        className="visits-period-btn"
+                        size="sm"
+                        variant="outline-secondary"
                         onClick={() => onSelectIP && onSelectIP(item.ip, item.ip_hash)}
                       >
                         {t('admin.visits.suspicious.inspect_dossier', 'Inspect Dossier')}
-                      </button>
+                      </Button>
                     </td>
                   </tr>
                 ))}

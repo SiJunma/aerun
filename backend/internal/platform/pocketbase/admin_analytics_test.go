@@ -388,3 +388,114 @@ func TestAdminAnalyticsVisitsHandler(t *testing.T) {
 		_ = resp["items"]
 	})
 }
+
+func TestAdminAnalyticsCustomDateRangeAndAdminPathExclusion(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	tokens := seedIdentityFixtures(t, app)
+	col, _ := app.FindCollectionByNameOrId(visitsCollectionName)
+
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.UTC)
+	yesterday := today.AddDate(0, 0, -1)
+	twoDaysAgo := today.AddDate(0, 0, -2)
+	tomorrow := today.AddDate(0, 0, 1)
+
+	insertVisit := func(when time.Time, sid, path string) {
+		rec := core.NewRecord(col)
+		rec.Set("occurred_at", when.Format(pbDateFormat))
+		rec.Set("user_id", fixPlayerID)
+		rec.Set("session_id", sid)
+		rec.Set("ip", "203.0.113.10")
+		rec.Set("ip_hash", hashIP("203.0.113.10"))
+		rec.Set("country", "US")
+		rec.Set("city", "NY")
+		rec.Set("device", "desktop")
+		rec.Set("browser", "Chrome")
+		rec.Set("os", "Windows")
+		rec.Set("entry_path", path)
+		rec.Set("is_bot", false)
+		if err := app.Save(rec); err != nil {
+			t.Fatalf("save visit: %v", err)
+		}
+	}
+
+	// 2 visits twoDaysAgo, 1 visit yesterday, 3 visits today (1 of which is /admin?tab=visits)
+	insertVisit(twoDaysAgo, "s_d2_1", "/topic/1")
+	insertVisit(twoDaysAgo, "s_d2_2", "/topic/2")
+	insertVisit(yesterday, "s_d1_1", "/")
+	insertVisit(today, "s_d0_1", "/")
+	insertVisit(today, "s_d0_2", "/admin?tab=visits")
+	insertVisit(today, "s_d0_3", "/admin/users")
+
+	t.Run("single day filters KPIs and computes equal-length previous day", func(t *testing.T) {
+		yStr := yesterday.Format("2006-01-02")
+		status, body := getAerunAnalytics(t, ts.URL+"/api/aerun/admin/analytics/dashboard?period=custom&from="+yStr+"&to="+yStr, tokens["root"])
+		if status != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", status, body)
+		}
+		var resp map[string]any
+		_ = json.Unmarshal(body, &resp)
+		kpis := resp["kpis"].(map[string]any)
+		if kpis["total_visits"] != float64(1) {
+			t.Fatalf("expected 1 visit on yesterday, got %v", kpis["total_visits"])
+		}
+		if kpis["prev_visits"] != float64(2) {
+			t.Fatalf("expected 2 prev_visits (twoDaysAgo), got %v", kpis["prev_visits"])
+		}
+	})
+
+	t.Run("custom range filters visits list and excludes /admin* from top_entry_paths", func(t *testing.T) {
+		tStr := today.Format("2006-01-02")
+		status, body := getAerunAnalytics(t, ts.URL+"/api/aerun/admin/analytics/dashboard?period=custom&from="+tStr+"&to="+tStr, tokens["root"])
+		if status != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", status, body)
+		}
+		var resp map[string]any
+		_ = json.Unmarshal(body, &resp)
+		paths := resp["top_entry_paths"].([]any)
+		for _, item := range paths {
+			name := item.(map[string]any)["name"].(string)
+			if strings.HasPrefix(name, "/admin") {
+				t.Fatalf("top_entry_paths must exclude /admin routes, got %q", name)
+			}
+		}
+
+		// Recent visits filtered by yesterday only
+		yStr := yesterday.Format("2006-01-02")
+		vStatus, vBody := getAerunAnalytics(t, ts.URL+"/api/aerun/admin/analytics/visits?period=custom&from="+yStr+"&to="+yStr, tokens["root"])
+		if vStatus != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", vStatus, vBody)
+		}
+		var vResp map[string]any
+		_ = json.Unmarshal(vBody, &vResp)
+		if vResp["total"] != float64(1) {
+			t.Fatalf("expected 1 visit in recent visits for yesterday, got %v", vResp["total"])
+		}
+	})
+
+	t.Run("invalid date bounds are rejected with 400", func(t *testing.T) {
+		tStr := today.Format("2006-01-02")
+		yStr := yesterday.Format("2006-01-02")
+		fStr := tomorrow.Format("2006-01-02")
+
+		// start > end
+		status, _ := getAerunAnalytics(t, ts.URL+"/api/aerun/admin/analytics/dashboard?period=custom&from="+tStr+"&to="+yStr, tokens["root"])
+		if status != http.StatusBadRequest {
+			t.Fatalf("expected 400 for from > to, got %d", status)
+		}
+		// end in future
+		status, _ = getAerunAnalytics(t, ts.URL+"/api/aerun/admin/analytics/dashboard?period=custom&from="+tStr+"&to="+fStr, tokens["root"])
+		if status != http.StatusBadRequest {
+			t.Fatalf("expected 400 for future end date, got %d", status)
+		}
+		// missing to
+		status, _ = getAerunAnalytics(t, ts.URL+"/api/aerun/admin/analytics/dashboard?period=custom&from="+tStr, tokens["root"])
+		if status != http.StatusBadRequest {
+			t.Fatalf("expected 400 for missing 'to' date, got %d", status)
+		}
+	})
+}

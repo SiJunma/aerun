@@ -222,3 +222,83 @@ func TestResolveLocationGeoIP(t *testing.T) {
 		t.Fatalf("empty IP: expected XX/Unknown, got %s/%s", cc, city)
 	}
 }
+
+// TestTelemetryDurableDeduplicationAcrossRestart verifies Task 6:
+// wiping the in-memory sessionTouches map (simulating a backend restart)
+// must not create duplicate visit rows for the same session within 30 minutes,
+// and mid-session login upgrade also works across a restart.
+func TestTelemetryDurableDeduplicationAcrossRestart(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	tokens := seedIdentityFixtures(t, app)
+
+	sendPing := func(sessionID, token string) map[string]any {
+		body := `{"session_id":"` + sessionID + `","guest_id":"guest_durable_1","entry_path":"/","referrer":""}`
+		req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/aerun/telemetry/visit", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+		if token != "" {
+			req.Header.Set("Authorization", token)
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		var resp map[string]any
+		if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode resp: %v", err)
+		}
+		return resp
+	}
+
+	// 1. First visit -> recorded
+	resp1 := sendPing("sess_restart_1", "")
+	if resp1["status"] != "recorded" {
+		t.Fatalf("expected recorded, got %v", resp1["status"])
+	}
+
+	// 2. Simulate backend restart by clearing in-memory cache
+	sessionMu.Lock()
+	sessionTouches = make(map[string]sessionTouch)
+	sessionMu.Unlock()
+
+	// 3. Same session guest ping within 30m -> touched (NO new row)
+	resp2 := sendPing("sess_restart_1", "")
+	if resp2["status"] != "touched" {
+		t.Fatalf("expected touched after restart, got %v", resp2["status"])
+	}
+
+	// 4. Simulate another restart, then user signs in -> upgraded (NO new row)
+	sessionMu.Lock()
+	sessionTouches = make(map[string]sessionTouch)
+	sessionMu.Unlock()
+
+	resp3 := sendPing("sess_restart_1", tokens["player"])
+	if resp3["status"] != "upgraded" {
+		t.Fatalf("expected upgraded after restart, got %v", resp3["status"])
+	}
+
+	records, err := app.FindRecordsByFilter(visitsCollectionName, "session_id = 'sess_restart_1'", "", 10, 0)
+	if err != nil {
+		t.Fatalf("query visits: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected exactly 1 visit row across restarts, got %d", len(records))
+	}
+	if records[0].GetString("user_id") != fixPlayerID {
+		t.Fatalf("expected user_id=%q on upgraded row, got %q", fixPlayerID, records[0].GetString("user_id"))
+	}
+
+	// 5. New tab (new session_id) still creates a separate visit
+	resp4 := sendPing("sess_restart_2", tokens["player"])
+	if resp4["status"] != "recorded" {
+		t.Fatalf("expected recorded for new session/tab, got %v", resp4["status"])
+	}
+}

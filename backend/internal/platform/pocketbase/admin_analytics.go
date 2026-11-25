@@ -38,13 +38,63 @@ func maskIP(ip string) string {
 // resolvePeriodBounds returns (currentStart, currentEnd, prevStart, prevEnd) formatted in
 // PocketBase's native SQLite DateTime format ("2006-01-02 15:04:05.000Z") so string
 // range comparisons in SQLite match stored DateField values accurately.
-func resolvePeriodBounds(period string) (string, string, string, string) {
+//
+// When fromStr/toStr (or dateStr for a single day) are provided, it validates:
+//   - YYYY-MM-DD format for both bounds
+//   - start <= end
+//   - end is not in the future (UTC date <= today UTC)
+//
+// and computes the previous period as an equal-length span immediately preceding curStart.
+func resolvePeriodBounds(period, fromStr, toStr, dateStr string) (string, string, string, string, error) {
 	now := time.Now().UTC()
+	todayUTC := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+	fromStr = strings.TrimSpace(fromStr)
+	toStr = strings.TrimSpace(toStr)
+	dateStr = strings.TrimSpace(dateStr)
+
+	if dateStr != "" && fromStr == "" && toStr == "" {
+		fromStr = dateStr
+		toStr = dateStr
+	}
+
+	if fromStr != "" || toStr != "" || period == "custom" {
+		if fromStr == "" || toStr == "" {
+			return "", "", "", "", fmt.Errorf("both 'from' and 'to' dates are required")
+		}
+		fromDate, err := time.Parse("2006-01-02", fromStr)
+		if err != nil {
+			return "", "", "", "", fmt.Errorf("invalid 'from' date format; expected YYYY-MM-DD")
+		}
+		toDate, err := time.Parse("2006-01-02", toStr)
+		if err != nil {
+			return "", "", "", "", fmt.Errorf("invalid 'to' date format; expected YYYY-MM-DD")
+		}
+		fromDate = time.Date(fromDate.Year(), fromDate.Month(), fromDate.Day(), 0, 0, 0, 0, time.UTC)
+		toDate = time.Date(toDate.Year(), toDate.Month(), toDate.Day(), 0, 0, 0, 0, time.UTC)
+
+		if fromDate.After(toDate) {
+			return "", "", "", "", fmt.Errorf("start date cannot be after end date")
+		}
+		if toDate.After(todayUTC) {
+			return "", "", "", "", fmt.Errorf("end date cannot be in the future")
+		}
+
+		days := int(toDate.Sub(fromDate)/(24*time.Hour)) + 1
+		span := time.Duration(days) * 24 * time.Hour
+		curStart := fromDate
+		curEnd := curStart.Add(span - time.Millisecond)
+		prevStart := curStart.Add(-span)
+		prevEnd := curStart.Add(-time.Millisecond)
+
+		return curStart.Format(pbDateFormat), curEnd.Format(pbDateFormat), prevStart.Format(pbDateFormat), prevEnd.Format(pbDateFormat), nil
+	}
+
 	var curStart, curEnd, prevStart, prevEnd time.Time
 
 	switch period {
 	case "today":
-		curStart = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+		curStart = todayUTC
 		curEnd = now
 		duration := curEnd.Sub(curStart)
 		prevEnd = curStart
@@ -61,17 +111,28 @@ func resolvePeriodBounds(period string) (string, string, string, string) {
 		prevStart = curStart.Add(-30 * 24 * time.Hour)
 	}
 
-	return curStart.Format(pbDateFormat), curEnd.Format(pbDateFormat), prevStart.Format(pbDateFormat), prevEnd.Format(pbDateFormat)
+	return curStart.Format(pbDateFormat), curEnd.Format(pbDateFormat), prevStart.Format(pbDateFormat), prevEnd.Format(pbDateFormat), nil
 }
 
 // adminAnalyticsDashboardHandler returns high-level KPI and chart data for the visits dashboard.
 func adminAnalyticsDashboardHandler(e *core.RequestEvent) error {
-	period := e.Request.URL.Query().Get("period")
+	q := e.Request.URL.Query()
+	period := q.Get("period")
+	fromStr := q.Get("from")
+	toStr := q.Get("to")
+	dateStr := q.Get("date")
 	if period == "" {
-		period = "30d"
+		if fromStr != "" || toStr != "" || dateStr != "" {
+			period = "custom"
+		} else {
+			period = "30d"
+		}
 	}
 
-	curStart, curEnd, prevStart, prevEnd := resolvePeriodBounds(period)
+	curStart, curEnd, prevStart, prevEnd, err := resolvePeriodBounds(period, fromStr, toStr, dateStr)
+	if err != nil {
+		return validationError(err.Error())
+	}
 
 	// Reuse the single source of truth for Online Now (matches GET /api/aerun/status).
 	now := time.Now()
@@ -208,14 +269,19 @@ func adminAnalyticsDashboardHandler(e *core.RequestEvent) error {
 			Count int64  `db:"c"`
 		}
 		var rows []Row
+		extraWhere := ""
+		if field == "entry_path" {
+			// Exclude admin panel routes from visitor entry paths ranking.
+			extraWhere = " AND entry_path != '/admin' AND entry_path NOT LIKE '/admin/%' AND entry_path NOT LIKE '/admin?%' AND entry_path NOT LIKE '/admin#%'"
+		}
 		q := fmt.Sprintf(`
 			SELECT COALESCE(NULLIF(%s, ''), 'Other') as k, COUNT(*) as c
 			FROM visits
-			WHERE occurred_at >= {:start} AND occurred_at <= {:end} AND is_bot = 0
+			WHERE occurred_at >= {:start} AND occurred_at <= {:end} AND is_bot = 0%s
 			GROUP BY k
 			ORDER BY c DESC
 			LIMIT %d
-		`, field, limit)
+		`, field, extraWhere, limit)
 		_ = e.App.DB().NewQuery(q).Bind(dbx.Params{"start": curStart, "end": curEnd}).All(&rows)
 
 		result := make([]map[string]any, 0, len(rows))
@@ -265,17 +331,28 @@ func adminAnalyticsDashboardHandler(e *core.RequestEvent) error {
 
 // adminAnalyticsTopicsHandler returns topics ranked by unique readers and views.
 func adminAnalyticsTopicsHandler(e *core.RequestEvent) error {
-	period := e.Request.URL.Query().Get("period")
+	q := e.Request.URL.Query()
+	period := q.Get("period")
+	fromStr := q.Get("from")
+	toStr := q.Get("to")
+	dateStr := q.Get("date")
 	if period == "" {
-		period = "30d"
+		if fromStr != "" || toStr != "" || dateStr != "" {
+			period = "custom"
+		} else {
+			period = "30d"
+		}
 	}
-	limitStr := e.Request.URL.Query().Get("limit")
+	limitStr := q.Get("limit")
 	limit := 20
 	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
 		limit = l
 	}
 
-	curStart, curEnd, _, _ := resolvePeriodBounds(period)
+	curStart, curEnd, _, _, err := resolvePeriodBounds(period, fromStr, toStr, dateStr)
+	if err != nil {
+		return validationError(err.Error())
+	}
 
 	type TopicVisitAgg struct {
 		TopicID       string `db:"topic_id"`
@@ -285,7 +362,7 @@ func adminAnalyticsTopicsHandler(e *core.RequestEvent) error {
 	}
 
 	var aggs []TopicVisitAgg
-	err := e.App.DB().NewQuery(`
+	err = e.App.DB().NewQuery(`
 		SELECT 
 			topic_id,
 			COUNT(*) as views,
@@ -359,8 +436,13 @@ func adminAnalyticsVisitsHandler(e *core.RequestEvent) error {
 		limit = l
 	}
 
-	filter := e.Request.URL.Query().Get("filter") // all, members, guests, bots
-	query := strings.TrimSpace(e.Request.URL.Query().Get("query"))
+	q := e.Request.URL.Query()
+	filter := q.Get("filter") // all, members, guests, bots
+	query := strings.TrimSpace(q.Get("query"))
+	period := q.Get("period")
+	fromStr := q.Get("from")
+	toStr := q.Get("to")
+	dateStr := q.Get("date")
 
 	col, err := e.App.FindCollectionByNameOrId(visitsCollectionName)
 	if err != nil || col == nil {
@@ -369,6 +451,19 @@ func adminAnalyticsVisitsHandler(e *core.RequestEvent) error {
 
 	recordQuery := e.App.RecordQuery(col).OrderBy("occurred_at DESC")
 	countQuery := e.App.DB().Select("COUNT(*)").From(visitsCollectionName)
+
+	if period != "" || fromStr != "" || toStr != "" || dateStr != "" {
+		if period == "" {
+			period = "custom"
+		}
+		curStart, curEnd, _, _, err := resolvePeriodBounds(period, fromStr, toStr, dateStr)
+		if err != nil {
+			return validationError(err.Error())
+		}
+		dateExp := dbx.NewExp("occurred_at >= {:start} AND occurred_at <= {:end}", dbx.Params{"start": curStart, "end": curEnd})
+		recordQuery.AndWhere(dateExp)
+		countQuery.AndWhere(dateExp)
+	}
 
 	switch filter {
 	case "members":

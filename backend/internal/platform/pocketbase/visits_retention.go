@@ -61,14 +61,18 @@ func runVisitsDailyAggregation(app core.App) {
 
 	fetchBreakdown := func(field string) types.JSONRaw {
 		items := []RankedItem{}
+		extraWhere := ""
+		if field == "entry_path" {
+			extraWhere = " AND entry_path != '/admin' AND entry_path NOT LIKE '/admin/%' AND entry_path NOT LIKE '/admin?%' AND entry_path NOT LIKE '/admin#%'"
+		}
 		q := fmt.Sprintf(`
 			SELECT COALESCE(NULLIF(%s, ''), 'Other') as k, COUNT(*) as c
 			FROM visits
-			WHERE occurred_at >= {:start} AND occurred_at <= {:end} AND is_bot = 0
+			WHERE occurred_at >= {:start} AND occurred_at <= {:end} AND is_bot = 0%s
 			GROUP BY k
 			ORDER BY c DESC
 			LIMIT 15
-		`, field)
+		`, field, extraWhere)
 		_ = app.DB().NewQuery(q).Bind(dbx.Params{"start": start, "end": end}).All(&items)
 		raw, _ := json.Marshal(items)
 		return types.JSONRaw(raw)

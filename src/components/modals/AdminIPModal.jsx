@@ -23,14 +23,15 @@ export default function AdminIPModal({
   const [unbanning, setUnbanning] = useState(false);
 
   const loadDossier = useCallback(async () => {
-    if (!show || (!targetIP && !targetHash)) return;
+    if (!show || (!targetIP && !targetHash)) return null;
     setLoading(true);
     setError(null);
     try {
       const data = await fetchIPDossier({ ip: targetIP, ipHash: targetHash });
-      setDossier(data);
+      return data;
     } catch (err) {
       setError(err);
+      return null;
     } finally {
       setLoading(false);
     }
@@ -42,7 +43,15 @@ export default function AdminIPModal({
       setError(null);
       return;
     }
-    loadDossier();
+    let active = true;
+    loadDossier().then((data) => {
+      if (active && data) {
+        setDossier(data);
+      }
+    });
+    return () => {
+      active = false;
+    };
   }, [show, targetIP, targetHash, loadDossier]);
 
   const handleUnban = async () => {
@@ -132,12 +141,12 @@ export default function AdminIPModal({
             </div>
           </div>
 
-          {/* Ban Info if present */}
-          {dossier.ban_info && (
+          {/* Ban Info only when actually banned */}
+          {dossier.is_banned && dossier.ban_info && (
             <div className="visits-anomaly-card visits-anomaly-card--danger">
               <div>
                 <strong>{t('admin.visits.dossier.ban_reason', 'Ban Reason')}:</strong>{' '}
-                {dossier.ban_info.reason}
+                {dossier.ban_info.reason || '—'}
               </div>
               {dossier.ban_info.expires_at && (
                 <div>
@@ -214,22 +223,49 @@ export default function AdminIPModal({
                   </tr>
                 </thead>
                 <tbody>
-                  {(dossier.recent_visits || []).map((rv) => (
-                    <tr key={rv.id}>
-                      <td className="visits-text-nowrap">
-                        {rv.occurred_at ? new Date(rv.occurred_at).toLocaleString() : '—'}
-                      </td>
-                      <td>
-                        {rv.user_id
-                          ? `${t('admin.visits.dossier.user_label', 'User')} ${rv.user_id}`
-                          : `${t('admin.visits.table.guest_badge', 'Guest')} [${(rv.guest_id || '').slice(0, 6)}]`}
-                      </td>
-                      <td>
-                        {rv.device} ({rv.browser})
-                      </td>
-                      <td>{rv.entry_path}</td>
-                    </tr>
-                  ))}
+                  {(dossier.recent_visits || []).map((rv) => {
+                    const dateStr = rv.occurred_at
+                      ? new Date(rv.occurred_at).toLocaleString([], {
+                        month: 'short',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })
+                      : '—';
+
+                    let identityBadge = null;
+                    if (rv.is_bot) {
+                      identityBadge = (
+                        <span className="visits-badge visits-badge--bot">
+                          {t('admin.visits.table.bot_badge', 'Bot')}
+                        </span>
+                      );
+                    } else if (rv.user || rv.user_id) {
+                      identityBadge = (
+                        <span className="visits-badge visits-badge--member">
+                          {rv.user?.nickname || rv.user_id || t('admin.visits.table.member_fallback', 'Member')}
+                        </span>
+                      );
+                    } else {
+                      const shortG = rv.guest_id ? rv.guest_id.slice(0, 6) : 'anon';
+                      identityBadge = (
+                        <span className="visits-badge visits-badge--guest">
+                          {t('admin.visits.table.guest_badge', 'Guest')} [{shortG}]
+                        </span>
+                      );
+                    }
+
+                    return (
+                      <tr key={rv.id}>
+                        <td className="visits-text-muted visits-text-nowrap">{dateStr}</td>
+                        <td>{identityBadge}</td>
+                        <td>
+                          {rv.device || 'unknown'} · {rv.browser || rv.os || 'Other'}
+                        </td>
+                        <td>{rv.entry_path || '/'}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
