@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestTelemetryVisitHandler_Suite covers POST /api/aerun/telemetry/visit contract.
@@ -69,4 +70,155 @@ func TestTelemetryVisitHandler_Suite(t *testing.T) {
 			t.Fatalf("device mismatch: %s", r.GetString("device"))
 		}
 	})
+}
+
+// TestRecordTopicVisit covers topic_visits recording and session deduplication.
+func TestRecordTopicVisit(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	_ = seedIdentityFixtures(t, app)
+
+	// Create a test topic
+	catID := getGeneralCategoryID(t, app)
+	topicRec := seedTopicIn(t, app, "test-topic-visits", catID, fixPlayerID, time.Now())
+	topicID := topicRec.Id
+
+	sessionID := "sess_topic_1"
+	userID := fixPlayerID
+	guestID := ""
+
+	// First visit - should record
+	recordTopicVisit(app, sessionID, topicID, userID, guestID)
+
+	records, err := app.FindRecordsByFilter(topicVisitsCollectionName, "session_id = '"+sessionID+"' && topic_id = '"+topicID+"'", "", 10, 0)
+	if err != nil {
+		t.Fatalf("query topic_visits: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected 1 topic_visit record, got %d", len(records))
+	}
+
+	// Second visit within same session - should be deduplicated
+	recordTopicVisit(app, sessionID, topicID, userID, guestID)
+
+	records, err = app.FindRecordsByFilter(topicVisitsCollectionName, "session_id = '"+sessionID+"' && topic_id = '"+topicID+"'", "", 10, 0)
+	if err != nil {
+		t.Fatalf("query topic_visits: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected 1 topic_visit record after dedup, got %d", len(records))
+	}
+
+	// Different session - should record new
+	recordTopicVisit(app, "sess_topic_2", topicID, userID, guestID)
+
+	records, err = app.FindRecordsByFilter(topicVisitsCollectionName, "topic_id = '"+topicID+"'", "", 10, 0)
+	if err != nil {
+		t.Fatalf("query topic_visits: %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("expected 2 topic_visit records for different sessions, got %d", len(records))
+	}
+}
+
+// TestTelemetryVisitValidation covers input validation for the telemetry endpoint.
+func TestTelemetryVisitValidation(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	_ = seedIdentityFixtures(t, app)
+
+	// session_id too long should be truncated
+	t.Run("truncates session_id longer than 64 chars", func(t *testing.T) {
+		longSessionID := strings.Repeat("a", 100)
+		body := `{"session_id":"` + longSessionID + `","guest_id":"guest_valid","entry_path":"/","referrer":""}`
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/aerun/telemetry/visit", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		var resp map[string]any
+		json.NewDecoder(res.Body).Decode(&resp)
+		if resp["status"] != "recorded" {
+			t.Fatalf("expected recorded, got %v", resp["status"])
+		}
+
+		records, err := app.FindRecordsByFilter(visitsCollectionName, "session_id = '"+longSessionID[:64]+"'", "", 1, 0)
+		if err != nil {
+			t.Fatalf("query visits: %v", err)
+		}
+		if len(records) != 1 {
+			t.Fatalf("expected 1 visit record with truncated session_id, got %d", len(records))
+		}
+	})
+
+	// entry_path defaults to "/"
+	t.Run("defaults entry_path to / when empty", func(t *testing.T) {
+		body := `{"session_id":"sess_path_1","guest_id":"guest_path_1","entry_path":"","referrer":""}`
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/aerun/telemetry/visit", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		var resp map[string]any
+		json.NewDecoder(res.Body).Decode(&resp)
+		if resp["status"] != "recorded" {
+			t.Fatalf("expected recorded, got %v", resp["status"])
+		}
+
+		records, err := app.FindRecordsByFilter(visitsCollectionName, "session_id = 'sess_path_1'", "", 1, 0)
+		if err != nil {
+			t.Fatalf("query visits: %v", err)
+		}
+		if len(records) != 1 {
+			t.Fatalf("expected 1 visit record, got %d", len(records))
+		}
+		if records[0].GetString("entry_path") != "/" {
+			t.Fatalf("expected entry_path '/', got %s", records[0].GetString("entry_path"))
+		}
+	})
+}
+
+// TestResolveLocationGeoIP tests the ResolveLocation function directly.
+func TestResolveLocationGeoIP(t *testing.T) {
+	// Loopback
+	cc, city := ResolveLocation("127.0.0.1")
+	if cc != "XX" || city != "Local Network" {
+		t.Fatalf("loopback: expected XX/Local Network, got %s/%s", cc, city)
+	}
+
+	// IPv6 loopback
+	cc, city = ResolveLocation("::1")
+	if cc != "XX" || city != "Local Network" {
+		t.Fatalf("ipv6 loopback: expected XX/Local Network, got %s/%s", cc, city)
+	}
+
+	// Private IP
+	cc, city = ResolveLocation("192.168.1.1")
+	if cc != "XX" || city != "Local Network" {
+		t.Fatalf("private IP: expected XX/Local Network, got %s/%s", cc, city)
+	}
+
+	// Invalid IP
+	cc, city = ResolveLocation("not-an-ip")
+	if cc != "XX" || city != "Unknown" {
+		t.Fatalf("invalid IP: expected XX/Unknown, got %s/%s", cc, city)
+	}
+
+	// Empty IP
+	cc, city = ResolveLocation("")
+	if cc != "XX" || city != "Unknown" {
+		t.Fatalf("empty IP: expected XX/Unknown, got %s/%s", cc, city)
+	}
 }

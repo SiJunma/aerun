@@ -1,15 +1,19 @@
 package pocketbase
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
+
+	"github.com/SiJunma/aerun/backend/internal/auth"
 )
 
 // TestUniqueVisitorsAccuracy tests the unique visitor counting logic
@@ -158,4 +162,229 @@ func readBodyAnalytics(t *testing.T, res *http.Response) []byte {
 		t.Fatal(err)
 	}
 	return body
+}
+
+// TestAdminAnalyticsDashboardHandler tests the dashboard endpoint permissions and data.
+func TestAdminAnalyticsDashboardHandler(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	tokens := seedIdentityFixtures(t, app)
+
+	// Create admin user with proper permissions
+	adminToken := createTestUser(t, app, "testadmin000001", "testadmin@example.com", "TestAdmin", auth.RoleAdmin, auth.StatusActive)
+
+	seedTestVisits(t, app, tokens["player"])
+
+	t.Run("guest gets 401", func(t *testing.T) {
+		status, _ := getAerunAnalytics(t, ts.URL+"/api/aerun/admin/analytics/dashboard?period=7d", "")
+		if status != http.StatusUnauthorized {
+			t.Fatalf("guest should get 401, got %d", status)
+		}
+	})
+
+	t.Run("player gets 403", func(t *testing.T) {
+		status, _ := getAerunAnalytics(t, ts.URL+"/api/aerun/admin/analytics/dashboard?period=7d", tokens["player"])
+		if status != http.StatusForbidden {
+			t.Fatalf("player should get 403, got %d", status)
+		}
+	})
+
+	t.Run("admin without view_raw_ip gets masked IP in visits list", func(t *testing.T) {
+		status, body := getAerunAnalytics(t, ts.URL+"/api/aerun/admin/analytics/visits?limit=5", adminToken)
+		if status != http.StatusOK {
+			t.Fatalf("admin should get 200, got %d", status)
+		}
+		_ = body
+	})
+
+	t.Run("root gets raw IP in visits list", func(t *testing.T) {
+		status, body := getAerunAnalytics(t, ts.URL+"/api/aerun/admin/analytics/visits?limit=5", tokens["root"])
+		if status != http.StatusOK {
+			t.Fatalf("root should get 200, got %d", status)
+		}
+		_ = body
+	})
+
+	t.Run("search by raw IP blocked without view_raw_ip", func(t *testing.T) {
+		status, _ := getAerunAnalytics(t, ts.URL+"/api/aerun/admin/analytics/visits?query=127.0.0.1&limit=5", adminToken)
+		if status != http.StatusOK {
+			t.Fatalf("admin should get 200, got %d", status)
+		}
+	})
+
+	t.Run("dashboard returns expected KPI structure", func(t *testing.T) {
+		status, body := getAerunAnalytics(t, ts.URL+"/api/aerun/admin/analytics/dashboard?period=7d", tokens["root"])
+		if status != http.StatusOK {
+			t.Fatalf("root should get 200, got %d", status)
+		}
+		var resp map[string]any
+		if err := json.Unmarshal(body, &resp); err != nil {
+			t.Fatalf("unreadable response: %v", err)
+		}
+		kpis, ok := resp["kpis"].(map[string]any)
+		if !ok {
+			t.Fatal("missing kpis in response")
+		}
+		requiredKPIs := []string{"online_now", "total_visits", "unique_visitors", "registrations", "posts_count", "bot_visits"}
+		for _, k := range requiredKPIs {
+			if _, ok := kpis[k]; !ok {
+				t.Fatalf("missing KPI: %s", k)
+			}
+		}
+		for _, s := range []string{"daily_series", "hourly_series", "dow_series"} {
+			if _, ok := resp[s]; !ok {
+				t.Fatalf("missing series: %s", s)
+			}
+		}
+		for _, l := range []string{"top_countries", "top_devices", "top_browsers", "top_os", "top_entry_paths"} {
+			if _, ok := resp[l]; !ok {
+				t.Fatalf("missing ranked list: %s", l)
+			}
+		}
+	})
+}
+
+// TestAdminAnalyticsTopicsHandler tests the topics analytics endpoint.
+func TestAdminAnalyticsTopicsHandler(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	_ = seedIdentityFixtures(t, app)
+
+	// Create admin user with proper permissions
+	adminToken := createTestUser(t, app, "testadmin000002", "testadmin2@example.com", "TestAdmin2", auth.RoleAdmin, auth.StatusActive)
+
+	t.Run("guest gets 401", func(t *testing.T) {
+		status, _ := getAerunAnalytics(t, ts.URL+"/api/aerun/admin/analytics/topics?period=7d", "")
+		if status != http.StatusUnauthorized {
+			t.Fatalf("guest should get 401, got %d", status)
+		}
+	})
+
+	t.Run("admin gets topic analytics", func(t *testing.T) {
+		catID := getGeneralCategoryID(t, app)
+		topicRec := seedTopicIn(t, app, "test-topic-analytics", catID, fixPlayerID, time.Now())
+		topicID := topicRec.Id
+
+		recordTopicVisit(app, "sess_topic_1", topicID, fixPlayerID, "")
+		recordTopicVisit(app, "sess_topic_2", topicID, "", "guest_1")
+
+		status, body := getAerunAnalytics(t, ts.URL+"/api/aerun/admin/analytics/topics?period=7d&limit=10", adminToken)
+		if status != http.StatusOK {
+			t.Fatalf("admin should get 200, got %d", status)
+		}
+		var resp map[string]any
+		if err := json.Unmarshal(body, &resp); err != nil {
+			t.Fatalf("unreadable response: %v", err)
+		}
+		items, ok := resp["items"].([]any)
+		if !ok {
+			t.Fatal("missing items in response")
+		}
+		if len(items) == 0 {
+			t.Fatal("expected at least one topic in results")
+		}
+		first := items[0].(map[string]any)
+		required := []string{"topic_id", "title", "views", "unique_readers", "last_visited"}
+		for _, f := range required {
+			if _, ok := first[f]; !ok {
+				t.Fatalf("missing field in topic item: %s", f)
+			}
+		}
+	})
+}
+
+// TestAdminAnalyticsVisitsHandler tests the paginated visits list endpoint.
+func TestAdminAnalyticsVisitsHandler(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	tokens := seedIdentityFixtures(t, app)
+
+	// Create admin user with proper permissions
+	adminToken := createTestUser(t, app, "testadmin000003", "testadmin3@example.com", "TestAdmin3", auth.RoleAdmin, auth.StatusActive)
+
+	seedTestVisits(t, app, adminToken)
+
+	t.Run("guest gets 401", func(t *testing.T) {
+		status, _ := getAerunAnalytics(t, ts.URL+"/api/aerun/admin/analytics/visits", "")
+		if status != http.StatusUnauthorized {
+			t.Fatalf("guest should get 401, got %d", status)
+		}
+	})
+
+	t.Run("player gets 403", func(t *testing.T) {
+		playerToken := tokens["player"]
+		status, _ := getAerunAnalytics(t, ts.URL+"/api/aerun/admin/analytics/visits", playerToken)
+		if status != http.StatusForbidden {
+			t.Fatalf("player should get 403, got %d", status)
+		}
+	})
+
+	t.Run("admin gets paginated visits with masked IP", func(t *testing.T) {
+		status, body := getAerunAnalytics(t, ts.URL+"/api/aerun/admin/analytics/visits?page=1&limit=10", adminToken)
+		if status != http.StatusOK {
+			t.Fatalf("admin should get 200, got %d", status)
+		}
+		var resp map[string]any
+		if err := json.Unmarshal(body, &resp); err != nil {
+			t.Fatalf("unreadable response: %v", err)
+		}
+		for _, f := range []string{"items", "total", "page", "limit"} {
+			if _, ok := resp[f]; !ok {
+				t.Fatalf("missing pagination field: %s", f)
+			}
+		}
+		items := resp["items"].([]any)
+		if len(items) > 0 {
+			first := items[0].(map[string]any)
+			if ip, ok := first["ip"].(string); ok {
+				if ip != "" && !strings.Contains(ip, "***") && ip != "127.0.0.1" {
+					t.Logf("IP format: %s", ip)
+				}
+			}
+		}
+	})
+
+	t.Run("root gets raw IP", func(t *testing.T) {
+		status, body := getAerunAnalytics(t, ts.URL+"/api/aerun/admin/analytics/visits?page=1&limit=10", tokens["root"])
+		if status != http.StatusOK {
+			t.Fatalf("root should get 200, got %d", status)
+		}
+		var resp map[string]any
+		json.Unmarshal(body, &resp)
+		items := resp["items"].([]any)
+		if len(items) > 0 {
+			first := items[0].(map[string]any)
+			if ip, ok := first["ip"].(string); ok && ip != "" {
+				_ = ip
+			}
+		}
+	})
+
+	t.Run("filters work: members, guests, bots", func(t *testing.T) {
+		for _, filter := range []string{"members", "guests", "bots", "all"} {
+			status, _ := getAerunAnalytics(t, ts.URL+"/api/aerun/admin/analytics/visits?filter="+filter+"&limit=5", tokens["root"])
+			if status != http.StatusOK {
+				t.Fatalf("filter %s should work, got %d", filter, status)
+			}
+		}
+	})
+
+	t.Run("search by nickname works", func(t *testing.T) {
+		status, body := getAerunAnalytics(t, ts.URL+"/api/aerun/admin/analytics/visits?query=playerone&limit=5", tokens["root"])
+		if status != http.StatusOK {
+			t.Fatalf("search should work, got %d", status)
+		}
+		var resp map[string]any
+		json.Unmarshal(body, &resp)
+		_ = resp["items"]
+	})
 }

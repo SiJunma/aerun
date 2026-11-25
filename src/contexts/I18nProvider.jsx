@@ -85,6 +85,7 @@ export const I18nProvider = ({ children }) => {
       result = fallbackDict;
     }
 
+    // Handle string translations with interpolation
     if (typeof result === 'string') {
       // Basic interpolation: replace {key} with actualParams[key]
       Object.keys(actualParams).forEach(key => {
@@ -94,13 +95,17 @@ export const I18nProvider = ({ children }) => {
       return result;
     }
 
-    // Missing translation — log to help catch missing keys during development.
-    if (typeof result !== 'string') {
-      console.warn(
-        `[i18n] missing translation key "${path}" for lang "${lang}"` +
-        (lang !== 'en' ? ` (checked en fallback too)` : '')
-      );
+    // Handle non-string translations (arrays, objects, numbers, etc.)
+    // These are valid translation values (e.g., dow_names array for day names)
+    if (result !== undefined && result !== null) {
+      return result;
     }
+
+    // Missing translation — log to help catch missing keys during development.
+    console.warn(
+      `[i18n] missing translation key "${path}" for lang "${lang}"` +
+      (lang !== 'en' ? ` (checked en fallback too)` : '')
+    );
 
     // Never return a nested translation object as a React child — that would
     // throw "Objects are not valid as a React child". Fall back to the path.

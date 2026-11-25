@@ -495,6 +495,7 @@ const AdminPage = () => {
       case 'users': return hasPermission(PERMISSIONS.APPROVE_USERS) || hasPermission(PERMISSIONS.BAN_USERS) || hasPermission(PERMISSIONS.CHANGE_ROLES);
       case 'roles': return hasPermission(PERMISSIONS.MANAGE_ROLES);
       case 'categories': return hasPermission(PERMISSIONS.MANAGE_CATEGORIES);
+      case 'visits': return hasPermission(PERMISSIONS.VIEW_VISITS_DASHBOARD);
       case 'audit': return hasPermission(PERMISSIONS.VIEW_AUDIT_LOG);
       default: return false;
     }
@@ -844,7 +845,7 @@ const AdminPage = () => {
 
   useEffect(() => {
     if (!canAccessTab(activeTab)) {
-      const tabs = ['settings', 'designs', 'users', 'roles', 'categories', 'audit'];
+      const tabs = ['settings', 'designs', 'users', 'roles', 'categories', 'visits', 'audit'];
       const firstAvailable = tabs.find(t => canAccessTab(t));
       if (firstAvailable) {
         setActiveTab(firstAvailable);
