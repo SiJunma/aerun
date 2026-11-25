@@ -3,6 +3,8 @@
 > **Актуальный стек**: Go 1.27 + PocketBase (SQLite) + React 19 (обновлено: Ноябрь 2026).
 > **Ветка**: `feature/theming`. Источник правды — ветка на GitHub, а не локальные копии.
 > **Спецификации DOM**: `markdowns/SPEC_forum-index-theme-dom.md`, `markdowns/SPEC_forum-and-members-theme-dom.md`, `markdowns/SPEC_forum-topic-view-theme-dom.md`, `markdowns/SPEC_REFACTOR_ADMIN_PAGE_ARCHITECTURE.md`, `markdowns/SPEC_REFACTOR_PROFILE_PAGE_ARCHITECTURE.md`.
+>
+> **⚠️ Статус на 2026-11-25: темизация НЕ закончена.** В `main` 2026-11-22 влито промежуточное состояние (мерж `588f511`), чтобы получить обновлённый вид на готовых страницах. Работа продолжается в ветке `feature/theming`; актуальный план живёт там, эта копия — снимок на момент мержа.
 
 ---
 

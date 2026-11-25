@@ -15,7 +15,6 @@
 > - `src/index.css`  
 > - `src/i18n/dictionary.js`  
 > - `scripts/check-inline-reply-contracts.mjs` *(новый)*  
-> **Основа:** `markdowns/CONCEPT_Inline_Floating_Reply_Form.md`  
 > **Референс:** Discourse Docked Composer / Linear Inline Issue Reply / GitHub Discussions
 
 ---

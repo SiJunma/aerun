@@ -1,6 +1,6 @@
 # Native Theme Sandbox — план спринтов для агентов
 
-> **ПРЕРЕКВИЗИТ:** Этот план выполняется ПОСЛЕ полного завершения [THEMEABLE_SPRINT_PLAN.md](./THEMEABLE_SPRINT_PLAN.md) (спринты 0–15).
+> **ПРЕРЕКВИЗИТ:** Этот план выполняется ПОСЛЕ полного завершения [TODO_THEMEABLE_SPRINT_PLAN.md](./TODO_THEMEABLE_SPRINT_PLAN.md) (спринты 0–15).
 > Все семантические `id`, `class`, `data-*` атрибуты и `useThemeable()` хук должны быть внедрены и протестированы.
 > 
 > **НАЗНАЧЕНИЕ ФИЧИ: ПЕСОЧНИЦА ДЛЯ ОТЛАДКИ (Debugging Sandbox)**
@@ -383,7 +383,7 @@ export * as statsFixtures from './stats';
    - Цветовые свотчи (Color Swatches) с hex/rgb значениями
    - Предпросмотр шрифтов и размеров (`font-family`, `font-size`, `line-height`)
    - Радиусы скругления (`border-radius`)
-   - Специфичные семантические классы `.aerun-*` из `THEMEABLE_SPRINT_PLAN.md`
+   - Специфичные семантические классы `.aerun-*` из `TODO_THEMEABLE_SPRINT_PLAN.md`
 
 ### [НОВЫЙ] `src/features/sandbox/registry/variablesMap.js`
 Декларативное описание токенов темы форума (Base Colors, Role Colors, UI States).

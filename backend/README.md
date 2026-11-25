@@ -1,4 +1,4 @@
-> **Current status (2026-09-18): local serve WIRED and verified end-to-end.**
+> **Current status (2026-11-25): local serve WIRED and verified end-to-end.**
 > Go 1.27.0 + PocketBase v0.40.4 installed; `go build ./...`, `go vet ./...` and
 > `go test ./...` pass. The entry point now bootstraps and serves
 > programmatically via `apis.Serve` (migrations apply, health self-probe passes,
@@ -54,27 +54,21 @@ configuration path between local and VPS deployments.
 
 ## Google login (optional, Sprint 2 task 3)
 
-The `users` collection exposes the Google provider only while both credentials
-exist in the process environment:
+`configureOAuth2` reconciles the Google provider on the `users` collection on
+every startup. Precedence:
 
-```powershell
-$env:AERUN_GOOGLE_CLIENT_ID='…apps.googleusercontent.com'
-$env:AERUN_GOOGLE_CLIENT_SECRET='…'
-```
-
-Local runs may keep the pair in `.env.local` at the repository root instead
-(gitignored): `cmd/aerun` seeds unset keys from it before `config.Load` (cwd
-first, then its parent, so a server started from `backend/` finds the root
-file), and a real environment variable always wins. The ownership rule on
-every startup `configureOAuth2`:
-
-- with the pair present in the environment, the `google` provider is FORCED on
-  with those credentials (endpoints, PKCE and scopes come from PocketBase's
-  Google defaults; only the client id/secret are stored);
-- with no (or an incomplete) pair, the reconcile touches nothing — the
-  PocketBase admin UI (users collection → OAuth2) is the owner, so the
-  operator enables Google there and no restart undoes it. This is the
-  default-install path: no code, no env edits.
+1. Complete `google_client_id` + `google_client_secret` stored in
+   `forum_settings` (DB) — managed in the admin panel at `/admin/secrets`.
+   This wins over the environment.
+2. Complete `AERUN_GOOGLE_CLIENT_ID` + `AERUN_GOOGLE_CLIENT_SECRET` in the
+   process environment (env fallback/seed). Local runs may keep the pair in
+   `.env.local` at the repository root instead (gitignored): `cmd/aerun` seeds
+   unset keys from it before `config.Load` (cwd first, then its parent, so a
+   server started from `backend/` finds the root file), and a real environment
+   variable always wins.
+3. Neither set — the reconcile touches nothing, and the PocketBase admin UI
+   (users collection → OAuth2) is the owner, so the operator enables Google
+   there and no restart undoes it.
 
 Password login is unaffected either way; `GET /api/collections/users/auth-methods`
 reports the result.

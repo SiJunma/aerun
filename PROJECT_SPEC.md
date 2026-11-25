@@ -1,6 +1,6 @@
 # PROJECT_SPEC.md — функциональная спецификация Aerun
 
-> **Статус:** актуально (создан 2026-11-02, ветка `main`). Источник истины по полям коллекций — Go-миграции `backend/internal/migrations/` (append-only); по маршрутам — `backend/internal/platform/pocketbase/run.go`.
+> **Статус:** актуально (создан 2026-11-02, обновлено 2026-11-25, ветка `main`). Источник истины по полям коллекций — Go-миграции `backend/internal/migrations/` (append-only); по маршрутам — `backend/internal/platform/pocketbase/run.go`.
 > При изменении схемы, API или модели доступа обновляйте этот файл в том же коммите (правила: `.agent/rules/documentation_maintenance.md`).
 
 ---
@@ -39,7 +39,7 @@
 | `ip_bans` | блокировки IP/подсетей | `ip_or_subnet`, `ip_start`, `ip_end` (16-байтный hex), `reason`, `banned_by`, `created_at`, `expires_at`, `is_active`; правила закрыты |
 | `daily_visits_summary` | суточные агрегаты | `date` (PK), `total_visits`, `unique_visitors`, `unique_members`, `unique_guests`, `bot_visits`, `new_registrations`, `posts_count`, `countries_json`, `devices_json`, `entry_paths_json`; правила закрыты |
 
-> Полные списки полей и правила индексов — в соответствующих файлах миграций (`1765900000_domain_foundation.go` … `1780000000_topic_description.go`).
+> Полные списки полей и правила индексов — в соответствующих файлах миграций (`1765900000_domain_foundation.go` … `1781000005_admin_secrets_settings.go`).
 
 ## 2. RBAC — модель доступа
 

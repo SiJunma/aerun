@@ -12,7 +12,7 @@
 - Новая проверка: создать `scripts/check-<topic>.mjs` / `scripts/test-<topic>.mjs`, добавить `test:<name>` в `package.json` **и** в цепочку `npm test`.
 
 ### Бэкенд (Go)
-- `cd backend && go test ./... -count=1` — юнит/интеграционные тесты рядом с кодом (`*_test.go`), включая миграции (`migrations_test.go`, спринт-тесты) и HTTP-контракты (httptest-серверы в `internal/platform/pocketbase/*_test.go`).
+- `cd backend && go test ./... -count=1` — юнит/интеграционные тесты рядом с кодом (`*_test.go`), включая миграции (`migrations_test.go`, спринт-тесты) и HTTP-контракты (httptest-серверы в `internal/platform/pocketbase/*_test.go`). Пакет `internal/platform/pocketbase` выполняется долго (~19 мин на медленной машине) — для него нужен `-timeout 30m` (таймаут Go по умолчанию — 10 мин).
 - Локально перед пушем: `gofmt -l .` (должно быть пусто), `go build ./...`, `go vet ./...`. На Windows-ворккрипте следить за CRLF — см. `.agent/rules/commands.md` §Local gofmt must see LF.
 
 ## CI — внешний арбитр
