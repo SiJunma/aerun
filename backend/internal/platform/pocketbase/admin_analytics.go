@@ -301,7 +301,6 @@ func adminAnalyticsDashboardHandler(e *core.RequestEvent) error {
 	topEntryPaths := queryRankedList("entry_path", 10)
 	geoipAvailable := geoIPDatabaseExists(e.App.DataDir())
 
-
 	return e.JSON(http.StatusOK, map[string]any{
 		"period": period,
 		"kpis": map[string]any{
