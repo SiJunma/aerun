@@ -299,6 +299,8 @@ func adminAnalyticsDashboardHandler(e *core.RequestEvent) error {
 	topBrowsers := queryRankedList("browser", 10)
 	topOS := queryRankedList("os", 10)
 	topEntryPaths := queryRankedList("entry_path", 10)
+	geoipAvailable := geoIPDatabaseExists(e.App.DataDir())
+
 
 	return e.JSON(http.StatusOK, map[string]any{
 		"period": period,
@@ -326,6 +328,7 @@ func adminAnalyticsDashboardHandler(e *core.RequestEvent) error {
 		"top_browsers":    topBrowsers,
 		"top_os":          topOS,
 		"top_entry_paths": topEntryPaths,
+		"geoip_available":  geoipAvailable,
 	})
 }
 
