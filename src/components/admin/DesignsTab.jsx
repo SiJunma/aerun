@@ -241,14 +241,14 @@ const DesignsTab = ({ designs, settings, updateSettings }) => {
         replacementId: available.length > 0 ? available[0].id : '',
       });
     } else {
-      updateDesign(designId, { isActive: false }).catch(console.error);
+      updateDesign(designId, { isActive: false, showInList: false }).catch(console.error);
     }
   };
 
   const handleConfirmDeactivate = async () => {
     const { designIdToDeactivate, replacementId } = deactivateModal;
     try {
-      await updateDesign(designIdToDeactivate, { isActive: false });
+      await updateDesign(designIdToDeactivate, { isActive: false, showInList: false });
       if (settings.defaultDesignId === designIdToDeactivate) {
         await updateSettings({ ...settings, defaultDesignId: replacementId });
       }
@@ -412,23 +412,47 @@ const DesignsTab = ({ designs, settings, updateSettings }) => {
             handleSave();
           }}
         >
+          {!editingDesign && (
+            <div className="designs-form__group">
+              <label className="designs-form__label" htmlFor="design-based-on">
+                {t('admin.designs.modal_based_on')}
+              </label>
+              <select
+                id="design-based-on"
+                className="designs-form__select"
+                value={basedOnId}
+                onChange={(e) => handleBasedOnChange(e.target.value)}
+              >
+                <option value="">{t('admin.designs.based_on_empty')}</option>
+                {baseDesignOptions.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <div className="designs-form__group">
-            <label className="designs-form__label" htmlFor="design-based-on">
-              {t('admin.designs.modal_based_on')}
-            </label>
-            <select
-              id="design-based-on"
-              className="designs-form__select"
-              value={basedOnId}
-              onChange={(e) => handleBasedOnChange(e.target.value)}
+            <label
+              className={`designs-switch ${showInListDisabled ? 'designs-switch--disabled' : ''}`}
+              htmlFor="show-in-list"
             >
-              <option value="">{t('admin.designs.based_on_empty')}</option>
-              {baseDesignOptions.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
+              <input
+                type="checkbox"
+                id="show-in-list"
+                className="designs-switch__input"
+                disabled={showInListDisabled}
+                checked={showInListDisabled ? false : form.showInList}
+                onChange={(e) => setForm({ ...form, showInList: e.target.checked })}
+              />
+              <span>{t('admin.designs.modal_show_in_list')}</span>
+            </label>
+            {showInListDisabled && (
+              <div className="designs-form__hint">
+                {t('admin.designs.show_in_list_disabled_hint')}
+              </div>
+            )}
           </div>
 
           <div className="designs-form__row">
@@ -544,27 +568,6 @@ const DesignsTab = ({ designs, settings, updateSettings }) => {
             />
           </Suspense>
 
-          <div className="designs-form__group">
-            <label
-              className={`designs-switch ${showInListDisabled ? 'designs-switch--disabled' : ''}`}
-              htmlFor="show-in-list"
-            >
-              <input
-                type="checkbox"
-                id="show-in-list"
-                className="designs-switch__input"
-                disabled={showInListDisabled}
-                checked={showInListDisabled ? false : form.showInList}
-                onChange={(e) => setForm({ ...form, showInList: e.target.checked })}
-              />
-              <span>{t('admin.designs.modal_show_in_list')}</span>
-            </label>
-            {showInListDisabled && (
-              <div className="designs-form__hint">
-                {t('admin.designs.show_in_list_disabled_hint')}
-              </div>
-            )}
-          </div>
         </form>
       </ForumModal>
 
