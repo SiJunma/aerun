@@ -1,65 +1,191 @@
-import React, { useState } from 'react';
-import { Card, Button, Badge, Form, Row, Col } from 'react-bootstrap';
-import ForumModal from '../common/ForumModal';
-import { useI18n } from '../../contexts/I18nProvider';
+import React, { useState, lazy, Suspense } from 'react';
 import { PlusCircle, Edit2, Trash2, Copy, Eye, EyeOff, Palette } from 'lucide-react';
-import { createDesign, updateDesign, deleteDesign } from '../../api/designs';
-import { useToast } from '../../contexts/ToastProvider';
+import ForumModal from '../common/ForumModal';
 import ConfirmModal from '../common/ConfirmModal';
+import { useI18n } from '../../contexts/I18nProvider';
+import { useToast } from '../../contexts/ToastProvider';
+import { createDesign, updateDesign, deleteDesign, uploadDesignFavicon } from '../../api/designs';
+import { validateCode } from './codeValidation';
+import FaviconUploader from './FaviconUploader';
+import './DesignsTab.css';
+
+const CodeEditor = lazy(() => import('./CodeEditor'));
+
+const DEFAULT_FORM = {
+  name: '',
+  description: '',
+  faviconUrl: '',
+  forumTitle: '',
+  welcomeMessage: '',
+  css: '',
+  js: '',
+  showInList: false,
+  isActive: false,
+};
+
+const EMPTY_CODE_ERRORS = {
+  welcomeMessage: null,
+  css: null,
+  js: null,
+};
 
 const DesignsTab = ({ designs, settings, updateSettings }) => {
   const { t } = useI18n();
   const { showToast } = useToast();
-  
+
   const [showModal, setShowModal] = useState(false);
   const [editingDesign, setEditingDesign] = useState(null);
-  const [form, setForm] = useState({
-    name: '', description: '', logoUrl: '', forumTitle: '',
-    welcomeMessage: '', css: '', js: '', showInList: true, isActive: true
-  });
-  
+  const [basedOnId, setBasedOnId] = useState('');
+  const [form, setForm] = useState(DEFAULT_FORM);
+  const [nameAttempted, setNameAttempted] = useState(false);
+  const [codeErrors, setCodeErrors] = useState(EMPTY_CODE_ERRORS);
+  const [pendingFavicon, setPendingFavicon] = useState(null);
+  const [faviconPreview, setFaviconPreview] = useState('');
+
+  const resetFaviconStaging = () => {
+    setPendingFavicon(null);
+    setFaviconPreview((prev) => {
+      if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
+      return '';
+    });
+  };
+
   const [confirmState, setConfirmState] = useState({
-    show: false, title: '', message: '', onConfirm: () => {}
+    show: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
   });
 
   const [deactivateModal, setDeactivateModal] = useState({
     show: false,
     designIdToDeactivate: null,
-    replacementId: ''
+    replacementId: '',
   });
 
   const handleOpenModal = (design = null) => {
+    setBasedOnId('');
+    setNameAttempted(false);
+    setCodeErrors(EMPTY_CODE_ERRORS);
+    resetFaviconStaging();
     if (design) {
+      const active = Boolean(design.isActive);
       setEditingDesign(design.id);
       setForm({
         name: design.name || '',
         description: design.description || '',
-        logoUrl: design.logoUrl || '',
+        faviconUrl: design.faviconUrl || '',
         forumTitle: design.forumTitle || '',
         welcomeMessage: design.welcomeMessage || '',
         css: design.css || '',
         js: design.js || '',
-        showInList: design.showInList ?? true,
-        isActive: design.isActive ?? true
+        showInList: active ? Boolean(design.showInList) : false,
+        isActive: active,
       });
     } else {
       setEditingDesign(null);
-      setForm({
-        name: '', description: '', logoUrl: '', forumTitle: '',
-        welcomeMessage: '', css: '', js: '', showInList: true, isActive: true
-      });
+      setForm({ ...DEFAULT_FORM });
     }
     setShowModal(true);
   };
 
+  const handleCloseModal = () => {
+    resetFaviconStaging();
+    setShowModal(false);
+  };
+
+  const handleBasedOnChange = (selectedId) => {
+    setBasedOnId(selectedId);
+    setCodeErrors(EMPTY_CODE_ERRORS);
+    resetFaviconStaging();
+    if (!selectedId) {
+      setForm((prev) => ({
+        ...prev,
+        faviconUrl: '',
+        forumTitle: '',
+        welcomeMessage: '',
+        css: '',
+        js: '',
+      }));
+      return;
+    }
+
+    const source = designs.find((d) => d.id === selectedId);
+    if (!source) return;
+    setForm((prev) => ({
+      ...prev,
+      faviconUrl: source.faviconUrl || '',
+      forumTitle: source.forumTitle || '',
+      welcomeMessage: source.welcomeMessage || '',
+      css: source.css || '',
+      js: source.js || '',
+    }));
+  };
+
+  const runFieldValidation = (field, language, value) => {
+    const result = validateCode(language, value, t);
+    setCodeErrors((prev) => ({ ...prev, [field]: result }));
+    return result;
+  };
+
+  const handleFaviconUpload = async (blob, filename) => {
+    if (!editingDesign) {
+      const objectUrl = URL.createObjectURL(blob);
+      setPendingFavicon({ blob, filename });
+      setFaviconPreview((prev) => {
+        if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
+        return objectUrl;
+      });
+      return objectUrl;
+    }
+    const url = await uploadDesignFavicon(editingDesign, blob, filename);
+    resetFaviconStaging();
+    setForm((prev) => ({ ...prev, faviconUrl: url }));
+    return url;
+  };
+
   const handleSave = async () => {
-    if (!form.name.trim()) return;
+    setNameAttempted(true);
+    const trimmedName = form.name.trim();
+    if (!trimmedName) return;
+
+    const welcomeError = validateCode('html', form.welcomeMessage, t);
+    const cssWarning = validateCode('css', form.css, t);
+    const jsError = validateCode('javascript', form.js, t);
+
+    setCodeErrors({
+      welcomeMessage: welcomeError,
+      css: cssWarning,
+      js: jsError,
+    });
+
+    if (welcomeError || jsError) {
+      showToast(t('admin.designs.validation_save_blocked'), 'danger');
+      return;
+    }
+
+    const payload = {
+      ...form,
+      name: trimmedName,
+      showInList: form.isActive ? Boolean(form.showInList) : false,
+    };
+
     try {
       if (editingDesign) {
-        await updateDesign(editingDesign, form);
+        await updateDesign(editingDesign, payload);
       } else {
-        await createDesign(form);
+        const newId = await createDesign(payload);
+        if (pendingFavicon && newId) {
+          const { blob, filename } = pendingFavicon;
+          try {
+            await uploadDesignFavicon(newId, blob, filename);
+          } catch (uploadErr) {
+            console.error(uploadErr);
+            showToast(t('profile.error_upload_failed'), 'danger');
+          }
+        }
       }
+      resetFaviconStaging();
       showToast(t('admin.designs.toast_saved'), 'success');
       setShowModal(false);
     } catch (err) {
@@ -74,7 +200,8 @@ const DesignsTab = ({ designs, settings, updateSettings }) => {
       await createDesign({
         ...data,
         name: `${data.name} (Copy)`,
-        isActive: false // Clones shouldn't be active immediately to avoid conflicts
+        isActive: false,
+        showInList: false,
       });
       showToast(t('admin.designs.toast_saved'), 'success');
     } catch (err) {
@@ -88,7 +215,7 @@ const DesignsTab = ({ designs, settings, updateSettings }) => {
       showToast(t('admin.designs.cant_delete_active'), 'warning');
       return;
     }
-    
+
     setConfirmState({
       show: true,
       title: t('admin.designs.confirm_delete_title'),
@@ -101,20 +228,19 @@ const DesignsTab = ({ designs, settings, updateSettings }) => {
           console.error(err);
           showToast(t('admin.designs.error_delete'), 'danger');
         }
-      }
+      },
     });
   };
 
   const initiateDeactivate = (designId) => {
     if (settings.defaultDesignId === designId) {
-      const available = designs.filter(d => d.id !== designId && d.isActive);
+      const available = designs.filter((d) => d.id !== designId && d.isActive);
       setDeactivateModal({
         show: true,
         designIdToDeactivate: designId,
-        replacementId: available.length > 0 ? available[0].id : ''
+        replacementId: available.length > 0 ? available[0].id : '',
       });
     } else {
-      // Just deactivate directly if it's not the default
       updateDesign(designId, { isActive: false }).catch(console.error);
     }
   };
@@ -152,192 +278,362 @@ const DesignsTab = ({ designs, settings, updateSettings }) => {
     window.open(`/?preview_design=${designId}`, '_blank');
   };
 
+  const showInListDisabled = !editingDesign || !form.isActive;
+  const baseDesignOptions = designs.filter((d) => d.id !== editingDesign);
+  const nameInvalid = nameAttempted && !form.name.trim();
+
   return (
-    <>
-      <div className="d-flex justify-content-between align-items-center mb-4">
-        <h4 className="mb-0 text-primary d-flex align-items-center gap-2">
-          <Palette size={24} /> {t('admin.designs.title')}
+    <div className="designs-tab">
+      <div className="designs-header">
+        <h4 className="designs-header__title">
+          <Palette size={22} />
+          <span>{t('admin.designs.title')}</span>
         </h4>
-        <Button variant="primary" onClick={() => handleOpenModal()} className="d-flex align-items-center gap-2">
-          <PlusCircle size={18} /> {t('admin.designs.create_btn')}
-        </Button>
+        <button
+          type="button"
+          className="designs-btn designs-btn--primary"
+          onClick={() => handleOpenModal()}
+        >
+          <PlusCircle size={18} />
+          <span>{t('admin.designs.create_btn')}</span>
+        </button>
       </div>
 
-      <div className="admin-card admin-card--spacing">
-        <div className="admin-card__body">
-          <Form.Check 
-            type="switch"
-            id="allow-custom-design"
-            label={t('admin.designs.modal_show_in_list')} 
-            // Note: Reuse a global label or add new one for the switch
-            title="Allow users to choose their own design"
-            checked={settings.allowUserCustomDesign}
-            onChange={(e) => updateSettings({ ...settings, allowUserCustomDesign: e.target.checked })}
-            className="mb-3 fw-bold"
-          />
-          <Form.Group>
-            <Form.Label className="fw-bold">{t('admin.designs.default_design')}</Form.Label>
-            <Form.Select 
-              value={settings.defaultDesignId || ''} 
-              onChange={(e) => updateSettings({ ...settings, defaultDesignId: e.target.value })}
-              className="w-auto min-w-200"
+      {designs.length === 0 ? (
+        <div className="designs-empty">{t('admin.designs.empty_list')}</div>
+      ) : (
+        <div className="designs-grid">
+          {designs.map((design) => (
+            <article
+              key={design.id}
+              className={`designs-card ${!design.isActive ? 'designs-card--inactive' : ''}`}
             >
-              <option value="">{t('admin.settings.default_design_none') || '-- No override --'}</option>
-              <optgroup label={t('admin.settings.default_design_builtin') || 'Built-in Themes'}>
-                <option value="dark">{t('profile.theme_dark') || 'Dark'}</option>
-                <option value="light">{t('profile.theme_light') || 'Light'}</option>
-                <option value="neutral">{t('profile.theme_neutral') || 'Neutral'}</option>
-              </optgroup>
-              {designs.filter(d => d.isActive).length > 0 && (
-                <optgroup label={t('admin.settings.default_design_custom') || 'Custom Designs'}>
-                  {designs.filter(d => d.isActive).map(d => (
-                    <option key={d.id} value={d.id}>{d.name}</option>
-                  ))}
-                </optgroup>
-              )}
-            </Form.Select>
-          </Form.Group>
-        </div>
-      </div>
+              <div className="designs-card__header">
+                <h5 className="designs-card__title">{design.name}</h5>
+                <span
+                  className={`designs-card__badge ${
+                    design.isActive
+                      ? 'designs-card__badge--active'
+                      : 'designs-card__badge--inactive'
+                  }`}
+                >
+                  {design.isActive ? t('admin.designs.active') : t('admin.designs.inactive')}
+                </span>
+              </div>
 
-      <Row className="g-4">
-        {designs.map(design => (
-          <Col md={6} lg={4} key={design.id}>
-            <Card className={`shadow-sm h-100 ${!design.isActive ? 'opacity-75 bg-light' : ''}`}>
-              <Card.Body className="d-flex flex-column">
-                <div className="d-flex justify-content-between align-items-start mb-2">
-                  <h5 className="mb-0 fw-bold">{design.name}</h5>
-                  <Badge bg={design.isActive ? 'success' : 'secondary'}>
-                    {design.isActive ? t('admin.designs.active') : t('admin.designs.inactive')}
-                  </Badge>
-                </div>
-                <p className="text-muted small flex-grow-1">{design.description}</p>
-                
-                <div className="d-flex gap-2 mt-3 flex-wrap">
-                  <Button variant={design.isActive ? 'outline-warning' : 'outline-success'} size="sm" onClick={() => toggleActivate(design)} title={design.isActive ? t('admin.designs.deactivate') : t('admin.designs.activate')}>
-                    {design.isActive ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </Button>
-                  <Button variant="outline-primary" size="sm" onClick={() => handlePreview(design.id)} title={t('admin.designs.preview')}>
-                    <Palette size={16} />
-                  </Button>
-                  <Button variant="outline-secondary" size="sm" onClick={() => handleOpenModal(design)} title={t('admin.designs.edit')}>
-                    <Edit2 size={16} />
-                  </Button>
-                  <Button variant="outline-info" size="sm" onClick={() => handleClone(design)} title={t('admin.designs.clone')}>
-                    <Copy size={16} />
-                  </Button>
-                  <Button variant="outline-danger" size="sm" onClick={() => handleDelete(design)} title={t('admin.designs.delete')}>
-                    <Trash2 size={16} />
-                  </Button>
-                </div>
-              </Card.Body>
-            </Card>
-          </Col>
-        ))}
-      </Row>
+              <p className="designs-card__desc">{design.description}</p>
+
+              <div className="designs-card__actions">
+                <button
+                  type="button"
+                  className={`designs-btn designs-btn--ghost designs-btn--icon ${
+                    design.isActive ? 'designs-btn--deactivate' : 'designs-btn--activate'
+                  }`}
+                  onClick={() => toggleActivate(design)}
+                  title={design.isActive ? t('admin.designs.deactivate') : t('admin.designs.activate')}
+                  aria-label={design.isActive ? t('admin.designs.deactivate') : t('admin.designs.activate')}
+                >
+                  {design.isActive ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+                <button
+                  type="button"
+                  className="designs-btn designs-btn--ghost designs-btn--icon designs-btn--preview"
+                  onClick={() => handlePreview(design.id)}
+                  title={t('admin.designs.preview')}
+                  aria-label={t('admin.designs.preview')}
+                >
+                  <Palette size={16} />
+                </button>
+                <button
+                  type="button"
+                  className="designs-btn designs-btn--ghost designs-btn--icon"
+                  onClick={() => handleOpenModal(design)}
+                  title={t('admin.designs.edit')}
+                  aria-label={t('admin.designs.edit')}
+                >
+                  <Edit2 size={16} />
+                </button>
+                <button
+                  type="button"
+                  className="designs-btn designs-btn--ghost designs-btn--icon"
+                  onClick={() => handleClone(design)}
+                  title={t('admin.designs.clone')}
+                  aria-label={t('admin.designs.clone')}
+                >
+                  <Copy size={16} />
+                </button>
+                <button
+                  type="button"
+                  className="designs-btn designs-btn--ghost designs-btn--icon designs-btn--danger"
+                  onClick={() => handleDelete(design)}
+                  title={t('admin.designs.delete')}
+                  aria-label={t('admin.designs.delete')}
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
 
       {/* Edit/Create Modal */}
       <ForumModal
         show={showModal}
-        onHide={() => setShowModal(false)}
+        onHide={handleCloseModal}
         size="lg"
         title={editingDesign ? t('admin.designs.modal_edit') : t('admin.designs.modal_create')}
         bodyClassName=""
         footerClassName=""
         footer={
           <>
-            <Button variant="secondary" onClick={() => setShowModal(false)}>{t('common.cancel')}</Button>
-            <Button variant="primary" onClick={handleSave} disabled={!form.name.trim()}>{t('admin.designs.save_btn')}</Button>
+            <button
+              type="button"
+              className="designs-btn designs-btn--secondary"
+              onClick={handleCloseModal}
+            >
+              {t('common.cancel')}
+            </button>
+            <button
+              type="button"
+              className="designs-btn designs-btn--primary"
+              onClick={handleSave}
+              disabled={!form.name.trim()}
+            >
+              {t('admin.designs.save_btn')}
+            </button>
           </>
         }
       >
-          <Form>
-            <Row>
-              <Col md={6}>
-                <Form.Group className="mb-3">
-                  <Form.Label className="fw-bold">{t('admin.designs.modal_name')}</Form.Label>
-                  <Form.Control type="text" value={form.name} onChange={e => setForm({...form, name: e.target.value})} />
-                </Form.Group>
-              </Col>
-              <Col md={6}>
-                <Form.Group className="mb-3">
-                  <Form.Label className="fw-bold">{t('admin.designs.modal_logo')}</Form.Label>
-                  <Form.Control type="text" value={form.logoUrl} onChange={e => setForm({...form, logoUrl: e.target.value})} placeholder="https://..." />
-                </Form.Group>
-              </Col>
-            </Row>
+        <form
+          className="designs-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSave();
+          }}
+        >
+          <div className="designs-form__group">
+            <label className="designs-form__label" htmlFor="design-based-on">
+              {t('admin.designs.modal_based_on')}
+            </label>
+            <select
+              id="design-based-on"
+              className="designs-form__select"
+              value={basedOnId}
+              onChange={(e) => handleBasedOnChange(e.target.value)}
+            >
+              <option value="">{t('admin.designs.based_on_empty')}</option>
+              {baseDesignOptions.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          </div>
 
-            <Form.Group className="mb-3">
-              <Form.Label className="fw-bold">{t('admin.designs.modal_desc')}</Form.Label>
-              <Form.Control as="textarea" rows={2} value={form.description} onChange={e => setForm({...form, description: e.target.value})} />
-            </Form.Group>
+          <div className="designs-form__row">
+            <div className="designs-form__group">
+              <label className="designs-form__label" htmlFor="design-name">
+                {t('admin.designs.modal_name')}
+              </label>
+              <input
+                id="design-name"
+                type="text"
+                className={`designs-form__control ${nameInvalid ? 'designs-form__control--invalid' : ''}`}
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+              />
+            </div>
 
-            <Form.Group className="mb-3">
-              <Form.Label className="fw-bold">{t('admin.designs.modal_title')}</Form.Label>
-              <Form.Control type="text" value={form.forumTitle} onChange={e => setForm({...form, forumTitle: e.target.value})} />
-            </Form.Group>
+            <div className="designs-form__group">
+              <label className="designs-form__label" htmlFor="design-forum-title">
+                {t('admin.designs.modal_title')}
+              </label>
+              <input
+                id="design-forum-title"
+                type="text"
+                className="designs-form__control"
+                value={form.forumTitle}
+                onChange={(e) => setForm({ ...form, forumTitle: e.target.value })}
+              />
+            </div>
+          </div>
 
-            <Form.Group className="mb-3">
-              <Form.Label className="fw-bold">{t('admin.designs.modal_welcome')}</Form.Label>
-              <Form.Control as="textarea" rows={3} className="font-monospace" value={form.welcomeMessage} onChange={e => setForm({...form, welcomeMessage: e.target.value})} />
-            </Form.Group>
-
-            <Form.Group className="mb-3">
-              <Form.Label className="fw-bold">{t('admin.designs.modal_css')}</Form.Label>
-              <Form.Control as="textarea" rows={5} className="font-monospace" value={form.css} onChange={e => setForm({...form, css: e.target.value})} />
-            </Form.Group>
-
-            <Form.Group className="mb-3">
-              <Form.Label className="fw-bold">{t('admin.designs.modal_js')}</Form.Label>
-              <Form.Control as="textarea" rows={3} className="font-monospace" value={form.js} onChange={e => setForm({...form, js: e.target.value})} />
-            </Form.Group>
-
-            <Form.Check 
-              type="switch"
-              id="show-in-list"
-              label={t('admin.designs.modal_show_in_list')}
-              checked={form.showInList}
-              onChange={e => setForm({...form, showInList: e.target.checked})}
-              className="fw-bold"
+          <div className="designs-form__group">
+            <label className="designs-form__label" htmlFor="design-favicon">
+              {t('admin.designs.modal_favicon')}
+            </label>
+            <FaviconUploader
+              key={`${editingDesign || 'new'}-${showModal}`}
+              id="design-favicon"
+              value={faviconPreview || form.faviconUrl}
+              onUpload={handleFaviconUpload}
+              onChange={(url) => {
+                if (!url.startsWith('blob:')) {
+                  resetFaviconStaging();
+                  setForm((prev) => ({ ...prev, faviconUrl: url }));
+                }
+              }}
+              onClear={() => {
+                resetFaviconStaging();
+                setForm((prev) => ({ ...prev, faviconUrl: '' }));
+              }}
             />
-          </Form>
+          </div>
+
+          <div className="designs-form__group">
+            <label className="designs-form__label" htmlFor="design-desc">
+              {t('admin.designs.modal_desc')}
+            </label>
+            <textarea
+              id="design-desc"
+              rows={2}
+              className="designs-form__textarea"
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+            />
+          </div>
+
+          <Suspense fallback={<div className="designs-code-skeleton">{t('common.loading')}</div>}>
+            <CodeEditor
+              id="design-welcome"
+              language="html"
+              label={t('admin.designs.modal_welcome')}
+              value={form.welcomeMessage}
+              onChange={(val) => {
+                setForm((prev) => ({ ...prev, welcomeMessage: val }));
+                if (codeErrors.welcomeMessage) {
+                  setCodeErrors((prev) => ({ ...prev, welcomeMessage: null }));
+                }
+              }}
+              onBeautify={(val) => runFieldValidation('welcomeMessage', 'html', val)}
+              error={codeErrors.welcomeMessage}
+              minHeight="120px"
+            />
+
+            <CodeEditor
+              id="design-css"
+              language="css"
+              label={t('admin.designs.modal_css')}
+              value={form.css}
+              onChange={(val) => {
+                setForm((prev) => ({ ...prev, css: val }));
+                if (codeErrors.css) {
+                  setCodeErrors((prev) => ({ ...prev, css: null }));
+                }
+              }}
+              onBeautify={(val) => runFieldValidation('css', 'css', val)}
+              error={codeErrors.css}
+              minHeight="180px"
+            />
+
+            <CodeEditor
+              id="design-js"
+              language="javascript"
+              label={t('admin.designs.modal_js')}
+              value={form.js}
+              onChange={(val) => {
+                setForm((prev) => ({ ...prev, js: val }));
+                if (codeErrors.js) {
+                  setCodeErrors((prev) => ({ ...prev, js: null }));
+                }
+              }}
+              onBeautify={(val) => runFieldValidation('js', 'javascript', val)}
+              error={codeErrors.js}
+              minHeight="120px"
+            />
+          </Suspense>
+
+          <div className="designs-form__group">
+            <label
+              className={`designs-switch ${showInListDisabled ? 'designs-switch--disabled' : ''}`}
+              htmlFor="show-in-list"
+            >
+              <input
+                type="checkbox"
+                id="show-in-list"
+                className="designs-switch__input"
+                disabled={showInListDisabled}
+                checked={showInListDisabled ? false : form.showInList}
+                onChange={(e) => setForm({ ...form, showInList: e.target.checked })}
+              />
+              <span>{t('admin.designs.modal_show_in_list')}</span>
+            </label>
+            {showInListDisabled && (
+              <div className="designs-form__hint">
+                {t('admin.designs.show_in_list_disabled_hint')}
+              </div>
+            )}
+          </div>
+        </form>
       </ForumModal>
 
       {/* Deactivate Replacement Modal */}
       <ForumModal
         show={deactivateModal.show}
-        onHide={() => setDeactivateModal({ show: false, designIdToDeactivate: null, replacementId: '' })}
+        onHide={() =>
+          setDeactivateModal({ show: false, designIdToDeactivate: null, replacementId: '' })
+        }
         title={t('admin.designs.confirm_deactivate_title')}
         bodyClassName=""
         footerClassName=""
         footer={
           <>
-            <Button variant="secondary" onClick={() => setDeactivateModal({ show: false, designIdToDeactivate: null, replacementId: '' })}>{t('common.cancel')}</Button>
-            <Button variant="primary" onClick={handleConfirmDeactivate}>{t('common.confirm')}</Button>
+            <button
+              type="button"
+              className="designs-btn designs-btn--secondary"
+              onClick={() =>
+                setDeactivateModal({ show: false, designIdToDeactivate: null, replacementId: '' })
+              }
+            >
+              {t('common.cancel')}
+            </button>
+            <button
+              type="button"
+              className="designs-btn designs-btn--primary"
+              onClick={handleConfirmDeactivate}
+            >
+              {t('common.confirm')}
+            </button>
           </>
         }
       >
-          <p>{t('admin.designs.confirm_deactivate_message')}</p>
-          <Form.Group>
-            <Form.Label className="fw-bold">{t('admin.designs.select_replacement')}</Form.Label>
-            <Form.Select 
-              value={deactivateModal.replacementId} 
-              onChange={e => setDeactivateModal({ ...deactivateModal, replacementId: e.target.value })}
+        <div className="designs-deactivate-body">
+          <p className="designs-deactivate-body__msg">
+            {t('admin.designs.confirm_deactivate_message')}
+          </p>
+          <div className="designs-form__group">
+            <label className="designs-form__label" htmlFor="design-replacement">
+              {t('admin.designs.select_replacement')}
+            </label>
+            <select
+              id="design-replacement"
+              className="designs-form__select"
+              value={deactivateModal.replacementId}
+              onChange={(e) =>
+                setDeactivateModal({ ...deactivateModal, replacementId: e.target.value })
+              }
             >
               <optgroup label={t('admin.settings.default_design_builtin') || 'Built-in Themes'}>
                 <option value="dark">{t('profile.theme_dark') || 'Dark'}</option>
                 <option value="light">{t('profile.theme_light') || 'Light'}</option>
                 <option value="neutral">{t('profile.theme_neutral') || 'Neutral'}</option>
               </optgroup>
-              {designs.filter(d => d.isActive && d.id !== deactivateModal.designIdToDeactivate).length > 0 && (
+              {designs.filter((d) => d.isActive && d.id !== deactivateModal.designIdToDeactivate)
+                .length > 0 && (
                 <optgroup label={t('admin.settings.default_design_custom') || 'Custom Designs'}>
-                  {designs.filter(d => d.isActive && d.id !== deactivateModal.designIdToDeactivate).map(d => (
-                    <option key={d.id} value={d.id}>{d.name}</option>
-                  ))}
+                  {designs
+                    .filter((d) => d.isActive && d.id !== deactivateModal.designIdToDeactivate)
+                    .map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
+                      </option>
+                    ))}
                 </optgroup>
               )}
-            </Form.Select>
-          </Form.Group>
+            </select>
+          </div>
+        </div>
       </ForumModal>
 
       <ConfirmModal
@@ -345,9 +641,9 @@ const DesignsTab = ({ designs, settings, updateSettings }) => {
         title={confirmState.title}
         message={confirmState.message}
         onConfirm={confirmState.onConfirm}
-        onHide={() => setConfirmState(prev => ({ ...prev, show: false }))}
+        onHide={() => setConfirmState((prev) => ({ ...prev, show: false }))}
       />
-    </>
+    </div>
   );
 };
 

@@ -122,7 +122,7 @@ func globalSettingsSnapshot(app core.App) map[string]any {
 		"allowGifInPosts":       settings.AllowGifInPosts,
 		"allowUserCustomDesign": settings.AllowUserCustomDesign,
 		"defaultDesignId":       settings.DefaultDesignID,
-		"logoUrl":               settings.LogoURL,
+		"faviconUrl":            settings.FaviconURL,
 		"deletedAvatar":         settings.DeletedAvatarURL,
 		"guestAvatar":           settings.GuestAvatarURL,
 		"bgLight":               settings.BgLight,
@@ -189,7 +189,7 @@ func updateGlobalSettingsHandler(cfg config.Config) func(e *core.RequestEvent) e
 			AllowGifInPosts       *bool          `json:"allowGifInPosts"`
 			AllowUserCustomDesign *bool          `json:"allowUserCustomDesign"`
 			DefaultDesignID       *string        `json:"defaultDesignId"`
-			LogoURL               *string        `json:"logoUrl"`
+			FaviconURL            *string        `json:"faviconUrl"`
 			DeletedAvatarURL      *string        `json:"deletedAvatar"`
 			GuestAvatarURL        *string        `json:"guestAvatar"`
 			BgLight               *string        `json:"bgLight"`
@@ -324,17 +324,17 @@ func updateGlobalSettingsHandler(cfg config.Config) func(e *core.RequestEvent) e
 				v := strings.TrimSpace(*body.DefaultDesignID)
 				set("defaultDesignId", func() { record.Set("default_design_id", v) })
 			}
-			if body.LogoURL != nil {
-				v := strings.TrimSpace(*body.LogoURL)
-				set("logoUrl", func() { record.Set("logo_url", v) })
+			if body.FaviconURL != nil {
+				v := strings.TrimSpace(*body.FaviconURL)
+				set("faviconUrl", func() { record.Set("favicon_url", v) })
 			}
 			// The identity placeholder references are normally written by the
 			// dedicated upload endpoint (PUT /admin/settings/placeholder/{kind}),
 			// which owns the FileField; accepting the URL here lets an admin set
-			// or CLEAR a placeholder the same way they set the logo, without the
+			// or CLEAR a placeholder the same way they set the favicon, without the
 			// panel needing a second write path. Empty clears it (fall back to
 			// the default); a non-empty string is trusted as an admin-supplied
-			// reference, exactly like logoUrl.
+			// reference, exactly like faviconUrl.
 			if body.DeletedAvatarURL != nil {
 				v := strings.TrimSpace(*body.DeletedAvatarURL)
 				set("deletedAvatar", func() { record.Set("deleted_avatar_url", v) })

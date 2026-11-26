@@ -69,7 +69,7 @@ type forumSettings struct {
 	AllowGifInPosts       bool
 	AllowUserCustomDesign bool
 	DefaultDesignID       string
-	LogoURL               string
+	FaviconURL            string
 	BgLight               string
 	BgDark                string
 	BgNeutral             string
@@ -159,7 +159,7 @@ func loadForumSettings(app core.App) forumSettings {
 	settings.AllowGifInPosts = record.GetBool("allow_gif_in_posts")
 	settings.AllowUserCustomDesign = record.GetBool("allow_user_custom_design")
 	settings.DefaultDesignID = record.GetString("default_design_id")
-	settings.LogoURL = record.GetString("logo_url")
+	settings.FaviconURL = record.GetString("favicon_url")
 	settings.DeletedAvatarURL = record.GetString("deleted_avatar_url")
 	settings.GuestAvatarURL = record.GetString("guest_avatar_url")
 	settings.BgLight = record.GetString("bg_light")

@@ -9,10 +9,97 @@ import { useAuth } from './AuthProvider';
 import { useI18n } from './I18nProvider';
 import { useDesign } from './DesignProvider';
 import { subscribeToUnreadCounts } from '../api/dms';
+import { resolveAvatarUrl } from '../api/avatars';
 
 const TitleContext = createContext();
 
 export const usePageTitle = () => useContext(TitleContext);
+
+const DEFAULT_FAVICON_URL = '/favicon.jpg';
+
+const getFaviconType = (url) => {
+  const clean = (url || '').split('?')[0].split('#')[0].toLowerCase();
+  if (clean.endsWith('.png')) return 'image/png';
+  if (clean.endsWith('.ico')) return 'image/x-icon';
+  if (clean.endsWith('.svg') || (url || '').toLowerCase().startsWith('data:image/svg+xml')) {
+    return 'image/svg+xml';
+  }
+  return 'image/jpeg';
+};
+
+const applyFavicon = (baseFaviconUrl, count, isCancelled) => {
+  let link = document.querySelector("link[rel*='icon']");
+  if (!link) {
+    link = document.createElement('link');
+    link.rel = 'shortcut icon';
+    document.head.appendChild(link);
+  }
+
+  const baseType = getFaviconType(baseFaviconUrl);
+  link.type = baseType;
+
+  if (count > 0 && baseType !== 'image/svg+xml') {
+    const renderWithBadge = (src, onErrorFallback) => {
+      const img = new Image();
+      try {
+        const parsed = new URL(src, window.location.origin);
+        if (parsed.origin !== window.location.origin) {
+          img.crossOrigin = 'anonymous';
+        }
+      } catch {
+        // Keep default same-origin loading
+      }
+      img.onload = () => {
+        if (isCancelled()) return;
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = 32;
+          canvas.height = 32;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, 32, 32);
+
+          // Draw badge circle
+          ctx.beginPath();
+          ctx.arc(22, 10, 9, 0, 2 * Math.PI);
+          ctx.fillStyle = '#ff3b30';
+          ctx.fill();
+
+          // Draw text
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 12px Arial';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(count > 9 ? '9+' : count.toString(), 22, 11);
+
+          const dataUrl = canvas.toDataURL('image/png');
+          link.type = 'image/png';
+          link.href = dataUrl;
+        } catch {
+          if (onErrorFallback) onErrorFallback();
+        }
+      };
+      img.onerror = () => {
+        if (isCancelled()) return;
+        if (onErrorFallback) onErrorFallback();
+      };
+      img.src = src;
+    };
+
+    renderWithBadge(baseFaviconUrl, () => {
+      if (baseFaviconUrl !== DEFAULT_FAVICON_URL) {
+        renderWithBadge(DEFAULT_FAVICON_URL, () => {
+          link.type = 'image/jpeg';
+          link.href = DEFAULT_FAVICON_URL;
+        });
+      } else {
+        link.type = 'image/jpeg';
+        link.href = DEFAULT_FAVICON_URL;
+      }
+    });
+  } else {
+    link.href = baseFaviconUrl;
+  }
+};
 
 export const TitleProvider = ({ children }) => {
   const [pageTitle, setPageTitle] = useState('');
@@ -141,57 +228,16 @@ export const TitleProvider = ({ children }) => {
     document.title = titleParts.join(' | ');
 
     // Handle Favicon update
-    const updateFavicon = (count) => {
-      let link = document.querySelector("link[rel*='icon']");
-      if (!link) {
-        link = document.createElement('link');
-        link.type = 'image/jpeg';
-        link.rel = 'shortcut icon';
-        document.head.appendChild(link);
-      }
+    let cancelled = false;
+    const rawFavicon = activeDesign?.faviconUrl || settings?.faviconUrl || '';
+    const baseFaviconUrl = resolveAvatarUrl(rawFavicon) || DEFAULT_FAVICON_URL;
+    applyFavicon(baseFaviconUrl, unreadCount, () => cancelled);
 
-      // THE BASE ICON IS THE ONE INDEX.HTML DECLARES: /favicon.jpg, a real
-      // image. /favicon.ico used to be referenced here, but that file is a
-      // ~750-byte stub next to the real 79KB jpg — swapping to it mid-load is
-      // exactly the "favicon flashes then disappears" the site showed.
-      const originalFaviconUrl = '/favicon.jpg';
-      // Keep the link's declared type in step with the href: a stale
-      // image/x-icon type makes some browsers reject the jpeg silently.
-      link.type = 'image/jpeg';
-
-      if (count > 0) {
-        const canvas = document.createElement('canvas');
-        canvas.width = 32;
-        canvas.height = 32;
-        const ctx = canvas.getContext('2d');
-        const img = new Image();
-        img.src = originalFaviconUrl;
-        img.onload = () => {
-          ctx.drawImage(img, 0, 0, 32, 32);
-          
-          // Draw badge circle
-          ctx.beginPath();
-          ctx.arc(22, 10, 9, 0, 2 * Math.PI);
-          ctx.fillStyle = '#ff3b30'; // red badge
-          ctx.fill();
-          
-          // Draw text
-          ctx.fillStyle = '#ffffff';
-          ctx.font = 'bold 12px Arial';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(count > 9 ? '9+' : count.toString(), 22, 11);
-          
-          link.href = canvas.toDataURL('image/png');
-        };
-      } else {
-        link.href = originalFaviconUrl;
-      }
+    return () => {
+      cancelled = true;
     };
 
-    updateFavicon(unreadCount);
-
-  }, [pageTitle, unreadCount, settings?.forumName, lang, activeDesign]);
+  }, [pageTitle, unreadCount, settings?.forumName, settings?.faviconUrl, lang, activeDesign]);
 
   return (
     <TitleContext.Provider value={{ setPageTitle, unreadCount }}>

@@ -341,6 +341,8 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	// replace on a single-select FileField, so it is safe without the envelope.
 	group.PUT("/admin/settings/placeholder/{kind}", uploadIdentityPlaceholderHandler).
 		BindFunc(RequirePermission(auth.PermAdminAccess))
+	group.PUT("/admin/settings/favicon", uploadSettingsFaviconHandler).
+		BindFunc(RequirePermission(auth.PermAdminAccess))
 
 	group.GET("/me", meHandler)
 	group.PUT("/me/settings", updateSettingsHandler)
@@ -401,6 +403,7 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	group.GET("/designs/{id}", getDesignHandler)
 	group.POST("/designs", createDesignHandler).BindFunc(RequirePermission(auth.PermManageDesigns)).BindFunc(enforceIdempotency)
 	group.PATCH("/designs/{id}", updateDesignHandler).BindFunc(RequirePermission(auth.PermManageDesigns)).BindFunc(enforceIdempotency)
+	group.PUT("/designs/{id}/favicon", uploadDesignFaviconHandler).BindFunc(RequirePermission(auth.PermManageDesigns))
 	group.DELETE("/designs/{id}", deleteDesignHandler).BindFunc(RequirePermission(auth.PermManageDesigns)).BindFunc(enforceIdempotency)
 
 	group.GET("/category-groups", listCategoryGroupsHandler)

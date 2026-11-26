@@ -136,8 +136,14 @@ func storeOwnedAvatar(e *core.RequestEvent, record *core.Record, field string) (
 // the sniffed extension (avatarFileName) precisely so PocketBase serves the
 // right Content-Type back.
 func readAvatarUpload(e *core.RequestEvent) ([]byte, error) {
+	return readImageUpload(e, "avatar")
+}
+
+// readImageUpload extracts and bounds a multipart "file" upload labeled by
+// `kindLabel` (e.g. "avatar" or "favicon").
+func readImageUpload(e *core.RequestEvent, kindLabel string) ([]byte, error) {
 	if e.Request.ContentLength > avatarUploadMaxBodyBytes {
-		return nil, validationError("avatar exceeds the maximum allowed size")
+		return nil, validationError(kindLabel + " exceeds the maximum allowed size")
 	}
 
 	e.Request.Body = http.MaxBytesReader(e.Response, e.Request.Body, avatarUploadMaxBodyBytes)
@@ -147,9 +153,9 @@ func readAvatarUpload(e *core.RequestEvent) ([]byte, error) {
 		// hunting a content-type bug they do not have.
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			return nil, validationError("avatar exceeds the maximum allowed size")
+			return nil, validationError(kindLabel + " exceeds the maximum allowed size")
 		}
-		return nil, validationError("avatar must be sent as multipart/form-data")
+		return nil, validationError(kindLabel + " must be sent as multipart/form-data")
 	}
 
 	// FormFile returns the already-opened part, so there is nothing to Open.
@@ -160,7 +166,7 @@ func readAvatarUpload(e *core.RequestEvent) ([]byte, error) {
 	defer src.Close()
 
 	if header.Size > avatarUploadMaxBytes {
-		return nil, validationError("avatar exceeds the maximum allowed size")
+		return nil, validationError(kindLabel + " exceeds the maximum allowed size")
 	}
 
 	// One byte over the limit is read so a body that only reveals its true
@@ -169,15 +175,15 @@ func readAvatarUpload(e *core.RequestEvent) ([]byte, error) {
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			return nil, validationError("avatar exceeds the maximum allowed size")
+			return nil, validationError(kindLabel + " exceeds the maximum allowed size")
 		}
-		return nil, validationError("the uploaded avatar could not be read")
+		return nil, validationError("the uploaded " + kindLabel + " could not be read")
 	}
 	if int64(len(data)) > avatarUploadMaxBytes {
-		return nil, validationError("avatar exceeds the maximum allowed size")
+		return nil, validationError(kindLabel + " exceeds the maximum allowed size")
 	}
 	if len(data) == 0 {
-		return nil, validationError("the uploaded avatar is empty")
+		return nil, validationError("the uploaded " + kindLabel + " is empty")
 	}
 	return data, nil
 }

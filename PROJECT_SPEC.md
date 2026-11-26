@@ -39,7 +39,9 @@
 | `ip_bans` | блокировки IP/подсетей | `ip_or_subnet`, `ip_start`, `ip_end` (16-байтный hex), `reason`, `banned_by`, `created_at`, `expires_at`, `is_active`; правила закрыты |
 | `daily_visits_summary` | суточные агрегаты | `date` (PK), `total_visits`, `unique_visitors`, `unique_members`, `unique_guests`, `bot_visits`, `new_registrations`, `posts_count`, `countries_json`, `devices_json`, `entry_paths_json`; правила закрыты |
 
-> Полные списки полей и правила индексов — в соответствующих файлах миграций (`1765900000_domain_foundation.go` … `1781000005_admin_secrets_settings.go`).
+> Полные списки полей и правила индексов — в соответствующих файлах миграций (`1765900000_domain_foundation.go` … `1781000008_favicon_file_fields.go`).
+
+> **Поле `favicon_url` и файл `favicon`** в коллекции `designs` (`1781000006`, `1781000008`) и в `forum_settings` (`1781000007`, `1781000008`) заменяют упразднённый `logo_url`. Загруженный файл хранится в FileField `favicon` (до 2 МБ на эндпоинте, PNG/JPEG/WebP/GIF/ICO/SVG, `Protected=false`), а `favicon_url` получает `/api/files/...`-путь. Новые дизайны создаются неактивными (`is_active: false`, `show_in_list: false`).
 
 ## 2. RBAC — модель доступа
 
@@ -59,7 +61,7 @@
 
 ### 3.1 Служебные
 - `GET /health` — liveness; `GET /status` — статус + статистика presence.
-- `GET /settings` — публичный снапшот настроек (без секретов); `PATCH|PUT /admin/settings` (admin_access); `PUT /admin/settings/placeholder/{kind}` — загрузка identity-placeholder (multipart, без idempotency).
+- `GET /settings` — публичный снапшот настроек (без секретов); `PATCH|PUT /admin/settings` (admin_access); `PUT /admin/settings/placeholder/{kind}` — загрузка identity-placeholder (multipart, без idempotency); `PUT /admin/settings/favicon` — загрузка глобального favicon (multipart, без idempotency, admin_access).
 - `GET /admin/secrets`, `PATCH /admin/secrets` (`manage_forum`) — чтение (маскировано) и запись секретов интеграций в БД (MaxMind license key, Google OAuth2, SMTP, IP hash salt); `POST /admin/geoip/download` (`manage_forum`) — скачивание и hot-reload `GeoLite2-City.mmdb` по ключу из БД.
 
 ### 3.2 Аккаунт и профиль
@@ -75,7 +77,7 @@
 
 ### 3.4 Справочники
 - Роли: `GET /roles` (публично, для бейджей), `GET /admin/roles` (manage_roles, с матрицей прав), `POST|PATCH|DELETE /roles[...]`.
-- Дизайны: `GET /designs`, `GET /designs/{id}`, `POST|PATCH|DELETE /designs[...]` (manage_designs).
+- Дизайны: `GET /designs`, `GET /designs/{id}`, `POST|PATCH|DELETE /designs[...]` (manage_designs), `PUT /designs/{id}/favicon` — загрузка favicon дизайна (multipart, без idempotency, manage_designs).
 - Группы категорий: `GET|POST|PATCH|DELETE /category-groups[...]` (manage_categories на запись).
 
 ### 3.5 Категории и форум-обзор

@@ -21,7 +21,7 @@ export const DEFAULT_GLOBAL_SETTINGS = {
   allowGifInPosts: true,
   allowUserCustomDesign: true,
   defaultDesignId: '',
-  logoUrl: '',
+  faviconUrl: '',
   // Admin-uploaded identity placeholder images (plan I5/D2). Empty means "no
   // custom image", and the frontend falls back to its neutral default. Read by
   // every visitor from the public settings snapshot, so guests render a removed
@@ -116,6 +116,26 @@ export const uploadIdentityPlaceholder = async (kind, blob, filename = `${kind}.
     });
   }
   return res?.avatar_url || '';
+};
+
+/**
+ * uploadSettingsFavicon stores an admin-uploaded favicon image on the
+ * forum_settings singleton and returns the new `/api/files/...` path.
+ */
+export const uploadSettingsFavicon = async (blob, filename = 'favicon.png') => {
+  const form = new FormData();
+  form.append('file', blob, filename);
+  const res = await sendApi('/api/aerun/admin/settings/favicon', {
+    method: 'PUT',
+    body: form
+  });
+  if (res?.favicon_url) {
+    _settingsCache = { ...DEFAULT_GLOBAL_SETTINGS, ...(_settingsCache || {}), faviconUrl: res.favicon_url };
+    _settingsSubscribers.forEach(cb => {
+      try { cb(_settingsCache); } catch (e) { console.error(e); }
+    });
+  }
+  return res?.favicon_url || '';
 };
 
 // --- Admin Secrets & Integrations ---

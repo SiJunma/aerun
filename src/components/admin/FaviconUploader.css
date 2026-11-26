@@ -1,0 +1,148 @@
+/* Favicon uploader widget styles.
+ * Uses theme CSS variables only and keeps typography >= 14px.
+ */
+
+.favicon-uploader {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.55rem;
+  font-size: 14px;
+  color: var(--text-color);
+  width: 100%;
+}
+
+.favicon-uploader__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.favicon-uploader__preview {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background-color: var(--block-bg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  color: var(--secondary-color);
+}
+
+.favicon-uploader__img {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  display: block;
+}
+
+.favicon-uploader__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.favicon-uploader__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.75rem;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  font-family: inherit;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background-color: transparent;
+  color: var(--text-color);
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.favicon-uploader__btn:hover:not(:disabled) {
+  background-color: var(--block-bg);
+  border-color: var(--primary-color);
+}
+
+.favicon-uploader__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.favicon-uploader__btn--primary {
+  background-color: var(--forum-view-btn-primary-bg, var(--primary-color));
+  border-color: var(--forum-view-btn-primary-border, var(--primary-color));
+  color: var(--topic-btn-primary-text, var(--bg-color));
+}
+
+.favicon-uploader__btn--primary:hover:not(:disabled) {
+  opacity: 0.9;
+  background-color: var(--forum-view-btn-primary-bg, var(--primary-color));
+}
+
+.favicon-uploader__btn--danger:hover:not(:disabled) {
+  background-color: var(--danger-bg);
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+}
+
+.favicon-uploader__url-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.favicon-uploader__input {
+  flex: 1 1 200px;
+  min-width: 0;
+  padding: 0.45rem 0.7rem;
+  font-size: 14px;
+  line-height: 1.4;
+  font-family: inherit;
+  color: var(--input-text);
+  background-color: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 6px;
+}
+
+.favicon-uploader__input::placeholder {
+  color: var(--input-placeholder);
+}
+
+.favicon-uploader__input:focus {
+  outline: none;
+  border-color: var(--content-link-color);
+  box-shadow: 0 0 0 2px rgba(var(--primary-rgb), 0.15);
+}
+
+.favicon-uploader__help {
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--secondary-color);
+}
+
+.favicon-uploader__error {
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--danger-text);
+}
+
+@keyframes favicon-uploader-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.favicon-uploader__spin {
+  animation: favicon-uploader-spin 0.8s linear infinite;
+}

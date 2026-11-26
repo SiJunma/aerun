@@ -11,7 +11,7 @@ export function toDesign(raw) {
     css: raw.css || '',
     js: raw.js || '',
     forumTitle: raw.forum_title ?? raw.forumTitle ?? '',
-    logoUrl: raw.logo_url ?? raw.logoUrl ?? '',
+    faviconUrl: raw.favicon_url ?? raw.faviconUrl ?? '',
     isActive: raw.is_active !== undefined ? Boolean(raw.is_active) : (raw.isActive !== undefined ? Boolean(raw.isActive) : true),
     showInList: raw.show_in_list !== undefined ? Boolean(raw.show_in_list) : (raw.showInList !== undefined ? Boolean(raw.showInList) : true),
     welcomeMessage: raw.welcome_message ?? raw.welcomeMessage ?? '',
@@ -29,8 +29,8 @@ export function toDesignPayload(data) {
   if (data.js !== undefined) payload.js = data.js;
   if (data.forumTitle !== undefined) payload.forum_title = data.forumTitle;
   else if (data.forum_title !== undefined) payload.forum_title = data.forum_title;
-  if (data.logoUrl !== undefined) payload.logo_url = data.logoUrl;
-  else if (data.logo_url !== undefined) payload.logo_url = data.logo_url;
+  if (data.faviconUrl !== undefined) payload.favicon_url = data.faviconUrl;
+  else if (data.favicon_url !== undefined) payload.favicon_url = data.favicon_url;
   if (data.isActive !== undefined) payload.is_active = Boolean(data.isActive);
   else if (data.is_active !== undefined) payload.is_active = Boolean(data.is_active);
   if (data.showInList !== undefined) payload.show_in_list = Boolean(data.showInList);
@@ -153,6 +153,17 @@ export const updateDesign = async (id, designData) => {
   });
   notifySubscribers();
   return record ? toDesign(record) : null;
+};
+
+export const uploadDesignFavicon = async (id, blob, filename = 'favicon.png') => {
+  const form = new FormData();
+  form.append('file', blob, filename);
+  const res = await sendApi(`/api/aerun/designs/${id}/favicon`, {
+    method: 'PUT',
+    body: form
+  });
+  notifySubscribers();
+  return res?.favicon_url || '';
 };
 
 export const deleteDesign = async (id) => {

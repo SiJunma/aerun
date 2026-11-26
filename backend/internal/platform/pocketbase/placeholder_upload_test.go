@@ -220,7 +220,7 @@ func TestUploadIdentityPlaceholderRejectsUnknownKind(t *testing.T) {
 // TestResetIdentityPlaceholderClearsReference pins the reset affordance: an
 // empty reference sent through the ordinary settings PATCH drops the custom
 // image back to the neutral default on the public snapshot, exactly like
-// clearing logoUrl.
+// clearing faviconUrl.
 func TestResetIdentityPlaceholderClearsReference(t *testing.T) {
 	app := newAerunTestApp(t)
 	defer app.Cleanup()

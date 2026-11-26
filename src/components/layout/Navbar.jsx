@@ -134,13 +134,6 @@ const Navigation = () => {
             )}
           </div>
           <Navbar.Brand as={Link} to="/" onClick={() => setExpanded(false)} className="forum-brand d-flex align-items-center gap-2">
-            {(activeDesign?.logoUrl || settings?.logoUrl) && (
-              <img
-                src={activeDesign?.logoUrl || settings.logoUrl}
-                alt="Logo"
-                className="forum-logo"
-              />
-            )}
             <span className="forum-name">
               {activeDesign?.forumTitle ? activeDesign.forumTitle : (
                 (typeof settings?.forumName === 'object' && settings.forumName !== null)

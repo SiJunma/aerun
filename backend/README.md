@@ -644,8 +644,8 @@ multipart body cannot satisfy the 512 KB envelope), and is safe without it
 because the write is a replace on a single-select `FileField`. The reference can
 also be set or cleared through the ordinary `PATCH /api/aerun/admin/settings`
 (the `deletedAvatar` / `guestAvatar` keys, empty string = reset to default),
-exactly like `logoUrl`. Files are stored with the default `Protected=false`, so a
-guest can load the placeholder the same way they load the logo.
+exactly like `faviconUrl`. Files are stored with the default `Protected=false`, so a
+guest can load the placeholder the same way they load the favicon.
 
 ### Legacy avatar import
 

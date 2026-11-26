@@ -357,7 +357,7 @@ var enforcedInCode = map[string]string{
 var brandingKeys = map[string]bool{
 	"forumName":      true,
 	"welcomeMessage": true,
-	"logoUrl":        true,
+	"faviconUrl":     true,
 	"bgLight":        true,
 	"bgDark":         true,
 	"bgNeutral":      true,

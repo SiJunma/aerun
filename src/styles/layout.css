@@ -48,12 +48,6 @@
   align-items: center;
 }
 
-.forum-logo {
-  height: 32px;
-  width: auto;
-  object-fit: contain;
-}
-
 .forum-name {
   color: var(--forum-name-color);
   font-weight: 600;

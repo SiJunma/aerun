@@ -32,7 +32,7 @@ type SettingsUpsert struct {
 	ForumName      map[string]string
 	WelcomeMessage map[string]string
 	// Text
-	LogoURL          string
+	FaviconURL       string
 	BgLight          string
 	BgDark           string
 	BgNeutral        string
@@ -177,7 +177,7 @@ func applySettingsUpsert(rec *core.Record, u *SettingsUpsert) bool {
 		return true
 	}
 
-	if setText("logo_url", u.LogoURL) {
+	if setText("favicon_url", u.FaviconURL) {
 		changed = true
 	}
 	if setText("bg_light", u.BgLight) {
@@ -364,7 +364,7 @@ func SettingsFromLedger(globalSettings map[string]map[string]any) *SettingsUpser
 		}
 	}
 
-	setString("logoUrl", &u.LogoURL)
+	setString("faviconUrl", &u.FaviconURL)
 	setString("bgLight", &u.BgLight)
 	setString("bgDark", &u.BgDark)
 	setString("bgNeutral", &u.BgNeutral)
@@ -408,7 +408,7 @@ func SettingsFromLedger(globalSettings map[string]map[string]any) *SettingsUpser
 func (u *SettingsUpsert) isEmpty() bool {
 	return u.ForumName == nil &&
 		u.WelcomeMessage == nil &&
-		u.LogoURL == "" &&
+		u.FaviconURL == "" &&
 		u.BgLight == "" &&
 		u.BgDark == "" &&
 		u.BgNeutral == "" &&
@@ -444,8 +444,8 @@ func (u *SettingsUpsert) SortedKeys() []string {
 	if u.WelcomeMessage != nil {
 		keys = append(keys, "welcome_message")
 	}
-	if u.LogoURL != "" {
-		keys = append(keys, "logo_url")
+	if u.FaviconURL != "" {
+		keys = append(keys, "favicon_url")
 	}
 	if u.BgLight != "" {
 		keys = append(keys, "bg_light")

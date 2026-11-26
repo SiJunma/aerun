@@ -3,7 +3,7 @@ import { Row, Col, Form, Button, Table, Badge, Dropdown, Spinner } from 'react-b
 import { useI18n } from '../contexts/I18nProvider';
 import { useSearchParams } from 'react-router-dom';
 import {
-  getGlobalSettings, updateGlobalSettings, uploadIdentityPlaceholder, approveUser, rejectUser, deleteUser, banUser, unbanUser,
+  getGlobalSettings, updateGlobalSettings, uploadIdentityPlaceholder, uploadSettingsFavicon, approveUser, rejectUser, deleteUser, banUser, unbanUser,
   updateUserRole, addRole, updateRole, deleteRole, fetchAdminRoles, fetchAdminUsers, bulkUpdateUsers, bulkDeleteUsers, fetchUsersContentCounts
 } from '../api/admin';
 import { subscribeToAllCategories, addCategory, updateCategory, deleteCategory, subscribeToCategoryGroups, addCategoryGroup, updateCategoryGroup, deleteCategoryGroup, fetchAdminCategories, fetchSecuredCategoryGroups } from '../api/categories';
@@ -46,6 +46,7 @@ import AdminIPModal from '../components/modals/AdminIPModal';
 import BanIPModal from '../components/modals/BanIPModal';
 import '../components/admin/VisitsTab.css';
 import AvatarUploader from '../components/common/AvatarUploader';
+import FaviconUploader from '../components/admin/FaviconUploader';
 import { usePageTitle } from '../contexts/TitleProvider';
 
 // Every permission key the server knows about.
@@ -879,7 +880,7 @@ const AdminPage = () => {
     defaultDesignId: '',
     whitelistMode: true,
     requireApproval: true,
-    logoUrl: '',
+    faviconUrl: '',
     deletedAvatar: '',
     guestAvatar: '',
     bgLight: 'https://images.unsplash.com/photo-1458668383970-8ddd3927deed?q=80&w=1400&auto=format&fit=crop',
@@ -924,7 +925,7 @@ const AdminPage = () => {
           allowGifInPosts: data.allowGifInPosts ?? true,
           allowUserCustomDesign: data.allowUserCustomDesign ?? true,
           defaultDesignId: data.defaultDesignId || '',
-          logoUrl: data.logoUrl || '',
+          faviconUrl: data.faviconUrl || '',
           deletedAvatar: data.deletedAvatar || '',
           guestAvatar: data.guestAvatar || '',
           bgLight: data.bgLight || 'https://images.unsplash.com/photo-1458668383970-8ddd3927deed?q=80&w=1400&auto=format&fit=crop',
@@ -1164,7 +1165,7 @@ const AdminPage = () => {
 
   // Reset a placeholder to the neutral default: an empty reference, sent through
   // the same PATCH the rest of the settings use (an empty string clears it, just
-  // like logoUrl). This only clears the reference — the stored file is left for
+  // like faviconUrl). This only clears the reference — the stored file is left for
   // the schema, harmless and never served once the reference is empty.
   const handleResetPlaceholder = async (kind) => {
     const key = kind === 'guest' ? 'guestAvatar' : 'deletedAvatar';
@@ -1172,6 +1173,29 @@ const AdminPage = () => {
     try {
       await updateGlobalSettings({ [key]: '' }, user.uid);
       setSettings(prev => ({ ...prev, [key]: '' }));
+      showToast(t('admin.settings.success'), 'success');
+    } catch (err) {
+      console.error(err);
+      showToast(t('admin.settings.error'), 'danger');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleUploadFavicon = async (blob, filename) => {
+    const url = await uploadSettingsFavicon(blob, filename);
+    if (url) {
+      setSettings(prev => ({ ...prev, faviconUrl: url }));
+      showToast(t('admin.settings.success'), 'success');
+    }
+    return url;
+  };
+
+  const handleClearFavicon = async () => {
+    setSaving(true);
+    try {
+      await updateGlobalSettings({ faviconUrl: '' }, user.uid);
+      setSettings(prev => ({ ...prev, faviconUrl: '' }));
       showToast(t('admin.settings.success'), 'success');
     } catch (err) {
       console.error(err);
@@ -1940,13 +1964,15 @@ const AdminPage = () => {
 
           <Row>
             <Col md={12}>
-              <Form.Group className="mb-4" controlId="logoUrl">
-                <Form.Label className="fw-bold">{t('admin.settings.logo_url')}</Form.Label>
-                <Form.Control
-                  type="text"
-                  placeholder="https://..."
-                  value={settings.logoUrl}
-                  onChange={(e) => setSettings({ ...settings, logoUrl: e.target.value })}
+              <Form.Group className="mb-4" controlId="faviconUrl">
+                <Form.Label className="fw-bold">{t('admin.settings.favicon_url')}</Form.Label>
+                <FaviconUploader
+                  id="faviconUrl"
+                  value={settings.faviconUrl || ''}
+                  onChange={(url) => setSettings(prev => ({ ...prev, faviconUrl: url }))}
+                  onUpload={handleUploadFavicon}
+                  onClear={handleClearFavicon}
+                  disabled={saving}
                 />
               </Form.Group>
             </Col>

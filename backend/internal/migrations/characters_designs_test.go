@@ -41,7 +41,7 @@ func TestCharactersAndDesignsCollections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("designs collection missing: %v", err)
 	}
-	for _, name := range []string{"name", "css", "js", "forum_title", "is_active", "welcome_message", "created_at", "updated_at"} {
+	for _, name := range []string{"name", "css", "js", "forum_title", "favicon_url", "is_active", "welcome_message", "created_at", "updated_at"} {
 		if designs.Fields.GetByName(name) == nil {
 			t.Errorf("designs.%s is missing", name)
 		}

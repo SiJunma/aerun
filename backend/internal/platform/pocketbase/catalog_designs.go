@@ -19,7 +19,7 @@ func designRecordPayload(r *core.Record) map[string]any {
 		"css":             r.GetString("css"),
 		"js":              r.GetString("js"),
 		"forum_title":     r.GetString("forum_title"),
-		"logo_url":        r.GetString("logo_url"),
+		"favicon_url":     r.GetString("favicon_url"),
 		"is_active":       r.GetBool("is_active"),
 		"show_in_list":    r.GetBool("show_in_list"),
 		"welcome_message": r.Get("welcome_message"),
@@ -72,7 +72,7 @@ type designMutationForm struct {
 	CSS            string `json:"css"`
 	JS             string `json:"js"`
 	ForumTitle     string `json:"forum_title"`
-	LogoURL        string `json:"logo_url"`
+	FaviconURL     string `json:"favicon_url"`
 	IsActive       *bool  `json:"is_active"`
 	ShowInList     *bool  `json:"show_in_list"`
 	WelcomeMessage any    `json:"welcome_message"`
@@ -87,6 +87,13 @@ func createDesignHandler(e *core.RequestEvent) error {
 	raw, err := readBodyLimited(e, 512*1024)
 	if err != nil {
 		return err
+	}
+	var rawMap map[string]any
+	if err := json.Unmarshal(raw, &rawMap); err != nil {
+		return validationError("malformed design payload")
+	}
+	if _, hasLegacyLogo := rawMap["logo_url"]; hasLegacyLogo {
+		return validationError("logo_url is no longer supported; use favicon_url")
 	}
 	var form designMutationForm
 	if err := json.Unmarshal(raw, &form); err != nil {
@@ -111,7 +118,7 @@ func createDesignHandler(e *core.RequestEvent) error {
 		rec.Set("css", form.CSS)
 		rec.Set("js", form.JS)
 		rec.Set("forum_title", form.ForumTitle)
-		rec.Set("logo_url", form.LogoURL)
+		rec.Set("favicon_url", form.FaviconURL)
 		if form.IsActive != nil {
 			rec.Set("is_active", *form.IsActive)
 		}
@@ -157,6 +164,9 @@ func updateDesignHandler(e *core.RequestEvent) error {
 	if err := json.Unmarshal(raw, &form); err != nil {
 		return validationError("malformed design payload")
 	}
+	if _, hasLegacyLogo := form["logo_url"]; hasLegacyLogo {
+		return validationError("logo_url is no longer supported; use favicon_url")
+	}
 
 	now := time.Now()
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
@@ -186,8 +196,8 @@ func updateDesignHandler(e *core.RequestEvent) error {
 		if ftRaw, ok := form["forum_title"]; ok {
 			rec.Set("forum_title", ftRaw)
 		}
-		if logoRaw, ok := form["logo_url"]; ok {
-			rec.Set("logo_url", logoRaw)
+		if faviconRaw, ok := form["favicon_url"]; ok {
+			rec.Set("favicon_url", faviconRaw)
 		}
 		if activeRaw, ok := form["is_active"]; ok {
 			rec.Set("is_active", activeRaw)
