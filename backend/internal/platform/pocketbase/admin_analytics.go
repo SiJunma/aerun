@@ -327,7 +327,7 @@ func adminAnalyticsDashboardHandler(e *core.RequestEvent) error {
 		"top_browsers":    topBrowsers,
 		"top_os":          topOS,
 		"top_entry_paths": topEntryPaths,
-		"geoip_available":  geoipAvailable,
+		"geoip_available": geoipAvailable,
 	})
 }
 
