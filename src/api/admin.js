@@ -3,7 +3,9 @@ import { logAdminAction } from './audit';
 import { DEFAULT_ROLES } from '../constants/permissions';
 
 export const DEFAULT_GLOBAL_SETTINGS = {
-  forumName: { en: 'Aerun Forum', ru: 'Aerun Forum' },
+  forumName: 'Aerun Forum',
+  headerHtml: '',
+  customFooterHtml: '',
   registrationEnabled: true,
   requireApproval: true,
   whitelistMode: false,
@@ -28,12 +30,6 @@ export const DEFAULT_GLOBAL_SETTINGS = {
   // account the same way a signed-in member does.
   deletedAvatar: '',
   guestAvatar: '',
-  bgLight: '',
-  bgDark: '',
-  bgNeutral: '',
-  bgOpacityLight: 0.5,
-  bgOpacityDark: 0.5,
-  bgOpacityNeutral: 0.5
 };
 
 let _settingsCache = null;

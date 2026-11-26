@@ -6,6 +6,7 @@ import { useI18n } from '../../contexts/I18nProvider';
 import { useTheme } from '../../contexts/ThemeProvider';
 import { resolveAvatarUrl } from '../../api/avatars';
 import { useDesign } from '../../contexts/DesignProvider';
+import { resolveField } from '../../utils/text';
 import { Bell, User, LogOut, MessageCircle, Palette, Check, FilePen } from 'lucide-react';
 import { subscribeToDmUnread } from '../../api/dms';
 import { playNotificationSound } from '../../utils/notificationSound';
@@ -15,7 +16,7 @@ const Navigation = () => {
   const { user, profile, settings, logout, unreadTopicsCount, hasPermission, PERMISSIONS, _activeDmConvId, dmUnread: unreadCounts } = useAuth();
   const { t, lang } = useI18n();
   const { theme, changeGuestTheme } = useTheme();
-  const { activeDesign } = useDesign();
+  const { resolvedDesign } = useDesign();
   const navigate = useNavigate();
   const [dmUnread, setDmUnread] = React.useState(0);
   const [expanded, setExpanded] = React.useState(false);
@@ -135,11 +136,7 @@ const Navigation = () => {
           </div>
           <Navbar.Brand as={Link} to="/" onClick={() => setExpanded(false)} className="forum-brand d-flex align-items-center gap-2">
             <span className="forum-name">
-              {activeDesign?.forumTitle ? activeDesign.forumTitle : (
-                (typeof settings?.forumName === 'object' && settings.forumName !== null)
-                  ? (settings.forumName[lang] || settings.forumName.en || 'Aerun Forum')
-                  : (settings?.forumName || 'Aerun Forum')
-              )}
+              {resolvedDesign?.forumTitle || resolveField(settings?.forumName, lang) || 'Aerun Forum'}
             </span>
           </Navbar.Brand>
         </div>

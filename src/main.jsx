@@ -38,15 +38,15 @@ createRoot(document.getElementById('root')).render(
     <BrowserRouter>
       <AuthProvider>
         <I18nProvider>
-          <ThemeProvider>
-            <DesignProvider>
+          <DesignProvider>
+            <ThemeProvider>
               <TitleProvider>
                 <ToastProvider>
                   <App />
                 </ToastProvider>
               </TitleProvider>
-            </DesignProvider>
-          </ThemeProvider>
+            </ThemeProvider>
+          </DesignProvider>
         </I18nProvider>
       </AuthProvider>
     </BrowserRouter>

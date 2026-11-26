@@ -11,7 +11,7 @@ import { toMembersRow, withLegacyDates } from '../api/auth-resources';
 import { resolveAvatarUrl } from '../api/avatars';
 import { identityAvatar } from '../utils/identity';
 import { getAuditLogs } from '../api/audit';
-import { subscribeToDesigns } from '../api/designs';
+import { subscribeToDesigns, subscribeToDefaultDesigns } from '../api/designs';
 import { MAX_ROLE_PERMISSIONS, PERMISSIONS, PERMISSION_LABELS, getRoleVisuals, isChiefAdmin, normalizePermissions, PERMISSION_GROUPS, CHIEF_ADMIN_ID, ADMIN_ROLE_ID, DEFAULT_ROLES, rankOfRole } from '../constants/permissions';
 import TransferRootModal from '../components/modals/TransferRootModal';
 import AuditDetailsModal from '../components/modals/AuditDetailsModal';
@@ -47,6 +47,8 @@ import BanIPModal from '../components/modals/BanIPModal';
 import '../components/admin/VisitsTab.css';
 import AvatarUploader from '../components/common/AvatarUploader';
 import FaviconUploader from '../components/admin/FaviconUploader';
+import CodeEditorField from '../components/admin/CodeEditorField';
+import { validateCode } from '../components/admin/codeValidation';
 import { usePageTitle } from '../contexts/TitleProvider';
 
 // Every permission key the server knows about.
@@ -245,6 +247,11 @@ const AdminPage = () => {
   const isSelfRoot = myRoleId === CHIEF_ADMIN_ID;
   const [userSearch, setUserSearch] = useState('');
   const [designs, setDesigns] = useState([]);
+  const [defaultDesigns, setDefaultDesigns] = useState([]);
+  const [settingsHeaderValid, setSettingsHeaderValid] = useState(null);
+  const handleSettingsHeaderValidity = useCallback((valid) => {
+    setSettingsHeaderValid(valid);
+  }, []);
 
   useEffect(() => {
     setPageTitle(t('admin.title', 'Admin Panel'));
@@ -859,7 +866,9 @@ const AdminPage = () => {
 
   // Initial settings state
   const [settings, setSettings] = useState({
-    forumName: { en: 'Aerun Forum', ru: 'Aerun Forum' },
+    forumName: 'Aerun Forum',
+    headerHtml: '',
+    customFooterHtml: '',
     registrationEnabled: true,
     maxCharsPerPost: 15000,
     postsPerPage: 20,
@@ -869,7 +878,6 @@ const AdminPage = () => {
     maintenanceMode: false,
     showMaintenanceMessage: false,
     maintenanceMessage: { en: '', ru: '' },
-    welcomeMessage: { en: '', ru: '' },
     enableReputation: true,
     reputationStyle: 'both',
     enableCharacters: true,
@@ -883,9 +891,6 @@ const AdminPage = () => {
     faviconUrl: '',
     deletedAvatar: '',
     guestAvatar: '',
-    bgLight: 'https://images.unsplash.com/photo-1458668383970-8ddd3927deed?q=80&w=1400&auto=format&fit=crop',
-    bgDark: 'https://images.unsplash.com/photo-1656077217715-bdaeb06bd01f?q=80&w=1400&auto=format&fit=crop',
-    bgNeutral: 'https://images.unsplash.com/photo-1675636173835-657f72144c77?q=80&w=1400&auto=format&fit=crop'
   });
 
   useEffect(() => {
@@ -902,10 +907,22 @@ const AdminPage = () => {
           return { en: defaultVal, ru: defaultVal };
         };
 
+        // forumName / headerHtml / customFooterHtml are single-variant
+        // strings now; a snapshot that still carries the old {en, ru} shape
+        // resolves to the ru variant (the migration's choice).
+        const asSingleString = (val, defaultVal = '') => {
+          if (typeof val === 'string') return val;
+          if (typeof val === 'object' && val !== null) {
+            return val.ru || val.en || defaultVal;
+          }
+          return defaultVal;
+        };
+
         const migrated = {
           ...data,
-          forumName: ensureBilingual(data.forumName, 'Aerun Forum'),
-          welcomeMessage: ensureBilingual(data.welcomeMessage, ''),
+          forumName: asSingleString(data.forumName, 'Aerun Forum'),
+          headerHtml: asSingleString(data.headerHtml, ''),
+          customFooterHtml: asSingleString(data.customFooterHtml, ''),
           maintenanceMessage: ensureBilingual(data.maintenanceMessage, ''),
           registrationEnabled: data.registrationEnabled ?? true,
           maintenanceMode: data.maintenanceMode ?? false,
@@ -928,9 +945,6 @@ const AdminPage = () => {
           faviconUrl: data.faviconUrl || '',
           deletedAvatar: data.deletedAvatar || '',
           guestAvatar: data.guestAvatar || '',
-          bgLight: data.bgLight || 'https://images.unsplash.com/photo-1458668383970-8ddd3927deed?q=80&w=1400&auto=format&fit=crop',
-          bgDark: data.bgDark || 'https://images.unsplash.com/photo-1656077217715-bdaeb06bd01f?q=80&w=1400&auto=format&fit=crop',
-          bgNeutral: data.bgNeutral || 'https://images.unsplash.com/photo-1675636173835-657f72144c77?q=80&w=1400&auto=format&fit=crop'
         };
         setSettings(migrated);
       }
@@ -1026,12 +1040,17 @@ const AdminPage = () => {
     return () => { alive = false; };
   }, [activeTab, usersPage, usersSearch, usersRefreshNonce]);
 
-  // Designs render on the designs tab, and the Settings tab reads the same
-  // list for the default-design dropdown.
+  // Designs (custom + default cards) render on the designs tab only. The
+  // Settings tab no longer reads the list — the default-design dropdown
+  // moved to surface 1 of the Designs tab.
   useEffect(() => {
-    if (activeTab !== 'designs' && activeTab !== 'settings') return;
+    if (activeTab !== 'designs') return;
     const unsubDesigns = subscribeToDesigns(setDesigns);
-    return () => unsubDesigns();
+    const unsubDefaults = subscribeToDefaultDesigns(setDefaultDesigns);
+    return () => {
+      unsubDesigns();
+      unsubDefaults();
+    };
   }, [activeTab]);
 
   // The editor's role rows, loaded only when the roles tab is open AND this
@@ -1137,6 +1156,10 @@ const AdminPage = () => {
 
   const handleSaveSettings = async (e) => {
     e.preventDefault();
+    if (settingsHeaderValid === false || validateCode('html', settings.headerHtml || '', t)) {
+      showToast(t('admin.designs.validation_save_blocked'), 'danger');
+      return;
+    }
     setSaving(true);
     try {
       await updateGlobalSettings(settings, user.uid);
@@ -1940,23 +1963,13 @@ const AdminPage = () => {
         <Form>
           <h5 className="mb-4 text-primary">{t('admin.settings.general')}</h5>
           <Row>
-            <Col md={6}>
-              <Form.Group className="mb-4" controlId="forumNameEn">
-                <Form.Label className="fw-bold">{t('admin.settings.forum_name')} (EN)</Form.Label>
+            <Col md={12}>
+              <Form.Group className="mb-4" controlId="forumName">
+                <Form.Label className="fw-bold">{t('admin.settings.forum_name')}</Form.Label>
                 <Form.Control
                   type="text"
-                  value={settings.forumName?.en || ''}
-                  onChange={(e) => setSettings({ ...settings, forumName: { ...settings.forumName, en: e.target.value } })}
-                />
-              </Form.Group>
-            </Col>
-            <Col md={6}>
-              <Form.Group className="mb-4" controlId="forumNameRu">
-                <Form.Label className="fw-bold">{t('admin.settings.forum_name')} (RU)</Form.Label>
-                <Form.Control
-                  type="text"
-                  value={settings.forumName?.ru || ''}
-                  onChange={(e) => setSettings({ ...settings, forumName: { ...settings.forumName, ru: e.target.value } })}
+                  value={settings.forumName || ''}
+                  onChange={(e) => setSettings({ ...settings, forumName: e.target.value })}
                 />
               </Form.Group>
             </Col>
@@ -1979,25 +1992,16 @@ const AdminPage = () => {
           </Row>
 
           <Row>
-            <Col md={6}>
-              <Form.Group className="mb-4" controlId="welcomeMsgEn">
-                <Form.Label className="fw-bold">{t('admin.settings.welcome_msg')} (EN)</Form.Label>
-                <Form.Control
-                  as="textarea"
-                  rows={3}
-                  value={settings.welcomeMessage?.en || ''}
-                  onChange={(e) => setSettings({ ...settings, welcomeMessage: { ...settings.welcomeMessage, en: e.target.value } })}
-                />
-              </Form.Group>
-            </Col>
-            <Col md={6}>
-              <Form.Group className="mb-4" controlId="welcomeMsgRu">
-                <Form.Label className="fw-bold">{t('admin.settings.welcome_msg')} (RU)</Form.Label>
-                <Form.Control
-                  as="textarea"
-                  rows={3}
-                  value={settings.welcomeMessage?.ru || ''}
-                  onChange={(e) => setSettings({ ...settings, welcomeMessage: { ...settings.welcomeMessage, ru: e.target.value } })}
+            <Col md={12}>
+              <Form.Group className="mb-4" controlId="headerHtml">
+                <CodeEditorField
+                  id="settings-header"
+                  language="html"
+                  label={t('admin.settings.header_msg')}
+                  value={settings.headerHtml || ''}
+                  onChange={(val) => setSettings({ ...settings, headerHtml: val })}
+                  onValidityChange={handleSettingsHeaderValidity}
+                  minHeight="120px"
                 />
               </Form.Group>
             </Col>
@@ -2067,77 +2071,6 @@ const AdminPage = () => {
               onChange={(e) => setSettings({ ...settings, allowGifInPosts: e.target.checked })}
             />
           </div>
-
-          <hr className="my-5" />
-          <h5 className="mb-4 text-primary">{t('admin.settings.backgrounds')}</h5>
-          <Row>
-            <Col md={12}>
-              <Form.Group className="mb-3">
-                <Form.Label className="fw-bold">{t('admin.settings.bg_light')}</Form.Label>
-                <div className="d-flex align-items-center gap-3">
-                  <Form.Control
-                    type="text"
-                    value={settings.bgLight || ''}
-                    onChange={(e) => setSettings({ ...settings, bgLight: e.target.value })}
-                  />
-                  <div className="d-flex align-items-center gap-2" style={{ minWidth: '220px' }}>
-                    <span className="small text-muted text-nowrap">{t('admin.settings.opacity')}:</span>
-                    <Form.Range
-                      min="0" max="1" step="0.05"
-                      value={settings.bgOpacityLight ?? 0.5}
-                      onChange={(e) => setSettings({ ...settings, bgOpacityLight: parseFloat(e.target.value) })}
-                      style={{ width: '100px' }}
-                    />
-                    <span className="small fw-bold" style={{ width: '40px', textAlign: 'right' }}>{Math.round((settings.bgOpacityLight ?? 0.5) * 100)}%</span>
-                  </div>
-                </div>
-              </Form.Group>
-            </Col>
-            <Col md={12}>
-              <Form.Group className="mb-3">
-                <Form.Label className="fw-bold">{t('admin.settings.bg_dark')}</Form.Label>
-                <div className="d-flex align-items-center gap-3">
-                  <Form.Control
-                    type="text"
-                    value={settings.bgDark || ''}
-                    onChange={(e) => setSettings({ ...settings, bgDark: e.target.value })}
-                  />
-                  <div className="d-flex align-items-center gap-2" style={{ minWidth: '220px' }}>
-                    <span className="small text-muted text-nowrap">{t('admin.settings.opacity')}:</span>
-                    <Form.Range
-                      min="0" max="1" step="0.05"
-                      value={settings.bgOpacityDark ?? 0.5}
-                      onChange={(e) => setSettings({ ...settings, bgOpacityDark: parseFloat(e.target.value) })}
-                      style={{ width: '100px' }}
-                    />
-                    <span className="small fw-bold" style={{ width: '40px', textAlign: 'right' }}>{Math.round((settings.bgOpacityDark ?? 0.5) * 100)}%</span>
-                  </div>
-                </div>
-              </Form.Group>
-            </Col>
-            <Col md={12}>
-              <Form.Group className="mb-3">
-                <Form.Label className="fw-bold">{t('admin.settings.bg_neutral')}</Form.Label>
-                <div className="d-flex align-items-center gap-3">
-                  <Form.Control
-                    type="text"
-                    value={settings.bgNeutral || ''}
-                    onChange={(e) => setSettings({ ...settings, bgNeutral: e.target.value })}
-                  />
-                  <div className="d-flex align-items-center gap-2" style={{ minWidth: '220px' }}>
-                    <span className="small text-muted text-nowrap">{t('admin.settings.opacity')}:</span>
-                    <Form.Range
-                      min="0" max="1" step="0.05"
-                      value={settings.bgOpacityNeutral ?? 0.5}
-                      onChange={(e) => setSettings({ ...settings, bgOpacityNeutral: parseFloat(e.target.value) })}
-                      style={{ width: '100px' }}
-                    />
-                    <span className="small fw-bold" style={{ width: '40px', textAlign: 'right' }}>{Math.round((settings.bgOpacityNeutral ?? 0.5) * 100)}%</span>
-                  </div>
-                </div>
-              </Form.Group>
-            </Col>
-          </Row>
 
           <hr className="my-5" />
           <h5 className="mb-4 text-primary">{t('admin.settings.identity_placeholders')}</h5>
@@ -2367,50 +2300,11 @@ const AdminPage = () => {
             )}
           </div>
 
-          <hr className="my-5" />
-          <h5 className="mb-4 text-primary">{t('admin.settings.design_section')}</h5>
-          <div className="ms-2">
-            <Form.Check
-              type="switch"
-              id="custom-design-switch"
-              label={t('admin.settings.allow_user_custom_design')}
-              className="mb-3 fw-bold"
-              checked={settings.allowUserCustomDesign ?? true}
-              onChange={(e) => setSettings({ ...settings, allowUserCustomDesign: e.target.checked })}
-            />
-            <div className="small text-muted mb-4 opacity-75">
-              {t('admin.settings.allow_user_custom_design_help')}
-            </div>
-            <Form.Group className="mb-4" controlId="defaultDesignId" style={{ maxWidth: '400px' }}>
-              <Form.Label className="fw-bold">{t('admin.settings.default_design')}</Form.Label>
-              <Form.Select
-                value={settings.defaultDesignId || 'dark'}
-                onChange={(e) => setSettings({ ...settings, defaultDesignId: e.target.value })}
-              >
-                <optgroup label={t('admin.settings.default_design_builtin') || 'Built-in Themes'}>
-                  <option value="dark">{t('profile.theme_dark') || 'Dark'}</option>
-                  <option value="light">{t('profile.theme_light') || 'Light'}</option>
-                  <option value="neutral">{t('profile.theme_neutral') || 'Neutral'}</option>
-                </optgroup>
-                {designs.filter(d => d.isActive).length > 0 && (
-                  <optgroup label={t('admin.settings.default_design_custom') || 'Custom Designs'}>
-                    {designs.filter(d => d.isActive).map(d => (
-                      <option key={d.id} value={d.id}>{d.name}</option>
-                    ))}
-                  </optgroup>
-                )}
-              </Form.Select>
-              <div className="small text-muted mt-1 opacity-75">
-                {t('admin.settings.default_design_help')}
-              </div>
-            </Form.Group>
-          </div>
-
           <Button
             variant="primary"
             className="px-5"
             onClick={handleSaveSettings}
-            disabled={saving}
+            disabled={saving || settingsHeaderValid === false}
           >
             {saving ? t('admin.settings.saving') : t('admin.settings.save_btn')}
           </Button>
@@ -2421,7 +2315,7 @@ const AdminPage = () => {
     <AdminSecretsSettings />
 
     <EmailTemplatesSettings
-      forumName={settings.forumName?.[currentLang] || settings.forumName?.en || 'Aerun'}
+      forumName={settings.forumName || 'Aerun'}
     />
   </div>
 );
@@ -3310,7 +3204,9 @@ const AdminPage = () => {
           {activeTab === 'designs' && hasPermission(PERMISSIONS.MANAGE_DESIGNS) && (
             <DesignsTab
               designs={designs}
+              defaultDesigns={defaultDesigns}
               settings={settings}
+              setSettings={setSettings}
               updateSettings={(newSettings) => updateGlobalSettings(newSettings, user.uid)}
               userId={user.uid}
             />

@@ -122,7 +122,7 @@ func TestUpdateGlobalSettingsAdminSavesAndSyncsBrand(t *testing.T) {
 	ts := newTestServer(t, app)
 	defer ts.Close()
 
-	payload := `{"forumName":{"en":"Dragon Realm","ru":"Мир Драконов"},"topicsPerPage":35,"postsPerPage":40}`
+	payload := `{"forumName":"Мир Драконов","headerHtml":"<p>Привет!</p>","customFooterHtml":"<p>Футер</p>","topicsPerPage":35,"postsPerPage":40}`
 	status, body, _ := categoryCall(t, http.MethodPatch, ts.URL+"/api/aerun/admin/settings", payload, tokens["root"], "test-idem-settings-admin")
 	if status != http.StatusOK {
 		t.Fatalf("admin edit must succeed, got %d: %s", status, body)
@@ -150,15 +150,32 @@ func TestUpdateGlobalSettingsAdminSavesAndSyncsBrand(t *testing.T) {
 		t.Fatalf("expected topics_per_page=35 in db, got %d", got)
 	}
 
-	// Verify the response carries the new forum name: the handler reads back
-	// the stored snapshot and returns it, so a divergence here means the write
-	// did not reach the row the snapshot reads from.
+	// Verify the response carries the new forum name as a plain string: the
+	// handler reads back the stored snapshot and returns it, so a divergence
+	// here means the write did not reach the row the snapshot reads from.
 	rawName, ok := resp.Settings["forumName"]
 	if !ok {
 		t.Fatal("response must contain forumName")
 	}
-	if nameMap, ok := rawName.(map[string]any); !ok || nameMap["en"] != "Dragon Realm" {
-		t.Fatalf("expected forumName.en=Dragon Realm, got %v", rawName)
+	if rawName != "Мир Драконов" {
+		t.Fatalf("expected forumName=%q (plain string), got %v", "Мир Драконов", rawName)
+	}
+	if resp.Settings["headerHtml"] != "<p>Привет!</p>" {
+		t.Fatalf("expected headerHtml=%q, got %v", "<p>Привет!</p>", resp.Settings["headerHtml"])
+	}
+	if resp.Settings["customFooterHtml"] != "<p>Футер</p>" {
+		t.Fatalf("expected customFooterHtml=%q, got %v", "<p>Футер</p>", resp.Settings["customFooterHtml"])
+	}
+	// The surfaces rework removed the bilingual banner and the per-theme
+	// backgrounds from the snapshot entirely.
+	for _, removed := range []string{"welcomeMessage", "bgLight", "bgDark", "bgNeutral", "bgOpacityLight", "bgOpacityDark", "bgOpacityNeutral"} {
+		if _, ok := resp.Settings[removed]; ok {
+			t.Fatalf("settings must not contain %q", removed)
+		}
+	}
+	// ... and the row must hold the plain string, not a bilingual map.
+	if got := reloaded.GetString("forum_name"); got != "Мир Драконов" {
+		t.Fatalf("expected forum_name=%q in db, got %q", "Мир Драконов", got)
 	}
 }
 

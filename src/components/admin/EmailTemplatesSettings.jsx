@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Card, Form, Button, Badge, Alert, Spinner } from 'react-bootstrap';
 import { Mail, Eye, Send, RotateCcw, Save, AlertCircle, CheckCircle2, Code } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
@@ -6,6 +6,7 @@ import { useToast } from '../../contexts/ToastProvider';
 import { fetchEmailTemplates, updateEmailWrapper, sendTestEmail } from '../../api/admin';
 import ForumModal from '../common/ForumModal';
 import ConfirmModal from '../common/ConfirmModal';
+import { HtmlEditorField } from './CodeEditorField';
 
 const EmailTemplatesSettings = ({ forumName }) => {
   const { t } = useI18n();
@@ -20,8 +21,12 @@ const EmailTemplatesSettings = ({ forumName }) => {
   const [showPreview, setShowPreview] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [fetchError, setFetchError] = useState(null);
-
-  const textareaRef = useRef(null);
+  // null until the field reports: a template that was never edited is
+  // treated as valid, an HTML error blocks Save like a missing {CONTENT}.
+  const [htmlValid, setHtmlValid] = useState(null);
+  const handleHtmlValidity = useCallback((valid) => {
+    setHtmlValid(valid);
+  }, []);
 
   const loadTemplates = async () => {
     try {
@@ -45,43 +50,19 @@ const EmailTemplatesSettings = ({ forumName }) => {
 
   const hasContentTag = wrapper.includes('{CONTENT}');
 
+  // The editor is CodeMirror now, not a textarea: there is no caret to
+  // restore, so a placeholder tag is appended at the end of the wrapper.
   const insertPlaceholder = (tag) => {
-    const el = textareaRef.current;
-    if (!el) {
-      setWrapper((prev) => prev + tag);
-      return;
-    }
-    const start = el.selectionStart ?? wrapper.length;
-    const end = el.selectionEnd ?? wrapper.length;
-    const scrollTop = el.scrollTop;
-    const scrollLeft = el.scrollLeft;
-    const current = wrapper ?? el.value;
-    const nextVal = current.substring(0, start) + tag + current.substring(end);
-    const caret = start + tag.length;
-    setWrapper(nextVal);
-    // Restore caret + scroll after React re-renders the controlled textarea.
-    // focus({ preventScroll: true }) avoids scrolling the editor/page to top.
-    requestAnimationFrame(() => {
-      const node = textareaRef.current;
-      if (!node) return;
-      try {
-        node.focus({ preventScroll: true });
-      } catch {
-        node.focus();
-      }
-      try {
-        node.setSelectionRange(caret, caret);
-      } catch {
-        // ignore — some browsers throw if element is not focusable yet
-      }
-      node.scrollTop = scrollTop;
-      node.scrollLeft = scrollLeft;
-    });
+    setWrapper((prev) => (prev || '') + tag);
   };
 
   const handleSave = async () => {
     if (!hasContentTag) {
       showToast(t('admin.email_templates.content_required_error'), 'warning');
+      return;
+    }
+    if (htmlValid === false) {
+      showToast(t('admin.designs.validation_save_blocked'), 'warning');
       return;
     }
     try {
@@ -225,20 +206,17 @@ const EmailTemplatesSettings = ({ forumName }) => {
           </div>
         </div>
 
-        {/* Editor */}
+        {/* Editor — HtmlEditorField (CodeMirror + HTML validation). Go
+            directives ({{ .Content }}, {{ .Token }}) are plain text to the
+            validator and pass it; the {CONTENT} tag check stays separate. */}
         <Form.Group className="mb-3" controlId="emailWrapperEditor">
-          <Form.Label className="fw-bold small text-muted text-uppercase mb-1">
-            {t('admin.email_templates.wrapper_label')}
-          </Form.Label>
-          <Form.Control
-            ref={textareaRef}
-            as="textarea"
-            rows={14}
+          <HtmlEditorField
+            id="emailWrapperEditor"
+            label={t('admin.email_templates.wrapper_label')}
             value={wrapper}
-            onChange={(e) => setWrapper(e.target.value)}
-            className="font-monospace"
-            style={{ fontSize: '13px', lineHeight: '1.45', tabSize: 2 }}
-            isInvalid={!hasContentTag}
+            onChange={(val) => setWrapper(val)}
+            onValidityChange={handleHtmlValidity}
+            minHeight="280px"
           />
           {!hasContentTag && (
             <Form.Control.Feedback type="invalid" className="d-block mt-2">
@@ -296,7 +274,7 @@ const EmailTemplatesSettings = ({ forumName }) => {
           <Button
             variant="primary"
             onClick={handleSave}
-            disabled={saving || !hasContentTag}
+            disabled={saving || !hasContentTag || htmlValid === false}
             className="d-flex align-items-center gap-1 px-4"
           >
             {saving ? (

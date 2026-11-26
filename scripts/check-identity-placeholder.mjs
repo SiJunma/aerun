@@ -13,6 +13,13 @@
 // placeholder, renders correctly in review and behaves as if the setting did not
 // exist — the admin uploads an image and the forum keeps showing the gray "U".
 //
+// Since the Designs Tab surfaces rework, the placeholder a render site passes
+// is the RESOLVED one (resolvedDesign.placeholderDeleted / .placeholderGuest
+// from resolveActiveDesign: the active card's own image when its overwrite
+// toggle is on, otherwise the surface-1 settings value) — never
+// settings.deletedAvatar / settings.guestAvatar directly, which would bypass
+// the card override.
+//
 // Run: node scripts/check-identity-placeholder.mjs
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -50,9 +57,9 @@ check(
   'ForumAuthorAvatar must resolve the placeholder through identityAvatar, not an inline ui-avatars URL'
 );
 check(
-  /customPlaceholder:\s*settings\?\.deletedAvatar/.test(forumAuthorAvatar),
-  'ForumAuthorAvatar must pass customPlaceholder: settings.deletedAvatar — a deleted author is the ' +
-    'removed-identity case the custom image is for'
+  /customPlaceholder:\s*resolvedDesign\?\.placeholderDeleted/.test(forumAuthorAvatar),
+  'ForumAuthorAvatar must pass customPlaceholder: resolvedDesign.placeholderDeleted — the resolved ' +
+    'placeholder (active card override, else surface-1 settings) is the removed-identity case'
 );
 
 // ── The DM surfaces resolve through the helper too ──────────────────────────
@@ -61,9 +68,9 @@ check(
   'DirectMessages must resolve placeholder avatars through identityAvatar (inbox row, header, bubble)'
 );
 check(
-  /customPlaceholder:\s*settings\?\.deletedAvatar/.test(directMessages),
-  'DirectMessages must pass customPlaceholder: settings.deletedAvatar so a removed peer draws the ' +
-    'admin image, not the gray "U"'
+  /customPlaceholder:\s*resolvedDesign\?\.placeholderDeleted/.test(directMessages),
+  'DirectMessages must pass customPlaceholder: resolvedDesign.placeholderDeleted so a removed peer draws ' +
+    'the resolved admin image, not the gray "U"'
 );
 
 // ── No inline ui-avatars left in the surfaces the helper owns ────────────────

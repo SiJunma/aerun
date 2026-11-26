@@ -39,8 +39,6 @@ body {
    --danger-border: #f5c2c7;
    --forum-footer-text: var(--secondary-color);
    --forum-footer-border: var(--footer-border);
-   --forum-announcement-bg: var(--card-bg);
-   --forum-announcement-border: var(--border-color);
    --forum-status-maintenance-bg: #dc3545;
    --forum-status-maintenance-text: #ffffff;
 

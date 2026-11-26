@@ -43,11 +43,6 @@ const (
 	// 2 MB cap (AvatarUploader) and sits well under the 5 MB FileField limit, so
 	// an oversized request is refused before it is buffered rather than after.
 	avatarUploadMaxBytes int64 = 2 << 20
-	// avatarUploadMaxBodyBytes is the ceiling for the whole request body. The
-	// multipart envelope (boundary lines, part headers, the trailing boundary)
-	// adds a few hundred bytes over the file itself, so the body cap carries
-	// headroom and the exact file limit is enforced on the parsed part.
-	avatarUploadMaxBodyBytes = avatarUploadMaxBytes + 16*1024
 )
 
 // uploadMyAvatarHandler stores a new avatar for the caller's own account and
@@ -140,14 +135,23 @@ func readAvatarUpload(e *core.RequestEvent) ([]byte, error) {
 }
 
 // readImageUpload extracts and bounds a multipart "file" upload labeled by
-// `kindLabel` (e.g. "avatar" or "favicon").
+// `kindLabel` (e.g. "avatar" or "favicon"), capped at the avatar ceiling.
 func readImageUpload(e *core.RequestEvent, kindLabel string) ([]byte, error) {
-	if e.Request.ContentLength > avatarUploadMaxBodyBytes {
+	return readImageUploadMax(e, kindLabel, avatarUploadMaxBytes)
+}
+
+// readImageUploadMax is readImageUpload with an explicit per-file ceiling, for
+// uploads whose limit is not the avatar's 2 MB — card backgrounds allow
+// 10 MB. The body ceiling stays 16 KB above the file ceiling, and the exact
+// file limit is enforced on the parsed part, exactly as readImageUpload does.
+func readImageUploadMax(e *core.RequestEvent, kindLabel string, maxFileBytes int64) ([]byte, error) {
+	maxBodyBytes := maxFileBytes + 16*1024
+	if e.Request.ContentLength > maxBodyBytes {
 		return nil, validationError(kindLabel + " exceeds the maximum allowed size")
 	}
 
-	e.Request.Body = http.MaxBytesReader(e.Response, e.Request.Body, avatarUploadMaxBodyBytes)
-	if err := e.Request.ParseMultipartForm(avatarUploadMaxBodyBytes); err != nil {
+	e.Request.Body = http.MaxBytesReader(e.Response, e.Request.Body, maxBodyBytes)
+	if err := e.Request.ParseMultipartForm(maxBodyBytes); err != nil {
 		// Distinguish "too big" from "not multipart": a body that hit the
 		// reader cap is a size problem, and saying otherwise sends the user
 		// hunting a content-type bug they do not have.
@@ -165,13 +169,13 @@ func readImageUpload(e *core.RequestEvent, kindLabel string) ([]byte, error) {
 	}
 	defer src.Close()
 
-	if header.Size > avatarUploadMaxBytes {
+	if header.Size > maxFileBytes {
 		return nil, validationError(kindLabel + " exceeds the maximum allowed size")
 	}
 
 	// One byte over the limit is read so a body that only reveals its true
 	// size at the end is caught here rather than silently truncated.
-	data, err := io.ReadAll(io.LimitReader(src, avatarUploadMaxBytes+1))
+	data, err := io.ReadAll(io.LimitReader(src, maxFileBytes+1))
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
@@ -179,7 +183,7 @@ func readImageUpload(e *core.RequestEvent, kindLabel string) ([]byte, error) {
 		}
 		return nil, validationError("the uploaded " + kindLabel + " could not be read")
 	}
-	if int64(len(data)) > avatarUploadMaxBytes {
+	if int64(len(data)) > maxFileBytes {
 		return nil, validationError(kindLabel + " exceeds the maximum allowed size")
 	}
 	if len(data) == 0 {

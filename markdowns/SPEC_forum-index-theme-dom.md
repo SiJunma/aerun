@@ -78,7 +78,7 @@
     │   ├── #forum-title
     │   ├── #forum-nav
     │   ├── #forum-user-links
-    │   ├── #forum-announcement        (optional)
+    │   ├── #forum-banner        (optional)
     │   └── #forum-status
     │
     ├── #forum-breadcrumbs-top
@@ -191,16 +191,16 @@
 
 ---
 
-# 7. Announcement
+# 7. Header banner
 
-## `#forum-announcement`
+## `#forum-banner`
 
-Необязательный блок объявления.
+Необязательный блок хедера форума (HTML из настроек/карточки дизайна).
 
-Если на странице есть объявление:
+Если на странице есть хедер:
 
 ```html
-<div id="forum-announcement">
+<div id="forum-banner">
     ...
 </div>
 ```
@@ -717,7 +717,7 @@ ForumIndex
 #forum-title
 #forum-nav
 #forum-user-links
-#forum-announcement
+#forum-banner
 #forum-status
 #forum-breadcrumbs-top
 #forum-main

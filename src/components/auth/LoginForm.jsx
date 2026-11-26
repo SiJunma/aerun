@@ -3,6 +3,7 @@ import { Button, Form, Spinner, Alert } from 'react-bootstrap';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
 import { describeAuthError } from '../../utils/auth-errors';
+import { resolveField } from '../../utils/text';
 import { makeStorageKey } from '../../utils/storageScope';
 
 const LoginForm = ({ onSuccess, onForgotPassword }) => {
@@ -74,9 +75,7 @@ const LoginForm = ({ onSuccess, onForgotPassword }) => {
   return (
     <div className="text-center">
       <h2 className="mb-4">
-        {(typeof settings?.forumName === 'object' && settings.forumName !== null)
-          ? (settings.forumName[lang] || settings.forumName.en || t('auth.login_title'))
-          : (settings?.forumName || t('auth.login_title'))}
+        {resolveField(settings?.forumName, lang) || t('auth.login_title')}
       </h2>
       <p className="text-muted mb-4">
         {settings?.whitelistMode === false

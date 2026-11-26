@@ -3,6 +3,7 @@ import { Button, Form, Spinner, Alert } from 'react-bootstrap';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
 import { describeAuthError } from '../../utils/auth-errors';
+import { resolveField } from '../../utils/text';
 import { checkNicknameExists } from '../../api/forum';
 import { getGlobalSettings } from '../../api/admin';
 import { makeStorageKey } from '../../utils/storageScope';
@@ -159,16 +160,12 @@ const RegisterForm = ({ onSuccess }) => {
     );
   }
 
-  const forumName = (typeof settings?.forumName === 'object' && settings.forumName !== null)
-    ? (settings.forumName[lang] || settings.forumName.en || 'Aerun Forum')
-    : (settings?.forumName || 'Aerun Forum');
+  const forumName = resolveField(settings?.forumName, lang) || 'Aerun Forum';
 
   return (
     <div className="text-center">
       <h2 className="mb-4">
-        {(typeof settings?.forumName === 'object' && settings.forumName !== null)
-          ? (settings.forumName[lang] || settings.forumName.en || t('auth.register_title'))
-          : (settings?.forumName || t('auth.register_title'))}
+        {resolveField(settings?.forumName, lang) || t('auth.register_title')}
       </h2>
       <p className="text-muted mb-4">{t('auth.register_subtitle', { name: forumName })}</p>
 

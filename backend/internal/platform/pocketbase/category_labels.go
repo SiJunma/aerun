@@ -137,6 +137,13 @@ func labelPair(rec *core.Record, i18nField, legacyField string) (string, string)
 	return en, ru
 }
 
+// bilingual is the {en, ru} shape the label payloads use. Kept as a map
+// rather than a struct because the client sends and receives it that way and
+// the languages are not a closed set. (Forum branding no longer uses it: the
+// forum name and header are plain single-variant strings since the surfaces
+// rework.)
+type bilingual map[string]any
+
 // labelFromRecord builds the {en, ru} payload value for one label.
 func labelFromRecord(rec *core.Record, i18nField, legacyField string) bilingual {
 	en, ru := labelPair(rec, i18nField, legacyField)
@@ -158,10 +165,10 @@ func applyLabel(rec *core.Record, i18nField, legacyField, en, ru string) {
 // decodeLabelPair unwraps a stored JSON label into its two languages.
 //
 // PocketBase surfaces a saved JSONField as types.JSONRaw rather than a map —
-// the same trap readBilingual documents for forum_name: without the raw cases a
-// label written through the admin panel would read back empty. A plain string
-// (nobody should write one, but a hand-edited dump might) is treated as both
-// languages rather than dropped.
+// the same trap the forum-name reader (readPlainString in global_settings.go)
+// documents: without the raw cases a label written through the admin panel
+// would read back empty. A plain string (nobody should write one, but a
+// hand-edited dump might) is treated as both languages rather than dropped.
 func decodeLabelPair(raw any) (string, string) {
 	var payload []byte
 	switch v := raw.(type) {
@@ -193,7 +200,8 @@ func decodeLabelPair(raw any) (string, string) {
 
 // labelLeaf pulls a string out of a decoded JSON object; a non-string leaf
 // (nested object, number) reads as "" rather than poisoning the payload with
-// "[object Object]" — the same rule normalizeBilingual applies to forum_name.
+// "[object Object]" — the same rule the old bilingual forum-name normaliser
+// applied before the name became a plain string.
 func labelLeaf(decoded map[string]any, key string) string {
 	value, _ := decoded[key].(string)
 	return strings.TrimSpace(value)

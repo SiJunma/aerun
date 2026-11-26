@@ -1,4 +1,4 @@
-// Syntax validation helpers for custom design HTML (welcomeMessage), CSS, and JS.
+// Syntax validation helpers for custom design HTML (headerHtml), CSS, and JS.
 // Pure JS (no heavy parser bundles) so save-time validation runs synchronously
 // while CodeMirror + js-beautify stay lazy-loaded inside CodeEditor.jsx.
 

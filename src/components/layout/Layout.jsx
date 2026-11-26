@@ -9,30 +9,28 @@ import { useLocation, Link } from 'react-router-dom';
 import ConnectionStatusBanner from '../common/ConnectionStatusBanner';
 import EmailVerificationBanner from '../common/EmailVerificationBanner';
 import ScrollButtons from '../common/ScrollButtons';
-import { sanitizeHtml } from '../../utils/text';
+import { sanitizeHtml, resolveField } from '../../utils/text';
 
 const Layout = ({ children }) => {
   const { settings, PERMISSIONS } = useAuth();
   const { lang, t } = useI18n();
-  const { activeDesign } = useDesign();
+  const { resolvedDesign } = useDesign();
   const location = useLocation();
   const isAdminRoute = location.pathname.startsWith('/admin');
 
-  const sanitizedBanner = useMemo(() => {
-    let rawHtml = '';
+  const sanitizedHeader = useMemo(() => {
+    return sanitizeHtml(resolvedDesign?.headerHtml || '') || null;
+  }, [resolvedDesign?.headerHtml]);
 
-    if (activeDesign?.welcomeMessage) {
-      rawHtml = activeDesign.welcomeMessage;
-    } else if (settings?.welcomeMessage) {
-      if (typeof settings.welcomeMessage === 'object' && settings.welcomeMessage !== null) {
-        rawHtml = settings.welcomeMessage[lang] || settings.welcomeMessage.en || '';
-      } else {
-        rawHtml = settings.welcomeMessage;
-      }
-    }
+  const sanitizedFooter = useMemo(() => {
+    return sanitizeHtml(resolvedDesign?.footerHtml || '') || null;
+  }, [resolvedDesign?.footerHtml]);
 
-    return sanitizeHtml(rawHtml) || null;
-  }, [settings?.welcomeMessage, activeDesign?.welcomeMessage, lang]);
+  // forumName is a plain string now; resolveField keeps the defensive
+  // object fallback for a snapshot that still carries the old {en, ru} shape.
+  const forumTitle = resolvedDesign?.forumTitle
+    || resolveField(settings?.forumName, lang)
+    || 'Aerun Forum';
 
   return (
     <div id="forum-wrapper" className="forum-wrapper">
@@ -52,9 +50,9 @@ const Layout = ({ children }) => {
           )}
 
           <EmailVerificationBanner />
-          
-          {sanitizedBanner && location.pathname === '/' && (
-            <div id="forum-announcement" className="forum-announcement" dangerouslySetInnerHTML={{ __html: sanitizedBanner }} />
+
+          {sanitizedHeader && location.pathname === '/' && (
+            <div id="forum-banner" className="forum-banner" dangerouslySetInnerHTML={{ __html: sanitizedHeader }} />
           )}
 
           {isAdminRoute ? (
@@ -74,14 +72,11 @@ const Layout = ({ children }) => {
         {!isAdminRoute && (
           <footer id="forum-about" className="forum-about footer-custom py-2 text-center">
             <Container>
+              {sanitizedFooter && (
+                <div className="forum-custom-footer" dangerouslySetInnerHTML={{ __html: sanitizedFooter }} />
+              )}
               <p className="mb-0 small">
-                &copy; {new Date().getFullYear()} {
-                  activeDesign?.forumTitle ? activeDesign.forumTitle : (
-                    (typeof settings?.forumName === 'object' && settings.forumName !== null)
-                      ? (settings.forumName[lang] || settings.forumName.en || 'Aerun Forum')
-                      : (settings?.forumName || 'Aerun Forum')
-                  )
-                }
+                &copy; {new Date().getFullYear()} {forumTitle}
               </p>
             </Container>
           </footer>

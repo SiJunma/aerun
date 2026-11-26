@@ -18,7 +18,7 @@ import { resolveField } from '../utils/text';
 import ForumModal from '../components/common/ForumModal';
 import AvatarUploader from '../components/common/AvatarUploader';
 import { voteOnProfile, fetchReputationLogs, getProfileVote, deleteReputation, updateReputationComment } from '../api/reputation';
-import { subscribeToDesigns } from '../api/designs';
+import { subscribeToDesigns, subscribeToDefaultDesigns } from '../api/designs';
 import { resolveAvatarUrl, uploadMyAvatar } from '../api/avatars';
 import ErrorCard from '../components/common/ErrorCard';
 import Timestamp from '../components/common/Timestamp';
@@ -175,10 +175,31 @@ const ProfilePage = () => {
   const [repValue, setRepValue] = useState(1);
 
   const [designs, setDesigns] = useState([]);
+  const [defaultDesigns, setDefaultDesigns] = useState([]);
 
   useEffect(() => {
-    return subscribeToDesigns(setDesigns);
+    const unsubDesigns = subscribeToDesigns(setDesigns);
+    const unsubDefaults = subscribeToDefaultDesigns(setDefaultDesigns);
+    return () => {
+      unsubDesigns();
+      unsubDefaults();
+    };
   }, []);
+
+  // Built-in theme names come from the default-design cards and can change;
+  // the dictionary label is the fallback while the cards are loading. A card
+  // hidden from the list (showInList false) is hidden from the picker too —
+  // unless the cards have not loaded yet, in which case all three show.
+  const defaultDesignCard = (key) => defaultDesigns.find((d) => d.key === key);
+  const builtinThemeLabel = (key) => {
+    const dictKey = key === 'light' ? 'profile.theme_light' : key === 'dark' ? 'profile.theme_dark' : 'profile.theme_neutral';
+    return defaultDesignCard(key)?.name || t(dictKey);
+  };
+  const builtinThemeVisible = (key) => {
+    if (defaultDesigns.length === 0) return true;
+    const card = defaultDesignCard(key);
+    return !card || card.showInList;
+  };
 
   const [submittingRep, setSubmittingRep] = useState(false);
   const [repLogs, setRepLogs] = useState([]);
@@ -1913,30 +1934,21 @@ const ProfilePage = () => {
                                 variant="outline-management" 
                                 className="w-100 d-flex justify-content-between align-items-center custom-select-toggle"
                               >
-                                {accountFormData.theme === 'light' ? t('profile.theme_light') : 
-                                 accountFormData.theme === 'dark' ? t('profile.theme_dark') : 
-                                 accountFormData.theme === 'neutral' ? t('profile.theme_neutral') :
+                                {accountFormData.theme === 'light' ? builtinThemeLabel('light') :
+                                 accountFormData.theme === 'dark' ? builtinThemeLabel('dark') :
+                                 accountFormData.theme === 'neutral' ? builtinThemeLabel('neutral') :
                                  designs.find(d => d.id === accountFormData.theme)?.name || accountFormData.theme || t('profile.theme_dark')}
                               </Dropdown.Toggle>
                               <Dropdown.Menu className="w-100 custom-select-menu shadow-sm">
-                                <Dropdown.Item 
-                                  active={accountFormData.theme === 'light'}
-                                  onClick={() => setAccountFormData({ ...accountFormData, theme: 'light' })}
-                                >
-                                  {t('profile.theme_light')}
-                                </Dropdown.Item>
-                                <Dropdown.Item 
-                                  active={accountFormData.theme === 'dark'}
-                                  onClick={() => setAccountFormData({ ...accountFormData, theme: 'dark' })}
-                                >
-                                  {t('profile.theme_dark')}
-                                </Dropdown.Item>
-                                <Dropdown.Item 
-                                  active={accountFormData.theme === 'neutral'}
-                                  onClick={() => setAccountFormData({ ...accountFormData, theme: 'neutral' })}
-                                >
-                                  {t('profile.theme_neutral')}
-                                </Dropdown.Item>
+                                {['light', 'dark', 'neutral'].filter(builtinThemeVisible).map((key) => (
+                                  <Dropdown.Item
+                                    key={key}
+                                    active={accountFormData.theme === key}
+                                    onClick={() => setAccountFormData({ ...accountFormData, theme: key })}
+                                  >
+                                    {builtinThemeLabel(key)}
+                                  </Dropdown.Item>
+                                ))}
                                 {settings?.allowUserCustomDesign && designs.filter(d => d.isActive && d.showInList).length > 0 && (
                                   <>
                                     <Dropdown.Divider />

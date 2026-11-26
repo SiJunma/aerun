@@ -105,7 +105,7 @@ export const TitleProvider = ({ children }) => {
   const [pageTitle, setPageTitle] = useState('');
   const { user, profile, settings, hasPermission, PERMISSIONS } = useAuth();
   const { lang } = useI18n();
-  const { activeDesign } = useDesign();
+  const { activeDesign, resolvedDesign } = useDesign();
 
   // Real-time unread notifications and DMs subscription for browser tab title badge.
   //
@@ -205,16 +205,12 @@ export const TitleProvider = ({ children }) => {
   }, [user?.uid, profile?.status, hasPermission, PERMISSIONS?.USE_DIRECT_MESSAGES]);
 
   useEffect(() => {
-    let baseName = 'Forum';
-    if (activeDesign?.forumTitle) {
-      baseName = activeDesign.forumTitle;
-    } else {
-      const rawName = settings?.forumName;
-      baseName =
-        (typeof rawName === 'object' && rawName !== null)
-          ? (rawName[lang] || rawName.ru || rawName.en || 'Forum')
-          : (rawName || 'Forum');
-    }
+    // forumName is a plain string now; resolveField keeps the defensive
+    // object fallback for a snapshot that still carries the old {en, ru} shape.
+    const baseName = resolvedDesign?.forumTitle
+      || (typeof settings?.forumName === 'object' && settings?.forumName !== null
+        ? (settings.forumName[lang] || settings.forumName.ru || settings.forumName.en || 'Forum')
+        : (settings?.forumName || 'Forum'));
 
     const titleParts = [];
     if (unreadCount > 0) {
@@ -227,9 +223,10 @@ export const TitleProvider = ({ children }) => {
 
     document.title = titleParts.join(' | ');
 
-    // Handle Favicon update
+    // Handle Favicon update — resolved through the active card with the
+    // surface-1 fallback, then the /favicon.jpg ultimate default.
     let cancelled = false;
-    const rawFavicon = activeDesign?.faviconUrl || settings?.faviconUrl || '';
+    const rawFavicon = resolvedDesign?.faviconUrl || settings?.faviconUrl || '';
     const baseFaviconUrl = resolveAvatarUrl(rawFavicon) || DEFAULT_FAVICON_URL;
     applyFavicon(baseFaviconUrl, unreadCount, () => cancelled);
 
@@ -237,7 +234,7 @@ export const TitleProvider = ({ children }) => {
       cancelled = true;
     };
 
-  }, [pageTitle, unreadCount, settings?.forumName, settings?.faviconUrl, lang, activeDesign]);
+  }, [pageTitle, unreadCount, settings?.forumName, settings?.faviconUrl, lang, activeDesign, resolvedDesign]);
 
   return (
     <TitleContext.Provider value={{ setPageTitle, unreadCount }}>

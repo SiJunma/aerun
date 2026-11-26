@@ -3,7 +3,7 @@
  *
  * Implements semantic structure from SPEC_forum-index-theme-dom.md:
  * #forum-wrapper, #forum, #forum-header, #forum-title, #forum-nav,
- * #forum-user-links, #forum-status, #forum-announcement, #forum-about.
+ * #forum-user-links, #forum-status, #forum-banner, #forum-about.
  *
  * Consumes only the semantic aliases from theme-variables.css (e.g.
  * --forum-name-color). Never reference a base token (var(--text-color),
@@ -163,9 +163,13 @@
   border: none;
 }
 
-#forum-announcement,
-.forum-announcement {
+#forum-banner,
+.forum-banner {
   margin-bottom: 0;
+}
+
+.forum-custom-footer {
+  margin-bottom: 0.5rem;
 }
 
 /* ── Footer ─────────────────────────────────────────────────── */

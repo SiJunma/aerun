@@ -1,7 +1,7 @@
 import React from 'react';
 import { Image } from 'react-bootstrap';
 import { useI18n } from '../../contexts/I18nProvider';
-import { useAuth } from '../../contexts/AuthProvider';
+import { useDesign } from '../../contexts/DesignProvider';
 import { resolveAvatarUrl } from '../../api/avatars';
 import { identityAvatar } from '../../utils/identity';
 
@@ -25,7 +25,7 @@ const ForumAuthorAvatar = ({
   isOnline = false,
 }) => {
   const { t } = useI18n();
-  const { settings } = useAuth();
+  const { resolvedDesign } = useDesign();
 
   // The DTO carries the resolved ids; fall back to the explicit props so
   // existing call sites keep working unchanged.
@@ -47,14 +47,14 @@ const ForumAuthorAvatar = ({
   const placeholderName = fallbackName ?? author?.display_name;
   const placeholder = placeholderName
     ? `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(placeholderName)}&size=${size}`
-    : identityAvatar({ name: '', avatar: '', customPlaceholder: settings?.deletedAvatar, size });
+    : identityAvatar({ name: '', avatar: '', customPlaceholder: resolvedDesign?.placeholderDeleted, size });
   // The DTO's avatar_url (resolved server-side) leads. For guests without a
   // custom avatar, fall back to the admin-uploaded guest placeholder, then
   // the explicit initialAvatar, then the cache; anything unresolved degrades
   // to the placeholder rather than a broken image.
   let avatarSource = author?.avatar_url;
   if (author?.kind === 'guest' && !avatarSource) {
-    avatarSource = settings?.guestAvatar;
+    avatarSource = resolvedDesign?.placeholderGuest;
   }
   if (!avatarSource) {
     avatarSource = initialAvatar ?? cachedAvatar;

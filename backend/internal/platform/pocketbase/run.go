@@ -404,7 +404,23 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	group.POST("/designs", createDesignHandler).BindFunc(RequirePermission(auth.PermManageDesigns)).BindFunc(enforceIdempotency)
 	group.PATCH("/designs/{id}", updateDesignHandler).BindFunc(RequirePermission(auth.PermManageDesigns)).BindFunc(enforceIdempotency)
 	group.PUT("/designs/{id}/favicon", uploadDesignFaviconHandler).BindFunc(RequirePermission(auth.PermManageDesigns))
+	group.PUT("/designs/{id}/background/{kind}", uploadDesignBackgroundHandler).BindFunc(RequirePermission(auth.PermManageDesigns))
+	group.PUT("/designs/{id}/placeholder/{kind}", uploadDesignPlaceholderHandler).BindFunc(RequirePermission(auth.PermManageDesigns))
 	group.DELETE("/designs/{id}", deleteDesignHandler).BindFunc(RequirePermission(auth.PermManageDesigns)).BindFunc(enforceIdempotency)
+
+	// Default (built-in) design cards: the three seeded themes as their own
+	// surface (PLAN_DESIGNS_TAB_SURFACES.md §3.2). Public list/get, admin
+	// PATCH; create and delete are refused with 405 — the cards are seeded
+	// by migration and undeletable. Uploads follow the design pattern and
+	// carry no enforceIdempotency (multipart, same as the favicon).
+	group.GET("/default-designs", listDefaultDesignsHandler)
+	group.GET("/default-designs/{key}", getDefaultDesignHandler)
+	group.POST("/default-designs", createDefaultDesignHandler).BindFunc(RequirePermission(auth.PermManageDesigns))
+	group.PATCH("/default-designs/{key}", updateDefaultDesignHandler).BindFunc(RequirePermission(auth.PermManageDesigns)).BindFunc(enforceIdempotency)
+	group.PUT("/default-designs/{key}/favicon", uploadDefaultDesignFaviconHandler).BindFunc(RequirePermission(auth.PermManageDesigns))
+	group.PUT("/default-designs/{key}/background/{kind}", uploadDefaultDesignBackgroundHandler).BindFunc(RequirePermission(auth.PermManageDesigns))
+	group.PUT("/default-designs/{key}/placeholder/{kind}", uploadDefaultDesignPlaceholderHandler).BindFunc(RequirePermission(auth.PermManageDesigns))
+	group.DELETE("/default-designs/{key}", deleteDefaultDesignHandler).BindFunc(RequirePermission(auth.PermManageDesigns))
 
 	group.GET("/category-groups", listCategoryGroupsHandler)
 	group.POST("/category-groups", createCategoryGroupHandler).BindFunc(RequirePermission(auth.PermManageCategories)).BindFunc(enforceIdempotency)

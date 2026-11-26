@@ -30,71 +30,100 @@ import (
 	"github.com/SiJunma/aerun/backend/internal/config"
 )
 
-// bilingual is the {en, ru} shape the admin panel already uses for branding.
-// Kept as a map rather than a struct because the client sends and receives it
-// that way and the languages are not a closed set.
-type bilingual map[string]any
+// readPlainString decodes a plain-string settings field, tolerating the
+// pre-surfaces shape: a JSONField that still holds a {en, ru} object (an
+// un-migrated row) reads as its ru leaf, and a JSON string reads as itself.
+//
+// PocketBase surfaces a saved JSONField as types.JSONRaw, not as a string —
+// so a row written through the admin panel and then read back arrives as
+// raw JSON bytes. Without that case every stored name reads back empty,
+// which is exactly how a rename that saved fine produced an empty forumName
+// in the response snapshot.
+func readPlainString(app core.App, field string) string {
+	record, err := app.FindRecordById(forumSettingsCollectionName, forumSettingsID)
+	if err != nil || record == nil {
+		return ""
+	}
+	raw := record.Get(field)
+	switch v := raw.(type) {
+	case nil:
+		return ""
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return ""
+		}
+		if trimmed[0] == '{' {
+			return bilingualLeafString(trimmed)
+		}
+		if trimmed[0] == '"' {
+			var decoded string
+			if err := json.Unmarshal([]byte(trimmed), &decoded); err == nil {
+				return strings.TrimSpace(decoded)
+			}
+		}
+		return trimmed
+	case types.JSONRaw:
+		return decodePlainStringBytes(v)
+	case []byte:
+		return decodePlainStringBytes(v)
+	case map[string]any:
+		return bilingualLeafStringMap(v)
+	default:
+		return ""
+	}
+}
 
-// forumName returns the forum's name for a language, falling back EN then to the
-// literal "Forum" the title bar used before a name was ever set.
+// decodePlainStringBytes parses a stored JSON value into a plain string: a
+// JSON string reads as itself, a {en, ru} object reads as its ru leaf.
+func decodePlainStringBytes(payload []byte) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	var decoded string
+	if err := json.Unmarshal(payload, &decoded); err == nil {
+		return strings.TrimSpace(decoded)
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(payload, &obj); err == nil {
+		return bilingualLeafStringMap(obj)
+	}
+	return ""
+}
+
+// bilingualLeafStringMap picks the ru leaf of a bilingual map, then en.
+func bilingualLeafStringMap(decoded map[string]any) string {
+	for _, key := range []string{"ru", "en"} {
+		if s, ok := decoded[key].(string); ok && strings.TrimSpace(s) != "" {
+			return strings.TrimSpace(s)
+		}
+	}
+	return ""
+}
+
+// bilingualLeafString is bilingualLeafStringMap for a raw JSON object string.
+func bilingualLeafString(raw string) string {
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		return ""
+	}
+	return bilingualLeafStringMap(decoded)
+}
+
+// forumName returns the forum's name: the plain single-variant string the
+// surfaces rework stores (migration 1781000011 converted the old {en, ru}
+// map by taking ru). The lang parameter is kept for the existing call sites
+// and ignored — there is no per-language name any more.
 //
 // A blank name is never returned: it would render as an empty title bar and an
 // empty mail signature, and both look like a broken deploy rather than an
 // unconfigured forum.
 func forumName(app core.App, lang string) string {
-	name := readBilingual(app, "forum_name")
-	for _, candidate := range []string{lang, "en", "ru"} {
-		if v, ok := name[candidate].(string); ok && strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
+	_ = lang
+	if name := strings.TrimSpace(readPlainString(app, "forum_name")); name != "" {
+		return name
 	}
 	return "Aerun"
-}
-
-// readBilingual decodes a JSON field, tolerating both the object form and the
-// legacy plain string the first export carried.
-//
-// PocketBase surfaces a saved JSONField as types.JSONRaw, not as a map —
-// so a row written through the admin panel and then read back arrives as
-// raw JSON bytes. Without that case every stored name reads back empty,
-// which is exactly how a rename that saved fine produced an empty forumName
-// in the response snapshot.
-func readBilingual(app core.App, field string) bilingual {
-	record, err := app.FindRecordById(forumSettingsCollectionName, forumSettingsID)
-	if err != nil || record == nil {
-		return bilingual{}
-	}
-	raw := record.Get(field)
-	switch v := raw.(type) {
-	case map[string]any:
-		return bilingual(v)
-	case types.JSONRaw:
-		return decodeBilingualBytes(v)
-	case []byte:
-		return decodeBilingualBytes(v)
-	case string:
-		// A plain string means the pre-migration shape; treat it as both
-		// languages rather than dropping it, so an old row still names itself.
-		if trimmed := strings.TrimSpace(v); trimmed != "" {
-			if trimmed[0] == '{' {
-				return decodeBilingualBytes([]byte(trimmed))
-			}
-			return bilingual{"en": trimmed, "ru": trimmed}
-		}
-	}
-	return bilingual{}
-}
-
-// decodeBilingualBytes parses a stored JSON object into string leaves.
-func decodeBilingualBytes(payload []byte) bilingual {
-	if len(payload) == 0 {
-		return bilingual{}
-	}
-	var decoded map[string]any
-	if err := json.Unmarshal(payload, &decoded); err != nil {
-		return bilingual{}
-	}
-	return bilingual(normalizeBilingual(decoded))
 }
 
 // globalSettingsSnapshot is what the public read returns. It is the camelCase
@@ -103,8 +132,9 @@ func decodeBilingualBytes(payload []byte) bilingual {
 func globalSettingsSnapshot(app core.App) map[string]any {
 	settings := loadForumSettings(app)
 	return map[string]any{
-		"forumName":             readBilingual(app, "forum_name"),
-		"welcomeMessage":        readBilingual(app, "welcome_message"),
+		"forumName":             forumName(app, ""),
+		"headerHtml":            readPlainString(app, "header_html"),
+		"customFooterHtml":      readPlainString(app, "custom_footer_html"),
 		"registrationEnabled":   !settings.MaintenanceMode && settings.RegistrationEnabled,
 		"maintenanceMode":       settings.MaintenanceMode,
 		"requireApproval":       settings.RequireApproval,
@@ -125,12 +155,6 @@ func globalSettingsSnapshot(app core.App) map[string]any {
 		"faviconUrl":            settings.FaviconURL,
 		"deletedAvatar":         settings.DeletedAvatarURL,
 		"guestAvatar":           settings.GuestAvatarURL,
-		"bgLight":               settings.BgLight,
-		"bgDark":                settings.BgDark,
-		"bgNeutral":             settings.BgNeutral,
-		"bgOpacityLight":        settings.BgOpacityLight,
-		"bgOpacityDark":         settings.BgOpacityDark,
-		"bgOpacityNeutral":      settings.BgOpacityNeutral,
 	}
 }
 
@@ -170,34 +194,29 @@ func updateGlobalSettingsHandler(cfg config.Config) func(e *core.RequestEvent) e
 		}
 
 		body := struct {
-			ForumName             map[string]any `json:"forumName"`
-			WelcomeMessage        map[string]any `json:"welcomeMessage"`
-			RegistrationEnabled   *bool          `json:"registrationEnabled"`
-			RequireApproval       *bool          `json:"requireApproval"`
-			WhitelistMode         *bool          `json:"whitelistMode"`
-			MaintenanceMode       *bool          `json:"maintenanceMode"`
-			MaxCharsPerPost       *int           `json:"maxCharsPerPost"`
-			PostsPerPage          *int           `json:"postsPerPage"`
-			TopicsPerPage         *int           `json:"topicsPerPage"`
-			MaxPostsPerTopic      *int           `json:"maxPostsPerTopic"`
-			MaxCharactersPerUser  *int           `json:"maxCharactersPerUser"`
-			EnableReputation      *bool          `json:"enableReputation"`
-			ReputationStyle       *string        `json:"reputationStyle"`
-			EnableCharacters      *bool          `json:"enableCharacters"`
-			EnableDice            *bool          `json:"enableDice"`
-			AllowGifAvatars       *bool          `json:"allowGifAvatars"`
-			AllowGifInPosts       *bool          `json:"allowGifInPosts"`
-			AllowUserCustomDesign *bool          `json:"allowUserCustomDesign"`
-			DefaultDesignID       *string        `json:"defaultDesignId"`
-			FaviconURL            *string        `json:"faviconUrl"`
-			DeletedAvatarURL      *string        `json:"deletedAvatar"`
-			GuestAvatarURL        *string        `json:"guestAvatar"`
-			BgLight               *string        `json:"bgLight"`
-			BgDark                *string        `json:"bgDark"`
-			BgNeutral             *string        `json:"bgNeutral"`
-			BgOpacityLight        *float64       `json:"bgOpacityLight"`
-			BgOpacityDark         *float64       `json:"bgOpacityDark"`
-			BgOpacityNeutral      *float64       `json:"bgOpacityNeutral"`
+			ForumName             *string `json:"forumName"`
+			HeaderHtml            *string `json:"headerHtml"`
+			CustomFooterHtml      *string `json:"customFooterHtml"`
+			RegistrationEnabled   *bool   `json:"registrationEnabled"`
+			RequireApproval       *bool   `json:"requireApproval"`
+			WhitelistMode         *bool   `json:"whitelistMode"`
+			MaintenanceMode       *bool   `json:"maintenanceMode"`
+			MaxCharsPerPost       *int    `json:"maxCharsPerPost"`
+			PostsPerPage          *int    `json:"postsPerPage"`
+			TopicsPerPage         *int    `json:"topicsPerPage"`
+			MaxPostsPerTopic      *int    `json:"maxPostsPerTopic"`
+			MaxCharactersPerUser  *int    `json:"maxCharactersPerUser"`
+			EnableReputation      *bool   `json:"enableReputation"`
+			ReputationStyle       *string `json:"reputationStyle"`
+			EnableCharacters      *bool   `json:"enableCharacters"`
+			EnableDice            *bool   `json:"enableDice"`
+			AllowGifAvatars       *bool   `json:"allowGifAvatars"`
+			AllowGifInPosts       *bool   `json:"allowGifInPosts"`
+			AllowUserCustomDesign *bool   `json:"allowUserCustomDesign"`
+			DefaultDesignID       *string `json:"defaultDesignId"`
+			FaviconURL            *string `json:"faviconUrl"`
+			DeletedAvatarURL      *string `json:"deletedAvatar"`
+			GuestAvatarURL        *string `json:"guestAvatar"`
 		}{}
 		if err := e.BindBody(&body); err != nil {
 			return validationError("invalid settings payload")
@@ -251,10 +270,16 @@ func updateGlobalSettingsHandler(cfg config.Config) func(e *core.RequestEvent) e
 			}
 
 			if body.ForumName != nil {
-				set("forumName", func() { record.Set("forum_name", normalizeBilingual(body.ForumName)) })
+				v := strings.TrimSpace(*body.ForumName)
+				set("forumName", func() { record.Set("forum_name", v) })
 			}
-			if body.WelcomeMessage != nil {
-				set("welcomeMessage", func() { record.Set("welcome_message", normalizeBilingual(body.WelcomeMessage)) })
+			if body.HeaderHtml != nil {
+				v := *body.HeaderHtml
+				set("headerHtml", func() { record.Set("header_html", v) })
+			}
+			if body.CustomFooterHtml != nil {
+				v := *body.CustomFooterHtml
+				set("customFooterHtml", func() { record.Set("custom_footer_html", v) })
 			}
 			if body.RegistrationEnabled != nil {
 				v := *body.RegistrationEnabled
@@ -343,30 +368,6 @@ func updateGlobalSettingsHandler(cfg config.Config) func(e *core.RequestEvent) e
 				v := strings.TrimSpace(*body.GuestAvatarURL)
 				set("guestAvatar", func() { record.Set("guest_avatar_url", v) })
 			}
-			if body.BgLight != nil {
-				v := strings.TrimSpace(*body.BgLight)
-				set("bgLight", func() { record.Set("bg_light", v) })
-			}
-			if body.BgDark != nil {
-				v := strings.TrimSpace(*body.BgDark)
-				set("bgDark", func() { record.Set("bg_dark", v) })
-			}
-			if body.BgNeutral != nil {
-				v := strings.TrimSpace(*body.BgNeutral)
-				set("bgNeutral", func() { record.Set("bg_neutral", v) })
-			}
-			if body.BgOpacityLight != nil {
-				v := *body.BgOpacityLight
-				set("bgOpacityLight", func() { record.Set("bg_opacity_light", v) })
-			}
-			if body.BgOpacityDark != nil {
-				v := *body.BgOpacityDark
-				set("bgOpacityDark", func() { record.Set("bg_opacity_dark", v) })
-			}
-			if body.BgOpacityNeutral != nil {
-				v := *body.BgOpacityNeutral
-				set("bgOpacityNeutral", func() { record.Set("bg_opacity_neutral", v) })
-			}
 
 			// The trail records the command, not its values: every key that
 			// reached the row is named, so "who turned what off" is one query
@@ -405,19 +406,4 @@ func updateGlobalSettingsHandler(cfg config.Config) func(e *core.RequestEvent) e
 			"request_id": requestIDFrom(e),
 		})
 	}
-}
-
-// normalizeBilingual keeps only string leaves, so an admin cannot store a nested
-// object or an array in the forum name and have the title bar render "[object
-// Object]".
-func normalizeBilingual(in map[string]any) map[string]any {
-	out := make(map[string]any, len(in))
-	for k, v := range in {
-		if s, ok := v.(string); ok {
-			if trimmed := strings.TrimSpace(s); trimmed != "" {
-				out[k] = trimmed
-			}
-		}
-	}
-	return out
 }

@@ -72,8 +72,11 @@ export function placeholderAvatarUrl(name, size = 40) {
  *
  *   1. the identity's OWN resolved avatar (a live member with a photo);
  *   2. the admin-uploaded custom placeholder for this kind, if one is set
- *      (`customPlaceholder` — the settings.deletedAvatar / settings.guestAvatar
- *      reference, resolved through resolveAvatarUrl like any other avatar);
+ *      (`customPlaceholder` — the resolved placeholder from
+ *      resolveActiveDesign: the active card's own image when its overwrite
+ *      toggle is on, otherwise the surface-1 settings.deletedAvatar /
+ *      settings.guestAvatar reference, resolved through resolveAvatarUrl
+ *      like any other avatar);
  *   3. the neutral gray "U" default, seeded by `name` only when the identity is
  *      live-but-photoless (empty name → "U").
  *

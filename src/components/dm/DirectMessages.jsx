@@ -4,6 +4,7 @@ import { Shield, Send, ArrowLeft, MessageCircle, Lock, Dices, Trash2, ChevronDow
 import { Link, useNavigate } from 'react-router-dom';
 import { useI18n } from '../../contexts/I18nProvider';
 import { useAuth } from '../../contexts/AuthProvider';
+import { useDesign } from '../../contexts/DesignProvider';
 import { useToast } from '../../contexts/ToastProvider';
 import RichEditor from '../common/RichEditor';
 import { resolveAvatarUrl } from '../../api/avatars';
@@ -53,6 +54,7 @@ import { toMillis as toEpochMs } from '../../utils/dates';
 const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTargetProfile }) => {
   const { t, lang } = useI18n();
   const { profile, settings, hasPermission, setActiveDmConvId } = useAuth();
+  const { resolvedDesign } = useDesign();
   const { showToast } = useToast();
   const navigate = useNavigate();
   const myUid = profile?.uid;
@@ -1093,7 +1095,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
     // avatar captured when the chat opened. A live peer keeps their own picture
     // or their initials — the deleted image is only for a gone identity (I3).
     const peerAvatarSrc = peerStatus === 'deleted'
-      ? identityAvatar({ name: '', avatar: '', customPlaceholder: settings?.deletedAvatar, size: 32 })
+      ? identityAvatar({ name: '', avatar: '', customPlaceholder: resolvedDesign?.placeholderDeleted, size: 32 })
       : (resolveAvatarUrl(activePeer.avatar) || placeholderAvatarUrl(activePeer.name, 32));
     return (
       <>
@@ -1503,7 +1505,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                       src={identityAvatar({
                         name: peerRawName,
                         avatar: peerAvatar,
-                        customPlaceholder: peerRawName ? undefined : settings?.deletedAvatar,
+                        customPlaceholder: peerRawName ? undefined : resolvedDesign?.placeholderDeleted,
                         size: 44,
                       })}
                       roundedCircle

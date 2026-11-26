@@ -70,12 +70,6 @@ type forumSettings struct {
 	AllowUserCustomDesign bool
 	DefaultDesignID       string
 	FaviconURL            string
-	BgLight               string
-	BgDark                string
-	BgNeutral             string
-	BgOpacityLight        float64
-	BgOpacityDark         float64
-	BgOpacityNeutral      float64
 
 	// DeletedAvatarURL and GuestAvatarURL are the host-agnostic /api/files
 	// references to the admin-uploaded placeholder images (migration
@@ -126,9 +120,6 @@ func loadForumSettings(app core.App) forumSettings {
 		AllowGifAvatars:       true,
 		AllowGifInPosts:       true,
 		AllowUserCustomDesign: true,
-		BgOpacityLight:        0.5,
-		BgOpacityDark:         0.5,
-		BgOpacityNeutral:      0.5,
 	}
 
 	record, err := app.FindRecordById(forumSettingsCollectionName, forumSettingsID)
@@ -162,9 +153,6 @@ func loadForumSettings(app core.App) forumSettings {
 	settings.FaviconURL = record.GetString("favicon_url")
 	settings.DeletedAvatarURL = record.GetString("deleted_avatar_url")
 	settings.GuestAvatarURL = record.GetString("guest_avatar_url")
-	settings.BgLight = record.GetString("bg_light")
-	settings.BgDark = record.GetString("bg_dark")
-	settings.BgNeutral = record.GetString("bg_neutral")
 	if v := record.GetString("reputation_style"); v != "" {
 		settings.ReputationStyle = v
 	}
@@ -176,9 +164,6 @@ func loadForumSettings(app core.App) forumSettings {
 	if n := record.GetInt("max_chars_per_post"); n > 0 || unlimitedCharsPerPost(record) {
 		settings.MaxCharsPerPost = n
 	}
-	settings.BgOpacityLight = clampOpacity(record, "bg_opacity_light", 0.5)
-	settings.BgOpacityDark = clampOpacity(record, "bg_opacity_dark", 0.5)
-	settings.BgOpacityNeutral = clampOpacity(record, "bg_opacity_neutral", 0.5)
 	rawTemplates := record.Get("email_templates")
 	switch v := rawTemplates.(type) {
 	case string:
@@ -203,28 +188,6 @@ func loadForumSettings(app core.App) forumSettings {
 // database) keeps the default: its 0 means "unset", not a choice.
 func unlimitedCharsPerPost(record *core.Record) bool {
 	return record.Collection().Fields.GetByName("max_chars_per_post") != nil
-}
-
-// clampOpacity reads a CSS alpha.
-//
-// The column carries Min/Max 0..1, but the value is clamped again here because
-// the read path must not depend on the schema being present: a snapshot restored
-// from before the field exists reads 0, which would render the forum with a
-// fully transparent background — unreadable — instead of falling back.
-func clampOpacity(record *core.Record, field string, fallback float64) float64 {
-	switch v := record.Get(field).(type) {
-	case float64:
-		if v <= 0 || v > 1 {
-			return fallback
-		}
-		return v
-	case int64:
-		if v <= 0 || float64(v) > 1 {
-			return fallback
-		}
-		return float64(v)
-	}
-	return fallback
 }
 
 // isTopicOpeningPost reports whether postID is the earliest published post in

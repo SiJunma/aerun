@@ -16,29 +16,23 @@
 package pocketbase
 
 import (
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/pocketbase/pocketbase/core"
-	"github.com/pocketbase/pocketbase/tools/types"
 )
 
 // SettingsUpsert is the desired state of the forum_settings singleton row.
 // Every field is optional: an empty value means "leave as-is".
 type SettingsUpsert struct {
-	// Branding (bilingual JSON)
+	// Branding (legacy bilingual maps from the Firebase export). They are
+	// stored as plain single-variant strings: the ru leaf, per the surfaces
+	// rework (migration 1781000011). The legacy source keys are NOT renamed.
 	ForumName      map[string]string
 	WelcomeMessage map[string]string
 	// Text
-	FaviconURL       string
-	BgLight          string
-	BgDark           string
-	BgNeutral        string
-	BgOpacityLight   float64
-	BgOpacityDark    float64
-	BgOpacityNeutral float64
+	FaviconURL string
 	// Feature flags
 	RegistrationEnabled   bool
 	RequireApproval       bool
@@ -121,48 +115,38 @@ func ImportSettings(app core.App, u *SettingsUpsert) (SettingsImportReport, erro
 func applySettingsUpsert(rec *core.Record, u *SettingsUpsert) bool {
 	changed := false
 
-	setBilingual := func(field string, m map[string]string) bool {
+	// pickRU takes the single-variant value out of a legacy bilingual map:
+	// ru first, then en. The legacy source keeps its {en, ru} shape; only
+	// the stored form changed (plain string).
+	pickRU := func(m map[string]string) (string, bool) {
 		if m == nil {
+			return "", false
+		}
+		for _, key := range []string{"ru", "en"} {
+			if s := strings.TrimSpace(m[key]); s != "" {
+				return s, true
+			}
+		}
+		return "", false
+	}
+
+	setPlainText := func(field, value string, present bool) bool {
+		if !present || value == "" {
 			return false
 		}
-		raw := make(map[string]any, len(m))
-		for k, v := range m {
-			raw[k] = v
-		}
-		stored := rec.Get(field)
-		var storedMap map[string]any
-		switch v := stored.(type) {
-		case map[string]any:
-			storedMap = v
-		case types.JSONRaw:
-			var decoded map[string]any
-			if err := json.Unmarshal([]byte(v), &decoded); err == nil {
-				storedMap = decoded
-			}
-		case []byte:
-			var decoded map[string]any
-			if err := json.Unmarshal(v, &decoded); err == nil {
-				storedMap = decoded
-			}
-		case string:
-			if trimmed := strings.TrimSpace(v); trimmed != "" && trimmed[0] == '{' {
-				var decoded map[string]any
-				if err := json.Unmarshal([]byte(trimmed), &decoded); err == nil {
-					storedMap = decoded
-				}
-			}
-		}
-		if mapsEqual(storedMap, raw) {
+		if rec.GetString(field) == value {
 			return false
 		}
-		rec.Set(field, raw)
+		rec.Set(field, value)
 		return true
 	}
 
-	if setBilingual("forum_name", u.ForumName) {
+	if v, ok := pickRU(u.ForumName); setPlainText("forum_name", v, ok) {
 		changed = true
 	}
-	if setBilingual("welcome_message", u.WelcomeMessage) {
+	// Legacy welcomeMessage lands in header_html (the rename): the source
+	// key stays welcomeMessage, the destination is the new field.
+	if v, ok := pickRU(u.WelcomeMessage); setPlainText("header_html", v, ok) {
 		changed = true
 	}
 
@@ -180,15 +164,6 @@ func applySettingsUpsert(rec *core.Record, u *SettingsUpsert) bool {
 	if setText("favicon_url", u.FaviconURL) {
 		changed = true
 	}
-	if setText("bg_light", u.BgLight) {
-		changed = true
-	}
-	if setText("bg_dark", u.BgDark) {
-		changed = true
-	}
-	if setText("bg_neutral", u.BgNeutral) {
-		changed = true
-	}
 	if setText("reputation_style", u.ReputationStyle) {
 		changed = true
 	}
@@ -196,26 +171,6 @@ func applySettingsUpsert(rec *core.Record, u *SettingsUpsert) bool {
 		changed = true
 	}
 
-	setNumber := func(field string, value float64) bool {
-		if value == 0 {
-			return false
-		}
-		if rec.GetFloat(field) == value {
-			return false
-		}
-		rec.Set(field, value)
-		return true
-	}
-
-	if setNumber("bg_opacity_light", u.BgOpacityLight) {
-		changed = true
-	}
-	if setNumber("bg_opacity_dark", u.BgOpacityDark) {
-		changed = true
-	}
-	if setNumber("bg_opacity_neutral", u.BgOpacityNeutral) {
-		changed = true
-	}
 	if u.MaxCharsPerPostSet {
 		if rec.GetInt("max_chars_per_post") != u.MaxCharsPerPost {
 			rec.Set("max_chars_per_post", u.MaxCharsPerPost)
@@ -278,23 +233,6 @@ func applySettingsUpsert(rec *core.Record, u *SettingsUpsert) bool {
 	return changed
 }
 
-// mapsEqual compares two map[string]any for shallow equality.
-func mapsEqual(a, b map[string]any) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for k, va := range a {
-		vb, ok := b[k]
-		if !ok {
-			return false
-		}
-		if fmt.Sprintf("%v", va) != fmt.Sprintf("%v", vb) {
-			return false
-		}
-	}
-	return true
-}
-
 // SettingsFromLedger builds a SettingsUpsert from the legacy settings/global
 // document in a staging ledger plan. It returns nil when the document is
 // absent or holds no recognizable fields.
@@ -328,24 +266,6 @@ func SettingsFromLedger(globalSettings map[string]map[string]any) *SettingsUpser
 			}
 		}
 	}
-	setFloat := func(key string, target *float64) {
-		if v, ok := fields[key]; ok {
-			switch n := v.(type) {
-			case float64:
-				if n != 0 {
-					*target = n
-				}
-			case int:
-				if n != 0 {
-					*target = float64(n)
-				}
-			case int64:
-				if n != 0 {
-					*target = float64(n)
-				}
-			}
-		}
-	}
 	setBilingual := func(key string, target *map[string]string) {
 		if v, ok := fields[key]; ok {
 			m, ok := v.(map[string]any)
@@ -365,9 +285,6 @@ func SettingsFromLedger(globalSettings map[string]map[string]any) *SettingsUpser
 	}
 
 	setString("faviconUrl", &u.FaviconURL)
-	setString("bgLight", &u.BgLight)
-	setString("bgDark", &u.BgDark)
-	setString("bgNeutral", &u.BgNeutral)
 	setString("reputationStyle", &u.ReputationStyle)
 	setString("defaultDesignId", &u.DefaultDesignID)
 
@@ -391,10 +308,6 @@ func SettingsFromLedger(globalSettings map[string]map[string]any) *SettingsUpser
 	setInt("topicsPerPage", &u.TopicsPerPage)
 	setInt("maxCharactersPerUser", &u.MaxCharactersPerUser)
 
-	setFloat("bgOpacityLight", &u.BgOpacityLight)
-	setFloat("bgOpacityDark", &u.BgOpacityDark)
-	setFloat("bgOpacityNeutral", &u.BgOpacityNeutral)
-
 	setBilingual("forumName", &u.ForumName)
 	setBilingual("welcomeMessage", &u.WelcomeMessage)
 
@@ -409,12 +322,6 @@ func (u *SettingsUpsert) isEmpty() bool {
 	return u.ForumName == nil &&
 		u.WelcomeMessage == nil &&
 		u.FaviconURL == "" &&
-		u.BgLight == "" &&
-		u.BgDark == "" &&
-		u.BgNeutral == "" &&
-		u.BgOpacityLight == 0 &&
-		u.BgOpacityDark == 0 &&
-		u.BgOpacityNeutral == 0 &&
 		!u.RegistrationEnabled &&
 		!u.RequireApproval &&
 		!u.WhitelistMode &&
@@ -442,28 +349,10 @@ func (u *SettingsUpsert) SortedKeys() []string {
 		keys = append(keys, "forum_name")
 	}
 	if u.WelcomeMessage != nil {
-		keys = append(keys, "welcome_message")
+		keys = append(keys, "header_html")
 	}
 	if u.FaviconURL != "" {
 		keys = append(keys, "favicon_url")
-	}
-	if u.BgLight != "" {
-		keys = append(keys, "bg_light")
-	}
-	if u.BgDark != "" {
-		keys = append(keys, "bg_dark")
-	}
-	if u.BgNeutral != "" {
-		keys = append(keys, "bg_neutral")
-	}
-	if u.BgOpacityLight != 0 {
-		keys = append(keys, "bg_opacity_light")
-	}
-	if u.BgOpacityDark != 0 {
-		keys = append(keys, "bg_opacity_dark")
-	}
-	if u.BgOpacityNeutral != 0 {
-		keys = append(keys, "bg_opacity_neutral")
 	}
 	if u.RegistrationEnabled {
 		keys = append(keys, "registration_enabled")

@@ -190,7 +190,7 @@ await updateGlobalSettings(settings, user.uid);
 ```text
 src/components/admin/tabs/SettingsTab/
 ├── SettingsTab.jsx                 # Главный контейнер настроек с внутренней навигацией
-├── GeneralSettingsCard.jsx         # Название форума, язык, приветственное сообщение -> PATCH { forumName, welcomeMessage }
+├── GeneralSettingsCard.jsx         # Название форума, хедер -> PATCH { forumName, headerHtml }
 ├── LimitsSettingsCard.jsx          # Лимиты символов, постов, тем -> PATCH { maxCharsPerPost, postsPerPage, ... }
 ├── FeatureTogglesCard.jsx          # Дайсы, репутация, маски, whitelist -> PATCH { enableDice, enableReputation, ... }
 ├── IdentityAssetsCard.jsx          # Логотип, дефолтные аватары, фоны -> Загрузка файлов и PATCH URL
