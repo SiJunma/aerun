@@ -463,7 +463,7 @@ export default function VisitsTab() {
               {dashboardData?.geoip_available === false ? (
                 <div className="visits-geoip-hint">
                   <p>{t('admin.visits.geoip.not_connected', 'GeoIP database is not connected')}</p>
-                  <p>{t('admin.visits.geoip.hint', 'Register at MaxMind, generate a license key in Manage License Keys, paste it into the admin settings, and download GeoLite2-City.mmdb.')}</p>
+                  <p>{t('admin.visits.geoip.hint', 'Register at MaxMind, generate a license key in Manage License Keys, paste it into the admin settings, and update the GeoLite2-City database.')}</p>
                   <div className="visits-geoip-links">
                     <Link to="/admin?tab=settings">{t('admin.visits.geoip.open_admin_settings', 'Open admin settings')}</Link>
                     <a href="https://www.maxmind.com/en/geolite2/signup" target="_blank" rel="noreferrer">{t('admin.visits.geoip.maxmind_signup', 'MaxMind GeoLite2 signup')}</a>

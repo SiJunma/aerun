@@ -120,9 +120,9 @@ export default function AdminSecretsSettings() {
         geoip_db_exists: Boolean(res?.geoip_db_exists),
         geoip_updated_at: res?.geoip_updated_at || prev?.geoip_updated_at || '',
       }));
-      showToast(t('admin.settings.geoip_download_success', 'GeoLite2-City database downloaded and activated!'), 'success');
+      showToast(t('admin.settings.geoip_download_success', 'GeoLite2-City database updated and activated!'), 'success');
     } catch (err) {
-      showToast(err.message || t('admin.settings.geoip_download_error', 'Failed to download GeoIP database'), 'danger');
+      showToast(err.message || t('admin.settings.geoip_download_error', 'Failed to update GeoIP database'), 'danger');
     } finally {
       setDownloadingGeoIP(false);
     }
@@ -201,7 +201,7 @@ export default function AdminSecretsSettings() {
                         : ''}
                     </span>
                   ) : (
-                    <span>{t('admin.settings.geoip_db_missing', 'GeoIP database not downloaded yet (locations show XX / Unknown)')}</span>
+                    <span>{t('admin.settings.geoip_db_missing', 'GeoIP database not installed yet (locations show XX / Unknown)')}</span>
                   )}
                 </div>
                 <Button

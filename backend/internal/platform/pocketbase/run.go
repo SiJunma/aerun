@@ -196,6 +196,14 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 		if cfg.MailMode == MailModeDisabled {
 			settings.SMTP.Enabled = false
 		}
+		// Trusted proxy headers: without them RealIP() falls back to the
+		// direct TCP peer (Caddy on 127.0.0.1), so every visit recorded ip
+		// 127.0.0.1 and GeoIP returned XX / Local Network for real visitors
+		// on production. See trusted_proxy.go for the chain and the trust
+		// model; the reconcile itself saves when the stored config differs.
+		if err := configureTrustedProxy(pb); err != nil {
+			return err
+		}
 		return pb.Save(settings)
 	})
 
