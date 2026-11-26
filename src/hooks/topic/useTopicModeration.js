@@ -82,7 +82,7 @@ export const useTopicModeration = ({
       navigate(`/category/${targetCategoryId}`);
     } catch (err) {
       console.error('[move topic error]', err);
-      showToast(t?.('forum.topic_move_error') || 'Failed to move topic', 'danger');
+      showToast(t?.('forum.move_topic_error') || 'Error moving topic', 'danger');
     }
   }, [topicId, currentUser?.uid, moveTopics, navigate, showToast, t]);
 
@@ -90,10 +90,10 @@ export const useTopicModeration = ({
     if (!targetTopicId || !Array.isArray(postIds) || postIds.length === 0) return;
     try {
       await movePosts(postIds, topicId, targetTopicId, currentUser?.uid);
-      showToast(t?.('forum.posts_move_success') || 'Posts moved', 'success');
+      showToast(t?.('forum.posts_moved') || 'Posts moved', 'success');
     } catch (err) {
       console.error('[move posts error]', err);
-      showToast(t?.('forum.posts_move_error') || 'Failed to move posts', 'danger');
+      showToast(t?.('forum.move_posts_error') || 'Error moving posts', 'danger');
     }
   }, [topicId, currentUser?.uid, movePosts, showToast, t]);
 

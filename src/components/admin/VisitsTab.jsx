@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { Button, Form } from 'react-bootstrap';
 import { RotateCw, ShieldBan } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
@@ -464,7 +465,7 @@ export default function VisitsTab() {
                   <p>{t('admin.visits.geoip.not_connected', 'GeoIP database is not connected')}</p>
                   <p>{t('admin.visits.geoip.hint', 'Register at MaxMind, generate a license key in Manage License Keys, paste it into the admin settings, and download GeoLite2-City.mmdb.')}</p>
                   <div className="visits-geoip-links">
-                    <a href="/admin?tab=settings">{t('admin.visits.geoip.open_admin_settings', 'Open admin settings')}</a>
+                    <Link to="/admin?tab=settings">{t('admin.visits.geoip.open_admin_settings', 'Open admin settings')}</Link>
                     <a href="https://www.maxmind.com/en/geolite2/signup" target="_blank" rel="noreferrer">{t('admin.visits.geoip.maxmind_signup', 'MaxMind GeoLite2 signup')}</a>
                   </div>
                 </div>

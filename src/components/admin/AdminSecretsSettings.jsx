@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Row, Col, Form, Button, Badge, Alert, Spinner } from 'react-bootstrap';
-import { KeyRound, Download, Save } from 'lucide-react';
+import { KeyRound, RefreshCw, Save } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
 import { useToast } from '../../contexts/ToastProvider';
 import { fetchAdminSecrets, updateAdminSecrets, downloadGeoIPDatabase } from '../../api/admin';
@@ -187,7 +187,7 @@ export default function AdminSecretsSettings() {
                   onChange={(e) => setMaxmindKey(e.target.value)}
                 />
                 <div className="small text-muted mt-1 opacity-75">
-                  {t('admin.settings.maxmind_key_help', 'Used exclusively on the server to download and update GeoLite2-City.mmdb.')}
+                  {t('admin.settings.maxmind_key_help', 'Used exclusively on the server to download and update GeoLite2-City.mmdb. To get a key: sign up for GeoLite in your MaxMind account, then open Manage License Keys, generate a new key, and copy it immediately — it is shown only once.')}
                 </div>
               </Form.Group>
 
@@ -212,10 +212,10 @@ export default function AdminSecretsSettings() {
                   disabled={downloadingGeoIP || !snapshot?.has_maxmind_license_key}
                   onClick={handleDownloadGeoIP}
                 >
-                  <Download size={15} />
+                  <RefreshCw size={15} />
                   {downloadingGeoIP
-                    ? t('admin.settings.geoip_downloading', 'Downloading...')
-                    : t('admin.settings.geoip_download_btn', 'Download / Update GeoIP DB')}
+                    ? t('admin.settings.geoip_downloading', 'Updating...')
+                    : t('admin.settings.geoip_download_btn', 'Update GeoIP DB')}
                 </Button>
               </div>
             </div>
