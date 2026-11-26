@@ -2384,10 +2384,9 @@ const AdminPage = () => {
             <Form.Group className="mb-4" controlId="defaultDesignId" style={{ maxWidth: '400px' }}>
               <Form.Label className="fw-bold">{t('admin.settings.default_design')}</Form.Label>
               <Form.Select
-                value={settings.defaultDesignId || ''}
+                value={settings.defaultDesignId || 'dark'}
                 onChange={(e) => setSettings({ ...settings, defaultDesignId: e.target.value })}
               >
-                <option value="">{t('admin.settings.default_design_none')}</option>
                 <optgroup label={t('admin.settings.default_design_builtin') || 'Built-in Themes'}>
                   <option value="dark">{t('profile.theme_dark') || 'Dark'}</option>
                   <option value="light">{t('profile.theme_light') || 'Light'}</option>
