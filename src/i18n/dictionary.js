@@ -1048,6 +1048,7 @@ export const translations = {
       nav: {
         userManagement: "User & Access",
         forumContent: "Forum Content",
+        appearance: "Appearance",
         systemConfig: "System",
         system: "System",
         toggleMenu: "Admin menu",
@@ -2835,6 +2836,7 @@ export const translations = {
       nav: {
         userManagement: "Пользователи и доступ",
         forumContent: "Контент форума",
+        appearance: "Оформление",
         systemConfig: "Система",
         system: "Система",
         toggleMenu: "Меню админки",

@@ -81,6 +81,13 @@ export const ADMIN_NAV_GROUPS = [
         icon: 'FolderTree',
         anyOf: [PERMISSIONS.MANAGE_CATEGORIES],
       },
+    ],
+  },
+  {
+    id: 'appearance',
+    title: 'admin.nav.appearance',
+    icon: 'Palette',
+    children: [
       {
         id: 'designs-defaults',
         path: 'designs-defaults',

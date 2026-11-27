@@ -37,7 +37,14 @@ export const ADMIN_NAV_GROUPS = [
         title: 'admin.tabs.categories',
         icon: 'FolderTree',
         anyOf: [PERMISSIONS.MANAGE_CATEGORIES]
-      },
+      }
+    ]
+  },
+  {
+    id: 'appearance',
+    title: 'admin.nav.appearance',
+    icon: 'Palette',
+    children: [
       {
         id: 'designs-defaults',
         path: 'designs-defaults',
