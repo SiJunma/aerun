@@ -90,6 +90,17 @@ export default defineConfig([
     },
   },
   {
+    // vite.config.js runs in Node, not in the browser: `process` is a real
+    // global there, and the dev proxy reads VITE_POCKETBASE_URL from it.
+    // Linting it with the browser set flags `process` as undefined.
+    files: ['vite.config.js'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
+    },
+  },
+  {
     files: ['functions/**/*.js', 'functions/**/*.eslintrc.js'],
     languageOptions: {
       ecmaVersion: 2018,

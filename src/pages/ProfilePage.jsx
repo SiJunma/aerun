@@ -2121,8 +2121,6 @@ const ProfilePage = () => {
                       </Button>
 
                       {/* ── Push Notifications ────────────────────────── */}
-
-{/* ── Push Notifications ────────────────────────── */}
                       <hr className="my-4" />
                       <h6 className="mb-1 text-primary small fw-bold d-flex align-items-center gap-2">
                         <Bell size={15} /> {t('profile.push_notifications_title')}
@@ -2187,19 +2185,44 @@ const ProfilePage = () => {
                         )}
                       </div>
 
-                      <Button
-                        variant="outline-secondary"
-                        size="sm"
-                        className="w-auto"
-                        disabled={pushSubscribing || !pushSupported}
-                        onClick={pushSubscribe}
-                      >
-                        {pushSubscribed ? t('profile.push_subscribed') : t('profile.push_subscribe_btn')}
-                      </Button>
+                      <div className="mb-4">
+                        <Button
+                          variant="outline-secondary"
+                          size="sm"
+                          className="w-auto"
+                          disabled={pushSubscribing || !pushSupported}
+                          onClick={pushSubscribe}
+                        >
+                          {pushSubscribed ? t('profile.push_subscribed') : t('profile.push_subscribe_btn')}
+                        </Button>
+                      </div>
 
-                      <Button variant="primary" onClick={handleSaveSettingsTab} className="px-4">
-                        {t('common.save')}
-                      </Button>
+                      {/* The form's Save belongs to the whole settings tab
+                          (including the push toggle), not to the push block:
+                          it lives on its own row, so the two actions can no
+                          longer read as one button group. Styled like the
+                          account tab's Save, with the same saving state. */}
+                      <hr className="my-4" />
+                      <div className="d-flex justify-content-end">
+                        <Button
+                          variant="primary"
+                          onClick={handleSaveSettingsTab}
+                          className="px-4 d-flex align-items-center gap-2"
+                          disabled={savingAccount}
+                        >
+                          {savingAccount ? (
+                            <>
+                              <Spinner as="span" animation="border" size="sm" role="status" aria-hidden="true" />
+                              {t('common.loading')}
+                            </>
+                          ) : (
+                            <>
+                              <Save size={18} />
+                              {t('common.save')}
+                            </>
+                          )}
+                        </Button>
+                      </div>
                     </Form>
                   </Card.Body>
                 </Card>
