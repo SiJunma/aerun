@@ -1,11 +1,10 @@
 import React from 'react';
-import { Pin, Lock, Settings, Trash2, ArrowRightLeft, Share2 } from 'lucide-react';
+import { Pin, Lock, Settings, Trash2, ArrowRightLeft } from 'lucide-react';
 import ForumBreadcrumbs from '../common/ForumBreadcrumbs';
 import ForumPagination from '../common/ForumPagination';
 import ForumAuthorName from '../common/ForumAuthorName';
 import Timestamp from '../common/Timestamp';
 import { resolveField } from '../../utils/text';
-import { shareOrCopy } from '../../utils/share';
 
 /**
  * TopicHeader: Topic title, metadata, breadcrumbs, and topic management actions dropdown.
@@ -147,16 +146,6 @@ export const TopicHeader = ({
                 className="forum-pagination-topic"
               />
             )}
-
-            {/* Share button */}
-            <button
-              type="button"
-              className="topic-action-btn topic-share-btn"
-              onClick={() => shareOrCopy({ title: topic.title, url: window.location.href })}
-              aria-label={t('forum.share_topic') || 'Share topic'}
-            >
-              <Share2 size={16} />
-            </button>
           </div>
         </div>
       </header>
