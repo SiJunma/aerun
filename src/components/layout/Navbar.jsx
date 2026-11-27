@@ -9,19 +9,52 @@ import { useDesign } from '../../contexts/DesignProvider';
 import { resolveField } from '../../utils/text';
 import { Bell, User, LogOut, MessageCircle, Palette, Check, FilePen } from 'lucide-react';
 import { subscribeToDmUnread } from '../../api/dms';
+import { subscribeToDefaultDesigns } from '../../api/designs';
+import { builtinThemeLabel, visibleBuiltinThemeKeys } from '../../utils/defaultDesignPicker';
 import { playNotificationSound } from '../../utils/notificationSound';
 import AuthModal from '../modals/AuthModal';
 
 const Navigation = () => {
   const { user, profile, settings, logout, unreadTopicsCount, hasPermission, PERMISSIONS, _activeDmConvId, dmUnread: unreadCounts } = useAuth();
   const { t, lang } = useI18n();
-  const { theme, changeGuestTheme } = useTheme();
-  const { resolvedDesign } = useDesign();
+  const { changeGuestTheme } = useTheme();
+  const { activeDesign, resolvedDesign } = useDesign();
   const navigate = useNavigate();
   const [dmUnread, setDmUnread] = React.useState(0);
   const [expanded, setExpanded] = React.useState(false);
   const [showAuthModal, setShowAuthModal] = React.useState(false);
   const [authModalMode, setAuthModalMode] = React.useState('login');
+
+  // Guest theme picker: the names come from the default-design cards
+  // (subscribeToDefaultDesigns — one fetch, module cache), exactly like the
+  // member picker in ProfilePage; the dictionary labels are the fallback
+  // while the cards are loading, and hidden cards never appear once loaded.
+  const [defaultDesigns, setDefaultDesigns] = React.useState([]);
+  React.useEffect(() => {
+    const unsub = subscribeToDefaultDesigns(setDefaultDesigns);
+    return () => unsub();
+  }, []);
+
+  // The checkmark follows the card actually applied, not the `theme` state:
+  // while the single-record GET for a fresh guest choice is in flight the
+  // page still shows the old card, so a checkmark on `theme` would lie
+  // about the page. No card resolved yet (boot / in flight) → no checkmark.
+  const appliedThemeKey = activeDesign?.isDefaultDesign ? activeDesign.key : null;
+
+  // One renderer for both dropdown variants (persistent desktop, collapse
+  // mobile) so the two cannot drift apart again. Selecting a card stores
+  // its KEY as the guest theme — the same value the login migration sends
+  // to the server.
+  const renderGuestThemeItems = () => visibleBuiltinThemeKeys(defaultDesigns).map((key) => (
+    <NavDropdown.Item
+      key={key}
+      onClick={() => { changeGuestTheme(key); setExpanded(false); }}
+      className={`d-flex align-items-center gap-2 ${appliedThemeKey === key ? 'fw-bold text-primary' : ''}`}
+    >
+      {appliedThemeKey === key ? <Check size={16} /> : <div style={{ width: 16 }}></div>}
+      {builtinThemeLabel(defaultDesigns, t, key)}
+    </NavDropdown.Item>
+  ));
 
   const isAdmin = (profile?.role === 'admin' || profile?.role === 'root') && hasPermission(PERMISSIONS.ADMIN_ACCESS);
 
@@ -251,18 +284,7 @@ const Navigation = () => {
                 align="end"
                 className="no-caret d-none d-lg-block"
               >
-                <NavDropdown.Item onClick={() => { changeGuestTheme('light'); setExpanded(false); }} className={`d-flex align-items-center gap-2 ${theme === 'light' ? 'fw-bold text-primary' : ''}`}>
-                  {theme === 'light' ? <Check size={16} /> : <div style={{ width: 16 }}></div>}
-                  {t('profile.theme_light')}
-                </NavDropdown.Item>
-                <NavDropdown.Item onClick={() => { changeGuestTheme('dark'); setExpanded(false); }} className={`d-flex align-items-center gap-2 ${theme === 'dark' ? 'fw-bold text-primary' : ''}`}>
-                  {theme === 'dark' ? <Check size={16} /> : <div style={{ width: 16 }}></div>}
-                  {t('profile.theme_dark')}
-                </NavDropdown.Item>
-                <NavDropdown.Item onClick={() => { changeGuestTheme('neutral'); setExpanded(false); }} className={`d-flex align-items-center gap-2 ${theme === 'neutral' ? 'fw-bold text-primary' : ''}`}>
-                  {theme === 'neutral' ? <Check size={16} /> : <div style={{ width: 16 }}></div>}
-                  {t('profile.theme_neutral')}
-                </NavDropdown.Item>
+                {renderGuestThemeItems()}
               </NavDropdown>
 
               <Nav.Link
@@ -337,18 +359,7 @@ const Navigation = () => {
                 align="end"
                 className="no-caret"
               >
-                <NavDropdown.Item onClick={() => { changeGuestTheme('light'); setExpanded(false); }} className={`d-flex align-items-center gap-2 ${theme === 'light' ? 'fw-bold text-primary' : ''}`}>
-                  {theme === 'light' ? <Check size={16} /> : <div style={{ width: 16 }}></div>}
-                  {t('profile.theme_light')}
-                </NavDropdown.Item>
-                <NavDropdown.Item onClick={() => { changeGuestTheme('dark'); setExpanded(false); }} className={`d-flex align-items-center gap-2 ${theme === 'dark' ? 'fw-bold text-primary' : ''}`}>
-                  {theme === 'dark' ? <Check size={16} /> : <div style={{ width: 16 }}></div>}
-                  {t('profile.theme_dark')}
-                </NavDropdown.Item>
-                <NavDropdown.Item onClick={() => { changeGuestTheme('neutral'); setExpanded(false); }} className={`d-flex align-items-center gap-2 ${theme === 'neutral' ? 'fw-bold text-primary' : ''}`}>
-                  {theme === 'neutral' ? <Check size={16} /> : <div style={{ width: 16 }}></div>}
-                  {t('profile.theme_neutral')}
-                </NavDropdown.Item>
+                {renderGuestThemeItems()}
               </NavDropdown>
             </Nav>
           )}

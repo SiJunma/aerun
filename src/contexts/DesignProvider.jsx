@@ -10,6 +10,13 @@ export const useDesign = () => useContext(DesignContext);
 
 const BUILTIN_THEMES = ['dark', 'light', 'neutral'];
 
+// The bridge from ThemeProvider's guest choice: DesignProvider sits outside
+// ThemeProvider and cannot read the theme context, so changeTheme (guest
+// branch) dispatches this event after writing localStorage. One name, one
+// source of truth — ThemeProvider imports it from here, so a typo on either
+// side cannot silently break the bridge.
+export const GUEST_THEME_CHANGED_EVENT = 'aerun:guest-theme-changed';
+
 // A card is usable as the SELECTED theme only while it is listed (default)
 // or active (custom). As the forum-default FALLBACK a hidden/deactivated
 // card still counts — a theme removed from the list stays usable as the
@@ -60,6 +67,28 @@ export const DesignProvider = ({ children }) => {
   // exactly as it used to wait for the lists.
   const settingsReady = Boolean(settings) && ('defaultDesignId' in settings || 'activeDesign' in settings);
 
+  // The guest choice lives in localStorage, which no React state observes:
+  // without this, targetId below would keep the value it read at boot (or
+  // when profile/settings changed) and a guest theme pick would never
+  // re-resolve. ThemeProvider dispatches GUEST_THEME_CHANGED_EVENT from
+  // changeTheme (guest branch) after writing localStorage; the listener
+  // re-reads the stored choice into state, and the provider fetches that
+  // ONE card with a single-record GET, exactly as for a member theme change.
+  const readGuestTheme = () => {
+    try {
+      return localStorage.getItem(makeStorageKey('guest_theme', 'guest'));
+    } catch {
+      // localStorage недоступен — игнорируем гостевой выбор.
+      return null;
+    }
+  };
+  const [guestTheme, setGuestTheme] = useState(readGuestTheme);
+  useEffect(() => {
+    const onGuestThemeChanged = () => setGuestTheme(readGuestTheme());
+    window.addEventListener(GUEST_THEME_CHANGED_EVENT, onGuestThemeChanged);
+    return () => window.removeEventListener(GUEST_THEME_CHANGED_EVENT, onGuestThemeChanged);
+  }, []);
+
   // Target id, as before: member theme > guest local choice > forum default.
   const targetId = useMemo(() => {
     if (profile?.settings?.theme) {
@@ -67,21 +96,17 @@ export const DesignProvider = ({ children }) => {
       return profile.settings.theme;
     }
     if (!profile) {
-      // Гость: локальный выбор из localStorage (скопленный по гостю).
-      try {
-        const guestTheme = localStorage.getItem(makeStorageKey('guest_theme', 'guest'));
-        if (guestTheme) {
-          return guestTheme;
-        }
-      } catch {
-        // localStorage недоступен — игнорируем гостевой выбор.
+      // Гость: локальный выбор из localStorage (скопленный по гостю),
+      // в state — см. readGuestTheme/onGuestThemeChanged выше.
+      if (guestTheme) {
+        return guestTheme;
       }
     }
     if (settings?.defaultDesignId) {
       return settings.defaultDesignId;
     }
     return null;
-  }, [profile, settings]);
+  }, [profile, settings, guestTheme]);
 
   // The single target that needs one GET, or null when the embedded card
   // already answers it: a preview (explicit, needs any card by id), a

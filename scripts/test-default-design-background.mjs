@@ -32,6 +32,13 @@ import assert from 'node:assert/strict';
 import { describe, it, mock } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import {
+  BUILTIN_THEME_KEYS,
+  builtinThemeDictKey,
+  builtinThemeLabel,
+  defaultDesignCard,
+  visibleBuiltinThemeKeys,
+} from '../src/utils/defaultDesignPicker.js';
 
 // The dev backend origin: pbUrl defaults to http://127.0.0.1:8090 when
 // VITE_POCKETBASE_URL is unset, which is exactly the local-stand split
@@ -567,5 +574,100 @@ describe('revision gates: banner placeholder and summary-driven UI', () => {
       /fetchSingleDesign\(fetchTarget\)|fetchSingleDesign\(previewId\)/,
       'the provider applies a changed theme with single-record GETs',
     );
+  });
+});
+
+describe('guest theme picker mapping (default-design cards)', () => {
+  // Cards exactly as GET /api/aerun/default-designs returns them, mapped
+  // with toDefaultDesign — the picker renders summaries, never full records.
+  // REGRESSION (found 2026-11-27): the Navbar guest dropdown hardcoded the
+  // three generic dictionary labels, so it showed the OLD names instead of
+  // the card names (Space / Snow Mountains / Fields on the local stand).
+  const cards = () => [
+    toDefaultDesign({ id: 'default-dark-id', key: 'dark', name: 'Space', show_in_list: true }),
+    toDefaultDesign({ id: 'default-light-id', key: 'light', name: 'Snow Mountains', show_in_list: true }),
+    toDefaultDesign({ id: 'default-neutral-id', key: 'neutral', name: 'Fields', show_in_list: false }),
+  ];
+  const t = (key) => ({
+    'profile.theme_light': 'Light',
+    'profile.theme_dark': 'Dark',
+    'profile.theme_neutral': 'Neutral',
+  }[key] || key);
+
+  it('labels a card by its card name, not the dictionary label', () => {
+    assert.equal(builtinThemeLabel(cards(), t, 'dark'), 'Space');
+    assert.equal(builtinThemeLabel(cards(), t, 'light'), 'Snow Mountains');
+  });
+
+  it('excludes a hidden card once the cards have loaded', () => {
+    assert.deepEqual(visibleBuiltinThemeKeys(cards()), ['light', 'dark']);
+  });
+
+  it('falls back to all three dictionary labels while the cards are loading', () => {
+    assert.deepEqual(visibleBuiltinThemeKeys([]), ['light', 'dark', 'neutral']);
+    assert.deepEqual(BUILTIN_THEME_KEYS, ['light', 'dark', 'neutral']);
+    assert.equal(builtinThemeLabel([], t, 'dark'), 'Dark');
+    assert.equal(builtinThemeLabel([], t, 'light'), 'Light');
+    assert.equal(builtinThemeLabel([], t, 'neutral'), 'Neutral');
+  });
+
+  it('keeps a key with no card at all visible under its dictionary label', () => {
+    const onlyDark = [toDefaultDesign({ id: 'default-dark-id', key: 'dark', name: 'Space', show_in_list: true })];
+    assert.deepEqual(visibleBuiltinThemeKeys(onlyDark), ['light', 'dark', 'neutral']);
+    assert.equal(builtinThemeLabel(onlyDark, t, 'light'), 'Light');
+  });
+
+  it('maps a key to its dictionary key and finds the card by key', () => {
+    assert.equal(builtinThemeDictKey('light'), 'profile.theme_light');
+    assert.equal(builtinThemeDictKey('dark'), 'profile.theme_dark');
+    assert.equal(builtinThemeDictKey('neutral'), 'profile.theme_neutral');
+    assert.equal(defaultDesignCard(cards(), 'dark')?.name, 'Space');
+    assert.equal(defaultDesignCard(cards(), 'no-such-key'), undefined);
+  });
+
+  it('the guest picker subscribes to the card list and renders from it', () => {
+    const navbar = read('../src/components/layout/Navbar.jsx');
+    assert.match(navbar, /subscribeToDefaultDesigns\(setDefaultDesigns\)/, 'one cached fetch of the default-design summaries');
+    assert.match(navbar, /visibleBuiltinThemeKeys\(defaultDesigns\)/, 'the rendered keys come from the cards, hidden excluded');
+    assert.match(navbar, /builtinThemeLabel\(defaultDesigns, t, key\)/, 'the rendered label is the card name, dictionary fallback while loading');
+    assert.match(navbar, /changeGuestTheme\(key\)/, 'selecting a card stores its key as the guest theme');
+    assert.doesNotMatch(navbar, /profile\.theme_light|profile\.theme_dark|profile\.theme_neutral/, 'no hardcoded generic labels left in the guest dropdown');
+    // Both variants render the same items: the persistent (desktop) and
+    // the collapse (mobile) dropdowns share one renderer.
+    const occurrences = (navbar.match(/\{renderGuestThemeItems\(\)\}/g) || []).length;
+    assert.equal(occurrences, 2, 'the renderer is used in exactly both dropdown variants');
+  });
+
+  it('the checkmark follows the applied card, not the theme state', () => {
+    const navbar = read('../src/components/layout/Navbar.jsx');
+    assert.match(navbar, /activeDesign\?\.isDefaultDesign \? activeDesign\.key : null/, 'the applied key is the resolved card key');
+    assert.match(navbar, /appliedThemeKey === key/, 'the checkmark compares against the applied card');
+    assert.doesNotMatch(navbar, /theme === '(light|dark|neutral)'/, 'no checkmark reads the theme state anymore');
+  });
+});
+
+describe('guest theme change reaches DesignProvider', () => {
+  it('changeTheme dispatches the bridge event and DesignProvider re-resolves on it', () => {
+    // REGRESSION (found 2026-11-27): picking a theme as a guest did
+    // nothing — changeTheme wrote localStorage, but DesignProvider's
+    // target memo ([profile, settings] deps) never re-ran, so the page
+    // kept the forum-default card. DesignProvider sits OUTSIDE
+    // ThemeProvider (main.jsx), so the bridge is an explicit window event.
+    const themeProvider = read('../src/contexts/ThemeProvider.jsx');
+    const designProvider = read('../src/contexts/DesignProvider.jsx');
+    // One name, one source of truth: DesignProvider owns the constant,
+    // ThemeProvider imports it — a typo on either side would break the
+    // bridge silently, so the gate pins both sides to the same identifier.
+    assert.match(designProvider, /export const GUEST_THEME_CHANGED_EVENT = 'aerun:guest-theme-changed'/, 'the event name lives in DesignProvider');
+    assert.match(themeProvider, /import \{ useDesign, GUEST_THEME_CHANGED_EVENT \} from '\.\/DesignProvider'/, 'ThemeProvider imports the event name, not a string copy');
+    assert.match(themeProvider, /dispatchEvent\(new CustomEvent\(GUEST_THEME_CHANGED_EVENT/, 'changeTheme dispatches the event after writing the guest choice');
+    assert.match(designProvider, /addEventListener\(GUEST_THEME_CHANGED_EVENT/, 'DesignProvider subscribes to the event');
+    assert.match(designProvider, /removeEventListener\(GUEST_THEME_CHANGED_EVENT/, 'DesignProvider unsubscribes on unmount');
+    // The state bump is what makes the target memo re-read localStorage:
+    // without it in the deps the guest choice would sit unread until
+    // profile/settings changed.
+    assert.match(designProvider, /setGuestTheme\(readGuestTheme\(\)\)/, 'the listener re-reads the stored choice into state');
+    assert.match(designProvider, /\}, \[profile, settings, guestTheme\]\)/, 'the target memo depends on the guest choice state');
+    assert.doesNotMatch(designProvider, /getDefaultDesigns\(/, 'the re-resolve still uses no list fetch');
   });
 });

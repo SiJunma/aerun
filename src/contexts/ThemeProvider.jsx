@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { useAuth } from './AuthProvider';
-import { useDesign } from './DesignProvider';
+import { useDesign, GUEST_THEME_CHANGED_EVENT } from './DesignProvider';
 import { resolveDesignBaseTheme } from '../api/designs';
 import { makeStorageKey } from '../utils/storageScope';
 
@@ -109,6 +109,16 @@ export const ThemeProvider = ({ children }) => {
       } catch {
         // localStorage может быть недоступен (приватный режим) — деградируем мягко.
       }
+      // DesignProvider sits OUTSIDE ThemeProvider (main.jsx), so it cannot
+      // read the theme context — and its target memo reads localStorage only
+      // when its deps change, so a guest choice would otherwise never
+      // re-resolve (the dropdown checkmark moved, the page did not). The
+      // event is the bridge: DesignProvider re-reads the stored choice and
+      // fetches that ONE card with a single-record GET. A same-tab setItem
+      // fires no 'storage' event, so nothing else can carry this; the member
+      // path needs no event (profile.settings.theme changes, and the memo
+      // already depends on profile).
+      window.dispatchEvent(new CustomEvent(GUEST_THEME_CHANGED_EVENT, { detail: { theme: newTheme } }));
     }
   }, [profile, updateSettings]);
 

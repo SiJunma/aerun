@@ -19,6 +19,7 @@ import ForumModal from '../components/common/ForumModal';
 import AvatarUploader from '../components/common/AvatarUploader';
 import { voteOnProfile, fetchReputationLogs, getProfileVote, deleteReputation, updateReputationComment } from '../api/reputation';
 import { subscribeToDesigns, subscribeToDefaultDesigns } from '../api/designs';
+import { builtinThemeLabel as cardBuiltinThemeLabel, visibleBuiltinThemeKeys } from '../utils/defaultDesignPicker';
 import { resolveAvatarUrl, uploadMyAvatar } from '../api/avatars';
 import ErrorCard from '../components/common/ErrorCard';
 import Timestamp from '../components/common/Timestamp';
@@ -196,16 +197,9 @@ const ProfilePage = () => {
   // the dictionary label is the fallback while the cards are loading. A card
   // hidden from the list (showInList false) is hidden from the picker too —
   // unless the cards have not loaded yet, in which case all three show.
-  const defaultDesignCard = (key) => defaultDesigns.find((d) => d.key === key);
-  const builtinThemeLabel = (key) => {
-    const dictKey = key === 'light' ? 'profile.theme_light' : key === 'dark' ? 'profile.theme_dark' : 'profile.theme_neutral';
-    return defaultDesignCard(key)?.name || t(dictKey);
-  };
-  const builtinThemeVisible = (key) => {
-    if (defaultDesigns.length === 0) return true;
-    const card = defaultDesignCard(key);
-    return !card || card.showInList;
-  };
+  // Shared with the Navbar guest picker (src/utils/defaultDesignPicker.js).
+  const builtinThemeLabel = (key) => cardBuiltinThemeLabel(defaultDesigns, t, key);
+  const builtinThemeVisible = (key) => visibleBuiltinThemeKeys(defaultDesigns).includes(key);
 
   const [submittingRep, setSubmittingRep] = useState(false);
   const [repLogs, setRepLogs] = useState([]);
