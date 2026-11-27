@@ -456,15 +456,19 @@ export const getDefaultDesign = async (key) => {
 };
 
 // --- Single-record fetch + edit-modal session cache ------------------------
-// One theme, one GET: a built-in key ('dark'/'light'/'neutral') resolves to
-// the default-design record by key, anything else to the custom record by
-// id. This is the only way the active design is resolved once the embedded
-// settings card cannot answer the target — full lists are never fetched
-// for it, and the theme picker never fetches lists to apply a theme either.
+// One theme, one GET (two at most): a built-in key ('dark'/'light'/'neutral')
+// resolves to the default-design record by key; any other id is tried as a
+// custom record by id first, then as a default-design record by id. Either
+// order is safe — a custom id can never equal a builtin key, and the two
+// collections have disjoint ids — but custom-first keeps the common preview
+// path (custom designs) to a single request. This is the only way the active
+// design is resolved once the embedded settings card cannot answer the
+// target — full lists are never fetched for it, and the theme picker never
+// fetches lists to apply a theme either.
 export async function fetchSingleDesign(targetId) {
   if (!targetId) return null;
   if (BUILTIN_THEMES.includes(targetId)) return getDefaultDesign(targetId);
-  return getDesign(targetId);
+  return (await getDesign(targetId)) ?? (await getDefaultDesign(targetId));
 }
 
 // The edit modal loads its full record once per session and reuses it:

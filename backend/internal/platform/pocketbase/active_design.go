@@ -64,7 +64,7 @@ func resolveDesignTarget(app core.App, target string, allowHidden bool) (map[str
 		return nil, false
 	}
 	if isBuiltinTheme(target) {
-		rec, err := findDefaultDesignByKey(app, target)
+		rec, err := findDefaultDesignByKeyOrID(app, target)
 		if err != nil || rec == nil {
 			return nil, false
 		}

@@ -191,7 +191,7 @@ func uploadDefaultDesignBackgroundHandler(e *core.RequestEvent) error {
 	if key == "" {
 		return validationError("default design key is required")
 	}
-	rec, err := findDefaultDesignByKey(e.App, key)
+	rec, err := findDefaultDesignByKeyOrID(e.App, key)
 	if err != nil || rec == nil {
 		return notFoundError("default design not found")
 	}
@@ -264,7 +264,7 @@ func uploadDefaultDesignPlaceholderHandler(e *core.RequestEvent) error {
 	if key == "" {
 		return validationError("default design key is required")
 	}
-	rec, err := findDefaultDesignByKey(e.App, key)
+	rec, err := findDefaultDesignByKeyOrID(e.App, key)
 	if err != nil || rec == nil {
 		return notFoundError("default design not found")
 	}
@@ -297,7 +297,7 @@ func uploadDefaultDesignFaviconHandler(e *core.RequestEvent) error {
 	if key == "" {
 		return validationError("default design key is required")
 	}
-	rec, err := findDefaultDesignByKey(e.App, key)
+	rec, err := findDefaultDesignByKeyOrID(e.App, key)
 	if err != nil || rec == nil {
 		return notFoundError("default design not found")
 	}

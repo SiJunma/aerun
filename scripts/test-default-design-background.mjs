@@ -86,6 +86,26 @@ const singleRecords = {
     overwrite_placeholder_deleted: false,
     overwrite_placeholder_guest: false,
   },
+  // The dark "Space" default design, addressed by RECORD id — this is what
+  // a preview link carries (/?preview_design=z4v2iq1ptaknsk): DesignsTab's
+  // handlePreview passes design.id / card.id, not the builtin key.
+  '/api/aerun/default-designs/z4v2iq1ptaknsk': {
+    id: 'z4v2iq1ptaknsk',
+    key: 'dark',
+    name: 'Space',
+    show_in_list: true,
+    bg_default_url: '/api/files/default_designs/z4v2iq1ptaknsk/bg.png',
+    css: '.space { color: white; }',
+    header_html: '<div>Space header</div>',
+    overwrite_header: true,
+    overwrite_footer: false,
+    overwrite_title: false,
+    overwrite_favicon: false,
+    overwrite_css: true,
+    overwrite_js: false,
+    overwrite_placeholder_deleted: false,
+    overwrite_placeholder_guest: false,
+  },
 };
 mock.module('../src/api/pocketbase.js', {
   namedExports: {
@@ -94,7 +114,13 @@ mock.module('../src/api/pocketbase.js', {
     sendApi: async (path) => {
       sendApiCalls.push(path);
       const record = singleRecords[path];
-      return record ? { ...record } : {};
+      // An unknown path is a 404: the real sendApi throws on !res.ok, and
+      // getDesign/getDefaultDesign answer null from that. Returning {} here
+      // would be wrong — {} is truthy, so getDesign would map it to a
+      // non-null empty design and the custom-then-default fallback in
+      // fetchSingleDesign would never run.
+      if (!record) throw new Error(`404: ${path}`);
+      return { ...record };
     },
   },
 });
@@ -378,6 +404,43 @@ describe('on-demand single-theme fetch (fetchSingleDesign)', () => {
     assert.equal(card.js, 'console.log(1)');
     assert.equal(card.headerHtml, '<div class="banner-content">Hi</div>');
     assert.equal(card.overwriteCss, true);
+  });
+
+  it('resolves a default design by record id, never a list', async () => {
+    // REGRESSION (found 2026-11-26): opening /?preview_design=
+    // z4v2iq1ptaknsk (preview of the dark "Space" default design) showed
+    // the forum in the light theme. handlePreview passes the RECORD id,
+    // but fetchSingleDesign only treated the three builtin KEYS as default
+    // designs — anything else went to the custom endpoint, 404d, and the
+    // provider fell back to the forum default. The fix: a non-key id is
+    // tried as a custom record first, then as a default record by id.
+    sendApiCalls.length = 0;
+    const card = await fetchSingleDesign('z4v2iq1ptaknsk');
+
+    // Custom-first, so the custom endpoint is probed once (404) and the
+    // default endpoint then resolves the record. The card itself comes
+    // from the default endpoint — never from a list, never as a custom
+    // design — and no list endpoint is hit at any point.
+    assert.deepEqual(sendApiCalls, [
+      '/api/aerun/designs/z4v2iq1ptaknsk',
+      '/api/aerun/default-designs/z4v2iq1ptaknsk',
+    ]);
+    assert.equal(card.id, 'z4v2iq1ptaknsk');
+    assert.equal(card.key, 'dark');
+    assert.equal(card.name, 'Space');
+    assert.equal(card.isDefaultDesign, true);
+    // A single-record GET is FULL: the css/header the summary omits arrive.
+    assert.equal(card.css, '.space { color: white; }');
+    assert.equal(card.headerHtml, '<div>Space header</div>');
+  });
+
+  it('returns null for an unknown id after trying both single-record endpoints', async () => {
+    sendApiCalls.length = 0;
+    assert.equal(await fetchSingleDesign('no-such-design'), null);
+    assert.deepEqual(sendApiCalls, [
+      '/api/aerun/designs/no-such-design',
+      '/api/aerun/default-designs/no-such-design',
+    ]);
   });
 
   it('fetches nothing for an empty target', async () => {

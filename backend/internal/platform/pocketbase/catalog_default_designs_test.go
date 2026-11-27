@@ -122,6 +122,72 @@ func TestDefaultDesignsPublicListAndGet(t *testing.T) {
 	}
 }
 
+// TestDefaultDesignGetByID pins the preview fix: the single default-design
+// GET resolves by record id as well as by key. The design preview
+// (?preview_design=...) passes a record id, so GET /default-designs/<id of
+// the dark card> must return the same full record as GET /default-designs/dark.
+func TestDefaultDesignGetByID(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	server := newTestServer(t, app)
+	defer server.Close()
+
+	status, body := getAerun(t, server.URL+"/api/aerun/default-designs")
+	if status != http.StatusOK {
+		t.Fatalf("GET /default-designs = %d: %s", status, body)
+	}
+	var resp struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatal(err)
+	}
+	var darkID string
+	for _, item := range resp.Items {
+		if item["key"] == "dark" {
+			darkID, _ = item["id"].(string)
+			break
+		}
+	}
+	if darkID == "" {
+		t.Fatalf("list has no dark card: %s", body)
+	}
+	if darkID == "dark" {
+		t.Fatalf("dark card id must be a record id, not the key: %s", body)
+	}
+
+	status, body = getAerun(t, server.URL+"/api/aerun/default-designs/"+darkID)
+	if status != http.StatusOK {
+		t.Fatalf("GET /default-designs/%s = %d: %s", darkID, status, body)
+	}
+	var one map[string]any
+	if err := json.Unmarshal(body, &one); err != nil {
+		t.Fatal(err)
+	}
+	if one["id"] != darkID || one["key"] != "dark" || one["name"] != "Тёмная" {
+		t.Fatalf("GET by id = %v, want the dark card", one)
+	}
+	// Same full record as the GET by key, including the heavy fields the
+	// list summaries drop.
+	for _, present := range []string{
+		"css", "js", "header_html", "custom_footer_html", "forum_title",
+		"favicon_url", "placeholder_deleted_url", "placeholder_guest_url",
+		"description", "bg_default_url", "bg_tablet_url", "bg_mobile_url",
+		"bg_opacity", "overwrite_header", "created_at", "updated_at",
+	} {
+		if _, ok := one[present]; !ok {
+			t.Errorf("single GET by id must carry %q", present)
+		}
+	}
+
+	// An unknown record id still 404s.
+	status, _ = getAerun(t, server.URL+"/api/aerun/default-designs/z4v2iq1ptaknsk")
+	if status != http.StatusNotFound {
+		t.Fatalf("GET unknown id = %d, want 404", status)
+	}
+}
+
 // TestDesignsListReturnsSummaries pins the custom-design list contract:
 // GET /api/aerun/designs returns lightweight summaries — exactly id, name,
 // show_in_list, bg_default_url, is_active, base_theme — even when the
@@ -197,10 +263,10 @@ func TestDesignsListReturnsSummaries(t *testing.T) {
 		"description": "A heavy design", "css": ".x{color:red}",
 		"js": "window.__x=1;", "forum_title": "Heavy",
 		"favicon_url": "/api/files/fav.png", "header_html": "<p>Head</p>",
-		"custom_footer_html": "<p>Foot</p>",
+		"custom_footer_html":      "<p>Foot</p>",
 		"placeholder_deleted_url": "/api/files/del.png",
 		"placeholder_guest_url":   "/api/files/guest.png",
-		"overwrite_header": true, "overwrite_css": true,
+		"overwrite_header":        true, "overwrite_css": true,
 		"bg_opacity": float64(0.5),
 	} {
 		if one[key] != want {

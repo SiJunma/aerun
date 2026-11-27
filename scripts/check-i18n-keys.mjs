@@ -101,6 +101,19 @@ for (const file of walkJs(srcDir)) {
 }
 
 const failures = [];
+// Keys only reachable through dynamic lookups (t(`admin.tabs.${activeTab}`))
+// — the static scan cannot see them, so they are asserted here by hand.
+// AdminPage builds the title/breadcrumb key from the hyphenated tab id;
+// the nav configs use the underscore spellings, so both must exist.
+const REQUIRED_KEYS = [
+  'admin.tabs.designs-defaults',
+  'admin.tabs.designs-custom',
+  'admin.tabs.designs-builtin',
+];
+for (const key of REQUIRED_KEYS) {
+  if (!enKeys.has(key)) failures.push(`EN: no ${key} — required dynamic key (see REQUIRED_KEYS)`);
+  if (!ruKeys.has(key)) failures.push(`RU: no ${key} — required dynamic key (see REQUIRED_KEYS)`);
+}
 for (const key of [...used.keys()].sort()) {
   if (!enKeys.has(key)) {
     failures.push(`EN: no ${key} — used in ${[...used.get(key)].sort().join(', ')}`);

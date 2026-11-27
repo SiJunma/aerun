@@ -1060,6 +1060,13 @@ export const translations = {
         designs_defaults: "Default Settings",
         designs_custom: "Custom Designs",
         designs_builtin: "Built-in Designs",
+        // Hyphenated aliases: AdminPage builds the title/breadcrumb key
+        // dynamically as `admin.tabs.${activeTab}`, and the tab ids are
+        // hyphenated (designs-defaults etc.). The nav configs use the
+        // underscore keys above, so both spellings must exist.
+        "designs-defaults": "Default Settings",
+        "designs-custom": "Custom Designs",
+        "designs-builtin": "Built-in Designs",
         users: "Users",
         roles: "Roles",
         categories: "Categories",
@@ -2848,6 +2855,13 @@ export const translations = {
         designs_defaults: "Настройки по умолчанию",
         designs_custom: "Кастомные дизайны",
         designs_builtin: "Встроенные дизайны",
+        // Hyphenated aliases: AdminPage builds the title/breadcrumb key
+        // dynamically as `admin.tabs.${activeTab}`, and the tab ids are
+        // hyphenated (designs-defaults etc.). The nav configs use the
+        // underscore keys above, so both spellings must exist.
+        "designs-defaults": "Настройки по умолчанию",
+        "designs-custom": "Кастомные дизайны",
+        "designs-builtin": "Встроенные дизайны",
         users: "Пользователи",
         roles: "Роли",
         categories: "Категории",

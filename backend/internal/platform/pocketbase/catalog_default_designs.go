@@ -1,7 +1,9 @@
 package pocketbase
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -44,12 +46,36 @@ func defaultDesignRecordPayload(r *core.Record) map[string]any {
 	return payload
 }
 
-func findDefaultDesignByKey(app core.App, key string) (*core.Record, error) {
+// findDefaultDesignByKeyOrID resolves a default design by its seeded key
+// ('dark' / 'light' / 'neutral') or by its record id. The single GET
+// (/api/aerun/default-designs/{key}) accepts either: the design preview
+// (?preview_design=...) passes a record id, while the admin edit modal and
+// the uploads pass keys. Key is tried first, then id, as two plain queries
+// rather than one `||` filter — there is no `||`-filter precedent in this
+// codebase, and the key-first order keeps the old behaviour (and precedence)
+// for every existing caller. The two namespaces cannot collide in practice
+// (seeded slugs vs PocketBase record ids), so the fallback only ever fires
+// for a genuine id.
+func findDefaultDesignByKeyOrID(app core.App, keyOrID string) (*core.Record, error) {
 	col, err := app.FindCollectionByNameOrId(defaultDesignsCollectionName)
 	if err != nil {
 		return nil, err
 	}
-	return app.FindFirstRecordByFilter(col, "key = {:key}", dbx.Params{"key": key})
+	rec, err := app.FindFirstRecordByFilter(col, "key = {:v}", dbx.Params{"v": keyOrID})
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if rec != nil {
+		return rec, nil
+	}
+	// No card with that key: try the record id. FindFirstRecordByFilter
+	// reports a miss as sql.ErrNoRows, not a nil record, so a miss here is
+	// a plain not-found for the callers (they check rec == nil).
+	rec, err = app.FindFirstRecordByFilter(col, "id = {:v}", dbx.Params{"v": keyOrID})
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	return rec, nil
 }
 
 // defaultDesignSummaryPayload is the lightweight list shape for
@@ -97,12 +123,12 @@ func listDefaultDesignsHandler(e *core.RequestEvent) error {
 }
 
 func getDefaultDesignHandler(e *core.RequestEvent) error {
-	key := strings.TrimSpace(e.Request.PathValue("key"))
-	if key == "" {
+	keyOrID := strings.TrimSpace(e.Request.PathValue("key"))
+	if keyOrID == "" {
 		return validationError("default design key is required")
 	}
 
-	rec, err := findDefaultDesignByKey(e.App, key)
+	rec, err := findDefaultDesignByKeyOrID(e.App, keyOrID)
 	if err != nil || rec == nil {
 		return notFoundError("default design not found")
 	}
@@ -141,7 +167,7 @@ func updateDefaultDesignHandler(e *core.RequestEvent) error {
 
 	now := time.Now()
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
-		rec, err := findDefaultDesignByKey(txApp, key)
+		rec, err := findDefaultDesignByKeyOrID(txApp, key)
 		if err != nil || rec == nil {
 			return 0, nil, notFoundError("default design not found")
 		}
