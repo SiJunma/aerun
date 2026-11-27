@@ -1,0 +1,356 @@
+/* Shared admin primitives.
+ *
+ * One home for the looks every admin surface shares: buttons, switches,
+ * form fields, cards, section titles. A rule that two tabs need lives
+ * here, once — never copied into a per-tab file under a new prefix. That
+ * is how the admin grew twenty byte-identical rule bodies across four
+ * files (2026-11-27 audit): one visual change meant editing four files,
+ * and the copies drifted. Per-tab files keep only what is genuinely
+ * theirs (grids, cards, charts, tables, modals).
+ *
+ * Targeting: AdminPage wraps every tab in <div class="admin-tab"
+ * data-tab="<tab-id>">. The same element everywhere is .admin-btn; one
+ * element in one place is .admin-tab[data-tab="push"] .admin-btn, or a
+ * modifier class on the element itself.
+ *
+ * Theme variables only, fonts never below 14px, no Bootstrap.
+ */
+
+/* ── Section titles ──────────────────────────────────────────────────────── */
+
+.admin-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-color);
+}
+
+.admin-subtitle {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-color);
+}
+
+.admin-muted {
+  font-size: 14px;
+  color: var(--secondary-color);
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+
+.admin-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+  font-family: inherit;
+}
+
+.admin-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.admin-btn--sm {
+  padding: 0.3rem 0.7rem;
+  font-size: 14px;
+}
+
+.admin-btn--icon {
+  padding: 0.4rem 0.55rem;
+  min-width: 34px;
+  min-height: 34px;
+}
+
+.admin-btn--primary {
+  background-color: var(--forum-view-btn-primary-bg, var(--primary-color));
+  border-color: var(--forum-view-btn-primary-border, var(--primary-color));
+  color: var(--topic-btn-primary-text, var(--bg-color));
+}
+
+.admin-btn--primary:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.admin-btn--secondary {
+  background-color: transparent;
+  border-color: var(--border-color);
+  color: var(--text-color);
+}
+
+.admin-btn--secondary:hover:not(:disabled) {
+  background-color: var(--block-bg);
+  border-color: var(--primary-color);
+}
+
+.admin-btn--ghost {
+  background-color: transparent;
+  border-color: var(--border-color);
+  color: var(--secondary-color);
+}
+
+.admin-btn--ghost:hover:not(:disabled) {
+  background-color: var(--block-bg);
+  color: var(--text-color);
+  border-color: var(--primary-color);
+}
+
+.admin-btn--activate:hover:not(:disabled) {
+  background-color: var(--success-bg);
+  border-color: var(--success-border);
+  color: var(--success-text);
+}
+
+.admin-btn--deactivate:hover:not(:disabled) {
+  background-color: rgba(245, 158, 11, 0.14);
+  border-color: var(--topic-pinned-color, #f59e0b);
+  color: var(--topic-pinned-color, #f59e0b);
+}
+
+.admin-btn--preview:hover:not(:disabled) {
+  background-color: rgba(var(--primary-rgb), 0.1);
+  border-color: var(--content-link-color);
+  color: var(--content-link-color);
+}
+
+.admin-btn--danger:hover:not(:disabled) {
+  background-color: var(--danger-bg);
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+}
+
+/* ── Form ────────────────────────────────────────────────────────────────── */
+
+.admin-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  font-size: 14px;
+  color: var(--text-color);
+}
+
+.admin-form__group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.admin-form__label {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+.admin-form__control,
+.admin-form__select,
+.admin-form__textarea {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  font-size: 14px;
+  line-height: 1.5;
+  font-family: inherit;
+  color: var(--input-text);
+  background-color: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 6px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.admin-form__control::placeholder,
+.admin-form__textarea::placeholder {
+  color: var(--input-placeholder);
+}
+
+.admin-form__control:focus,
+.admin-form__select:focus,
+.admin-form__textarea:focus {
+  outline: none;
+  border-color: var(--content-link-color);
+  box-shadow: 0 0 0 2px rgba(var(--primary-rgb), 0.15);
+}
+
+.admin-form__control--invalid {
+  border-color: var(--danger-border);
+}
+
+.admin-form__textarea {
+  resize: vertical;
+}
+
+.admin-form__hint {
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--secondary-color);
+}
+
+.admin-form__error {
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--danger-text);
+}
+
+/* Boxed notice for modal/form alerts (replaces Bootstrap <Alert>). */
+.admin-notice {
+  font-size: 14px;
+  line-height: 1.4;
+  padding: 0.4rem 0.65rem;
+  border-radius: 6px;
+  border: 1px solid transparent;
+}
+
+.admin-notice--danger {
+  background-color: var(--danger-bg);
+  color: var(--danger-text);
+  border-color: var(--danger-border);
+}
+
+.admin-notice--warning {
+  background-color: rgba(245, 158, 11, 0.14);
+  color: var(--text-color);
+  border-color: var(--topic-pinned-color, #f59e0b);
+}
+
+/* ── Toggle switch ───────────────────────────────────────────────────────── */
+
+.admin-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-color);
+  user-select: none;
+}
+
+.admin-switch--disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.admin-switch__input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 42px;
+  height: 24px;
+  border-radius: 999px;
+  background-color: var(--border-color);
+  border: 1px solid var(--border-color);
+  position: relative;
+  cursor: inherit;
+  flex-shrink: 0;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.admin-switch__input::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background-color: var(--card-bg);
+  transition: transform 0.15s ease;
+}
+
+.admin-switch__input:checked {
+  background-color: var(--content-link-color);
+  border-color: var(--content-link-color);
+}
+
+.admin-switch__input:checked::after {
+  transform: translateX(18px);
+}
+
+/* ── Button rows ─────────────────────────────────────────────────────────── */
+
+.admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.admin-actions--wide {
+  gap: 0.75rem;
+}
+
+/* ── Layout primitives ───────────────────────────────────────────────────── */
+
+.admin-stack {
+  display: flex;
+  flex-direction: column;
+}
+
+.admin-stack--xs {
+  gap: 0.25rem;
+}
+
+.admin-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Admin Cards & Panels (moved from AdminSidebar.css — the class was
+ * shared by the whole admin, but lived in the sidebar's file) ───────────── */
+
+.admin-card {
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.admin-card--spacing,
+.admin-card-spacing {
+  margin-bottom: 1.5rem;
+}
+
+.admin-card__header,
+.admin-card-header {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border-color);
+  background-color: transparent;
+}
+
+.admin-card__body,
+.admin-card-body {
+  padding: 1.5rem;
+}
+
+.admin-card__footer,
+.admin-card-footer {
+  padding: 0.75rem 1.5rem;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.admin-card__title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.admin-card__title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-color);
+}

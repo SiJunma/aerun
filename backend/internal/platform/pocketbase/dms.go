@@ -754,6 +754,15 @@ func createDMHandler(e *core.RequestEvent) error {
 
 			// Email, first-unread only, offline only (Firebase parity).
 			maybeEnqueueDMEmail(txApp, conv.Id, rUser, senderNick, cleanText)
+
+			// Push, same gates as the email (offline only, per-user toggle):
+			// maybeEnqueuePushNotification re-checks them, and a failure to
+			// queue must not cost the message — the send already succeeded.
+			_ = maybeEnqueuePushNotification(txApp, rUser.Id, "push:dm", "push:dm:"+msg.Id+":"+rUser.Id, PushContent{
+				Title: "New Direct Message from " + senderNick,
+				Body:  dmEmailSnippet(cleanText),
+				URL:   "/messages/" + conv.Id,
+			})
 		}
 
 		return http.StatusOK, map[string]any{
@@ -942,6 +951,11 @@ func appendMessageToConversation(
 		publishSignal(txApp, realtimeSignalDMPost, msg.Id, rID)
 		if u, uErr := txApp.FindRecordById(usersCollectionName, rID); uErr == nil && u != nil {
 			maybeEnqueueDMEmail(txApp, conv.Id, u, senderNick, cleanText)
+			_ = maybeEnqueuePushNotification(txApp, rID, "push:dm", "push:dm:"+msg.Id+":"+rID, PushContent{
+				Title: "New Direct Message from " + senderNick,
+				Body:  dmEmailSnippet(cleanText),
+				URL:   "/messages/" + conv.Id,
+			})
 		}
 	}
 

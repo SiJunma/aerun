@@ -24,27 +24,6 @@
   padding: 1rem 1.25rem;
 }
 
-.visits-header-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.visits-period-selector {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-
-.visits-date-controls {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-
 .visits-date-field {
   display: inline-flex;
   align-items: center;
@@ -67,27 +46,8 @@
 
 .visits-date-error {
   font-size: 14px;
-  color: #ef4444;
+  color: var(--danger-text);
   width: 100%;
-}
-
-.visits-refresh-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  background: transparent;
-  color: var(--text-color);
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius, 6px);
-  padding: 0.5rem 1rem;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.visits-refresh-btn:hover:not(:disabled) {
-  background: var(--hover-bg, rgba(255, 255, 255, 0.05));
-  border-color: var(--primary-color);
 }
 
 .visits-danger-btn {
@@ -146,11 +106,6 @@
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
-}
-
-.visits-text-muted {
-  color: var(--secondary-color);
-  font-size: 14px;
 }
 
 .visits-text-nowrap {
@@ -336,12 +291,6 @@
   gap: 0.75rem;
 }
 
-.visits-ranked-item {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
 .visits-ranked-header {
   display: flex;
   justify-content: space-between;
@@ -350,12 +299,6 @@
   font-size: 14px;
   font-weight: 500;
   color: var(--text-color);
-}
-
-.visits-ranked-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .visits-ranked-bar-bg {

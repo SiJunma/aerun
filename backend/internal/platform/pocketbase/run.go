@@ -325,6 +325,10 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 
 	// Global forum settings (public snapshot read, admin write)
 	group.GET("/settings", getGlobalSettingsHandler)
+	// Dynamic PWA manifest and icon redirects (migration 1780100001):
+	// public, no auth — browsers fetch the manifest before anyone signs in.
+	group.GET("/manifest.webmanifest", getManifestHandler)
+	group.GET("/pwa-icon/{kind}", getPWAIconHandler)
 	group.PATCH("/admin/settings", updateGlobalSettingsHandler(cfg)).
 		BindFunc(RequirePermission(auth.PermAdminAccess)).BindFunc(enforceIdempotency)
 	group.PUT("/admin/settings", updateGlobalSettingsHandler(cfg)).
@@ -346,6 +350,11 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	group.PUT("/admin/settings/placeholder/{kind}", uploadIdentityPlaceholderHandler).
 		BindFunc(RequirePermission(auth.PermAdminAccess))
 	group.PUT("/admin/settings/favicon", uploadSettingsFaviconHandler).
+		BindFunc(RequirePermission(auth.PermAdminAccess))
+	// PWA icon upload (migration 1780100001). No enforceIdempotency: the
+	// middleware buffers the body and caps it at 512 KB, which a multipart
+	// image can never satisfy (same reasoning as the favicon).
+	group.PUT("/admin/settings/pwa-icon/{kind}", uploadPWAIconHandler).
 		BindFunc(RequirePermission(auth.PermAdminAccess))
 
 	group.GET("/me", meHandler)

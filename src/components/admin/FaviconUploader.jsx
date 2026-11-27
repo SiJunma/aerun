@@ -145,11 +145,11 @@ const FaviconUploader = ({
         </div>
 
         {mode === 'preview' ? (
-          <div className="favicon-uploader__actions">
+          <div className="admin-actions">
             <button
               type="button"
               id={id}
-              className="favicon-uploader__btn"
+              className="admin-btn admin-btn--secondary"
               disabled={disabled || uploading}
               onClick={() => fileInputRef.current?.click()}
             >
@@ -158,7 +158,7 @@ const FaviconUploader = ({
             </button>
             <button
               type="button"
-              className="favicon-uploader__btn"
+              className="admin-btn admin-btn--secondary"
               disabled={disabled || uploading}
               onClick={() => {
                 setError('');
@@ -172,7 +172,7 @@ const FaviconUploader = ({
             {Boolean(value) && (
               <button
                 type="button"
-                className="favicon-uploader__btn favicon-uploader__btn--danger"
+                className="admin-btn admin-btn--secondary admin-btn--danger"
                 disabled={disabled || uploading}
                 onClick={handleClearClick}
               >
@@ -186,7 +186,7 @@ const FaviconUploader = ({
             <input
               id={id}
               type="url"
-              className="favicon-uploader__input"
+              className="admin-form__control favicon-uploader__input"
               value={urlInput}
               placeholder="https://..."
               disabled={disabled || uploading}
@@ -205,7 +205,7 @@ const FaviconUploader = ({
             />
             <button
               type="button"
-              className="favicon-uploader__btn favicon-uploader__btn--primary"
+              className="admin-btn admin-btn--primary"
               disabled={disabled || uploading}
               onClick={handleUrlConfirm}
             >
@@ -213,7 +213,7 @@ const FaviconUploader = ({
             </button>
             <button
               type="button"
-              className="favicon-uploader__btn"
+              className="admin-btn admin-btn--secondary"
               disabled={disabled || uploading}
               onClick={() => {
                 setError('');
@@ -226,17 +226,17 @@ const FaviconUploader = ({
         )}
       </div>
 
-      <div className="favicon-uploader__help">
+      <div className="admin-form__hint">
         {t('admin.settings.favicon_upload_help')}
       </div>
 
-      {error && <div className="favicon-uploader__error">{error}</div>}
+      {error && <div className="admin-form__error">{error}</div>}
 
       <input
         ref={fileInputRef}
         type="file"
         accept="image/png,image/jpeg,image/webp,image/gif,image/x-icon,image/vnd.microsoft.icon,.ico,image/svg+xml,.svg"
-        style={{ display: 'none' }}
+        hidden
         onChange={handleFileChange}
       />
     </div>

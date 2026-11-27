@@ -160,6 +160,18 @@ func globalSettingsSnapshot(app core.App, auth *core.Record) map[string]any {
 		"faviconUrl":            settings.FaviconURL,
 		"deletedAvatar":         settings.DeletedAvatarURL,
 		"guestAvatar":           settings.GuestAvatarURL,
+		// Web Push / PWA (migration 1780100001). The stored values, not the
+		// effective ones: empty means "use the built-in default", and the
+		// admin form must be able to tell the two apart.
+		"pushEnabled":          settings.PushEnabled,
+		"pwaName":              settings.PWAName,
+		"pwaShortName":         settings.PWAShortName,
+		"pwaDescription":       settings.PWADescription,
+		"pwaIcon192Url":        settings.PWAIcon192URL,
+		"pwaIcon512Url":        settings.PWAIcon512URL,
+		"pwaIconMaskableUrl":   settings.PWAIconMaskableURL,
+		"pwaIconAppleTouchUrl": settings.PWAIconAppleTouchURL,
+		"pwaIconBadgeUrl":      settings.PWAIconBadgeURL,
 	}
 	if card := resolveActiveDesignCard(app, auth); card != nil {
 		snapshot["activeDesign"] = card
@@ -226,6 +238,15 @@ func updateGlobalSettingsHandler(cfg config.Config) func(e *core.RequestEvent) e
 			FaviconURL            *string `json:"faviconUrl"`
 			DeletedAvatarURL      *string `json:"deletedAvatar"`
 			GuestAvatarURL        *string `json:"guestAvatar"`
+			PushEnabled           *bool   `json:"pushEnabled"`
+			PWAName               *string `json:"pwaName"`
+			PWAShortName          *string `json:"pwaShortName"`
+			PWADescription        *string `json:"pwaDescription"`
+			PWAIcon192URL         *string `json:"pwaIcon192Url"`
+			PWAIcon512URL         *string `json:"pwaIcon512Url"`
+			PWAIconMaskableURL    *string `json:"pwaIconMaskableUrl"`
+			PWAIconAppleTouchURL  *string `json:"pwaIconAppleTouchUrl"`
+			PWAIconBadgeURL       *string `json:"pwaIconBadgeUrl"`
 		}{}
 		if err := e.BindBody(&body); err != nil {
 			return validationError("invalid settings payload")
@@ -257,6 +278,18 @@ func updateGlobalSettingsHandler(cfg config.Config) func(e *core.RequestEvent) e
 		// never apply.
 		if n := body.MaxCharactersPerUser; n != nil && (*n < auth.MinMaxCharactersPerUser || *n > auth.HardMaxCharactersPerUser) {
 			return validationError("maxCharactersPerUser must be between 1 and 100")
+		}
+		// PWA manifest text (migration 1780100001): the column Max values
+		// are the bounds, checked here so an overlong value is a 400 naming
+		// the field rather than a 500 from Save.
+		if s := body.PWAName; s != nil && len(*s) > 128 {
+			return validationError("pwaName must be at most 128 characters")
+		}
+		if s := body.PWAShortName; s != nil && len(*s) > 64 {
+			return validationError("pwaShortName must be at most 64 characters")
+		}
+		if s := body.PWADescription; s != nil && len(*s) > 512 {
+			return validationError("pwaDescription must be at most 512 characters")
 		}
 
 		// The keys that arrived, for the audit row. Recorded as names only: the
@@ -376,6 +409,48 @@ func updateGlobalSettingsHandler(cfg config.Config) func(e *core.RequestEvent) e
 			if body.GuestAvatarURL != nil {
 				v := strings.TrimSpace(*body.GuestAvatarURL)
 				set("guestAvatar", func() { record.Set("guest_avatar_url", v) })
+			}
+			// Web Push master switch and PWA manifest text (migration
+			// 1780100001). The icon URLs are normally written by the
+			// dedicated upload endpoint (PUT /admin/settings/pwa-icon/{kind}),
+			// which owns the FileField; accepting the URL here lets an admin
+			// set or CLEAR an icon the same way they set the favicon, without
+			// the panel needing a second write path. Empty clears it.
+			if body.PushEnabled != nil {
+				v := *body.PushEnabled
+				set("pushEnabled", func() { record.Set("push_enabled", v) })
+			}
+			if body.PWAName != nil {
+				v := strings.TrimSpace(*body.PWAName)
+				set("pwaName", func() { record.Set("pwa_name", v) })
+			}
+			if body.PWAShortName != nil {
+				v := strings.TrimSpace(*body.PWAShortName)
+				set("pwaShortName", func() { record.Set("pwa_short_name", v) })
+			}
+			if body.PWADescription != nil {
+				v := strings.TrimSpace(*body.PWADescription)
+				set("pwaDescription", func() { record.Set("pwa_description", v) })
+			}
+			if body.PWAIcon192URL != nil {
+				v := strings.TrimSpace(*body.PWAIcon192URL)
+				set("pwaIcon192Url", func() { record.Set("pwa_icon_192_url", v) })
+			}
+			if body.PWAIcon512URL != nil {
+				v := strings.TrimSpace(*body.PWAIcon512URL)
+				set("pwaIcon512Url", func() { record.Set("pwa_icon_512_url", v) })
+			}
+			if body.PWAIconMaskableURL != nil {
+				v := strings.TrimSpace(*body.PWAIconMaskableURL)
+				set("pwaIconMaskableUrl", func() { record.Set("pwa_icon_maskable_url", v) })
+			}
+			if body.PWAIconAppleTouchURL != nil {
+				v := strings.TrimSpace(*body.PWAIconAppleTouchURL)
+				set("pwaIconAppleTouchUrl", func() { record.Set("pwa_icon_apple_touch_url", v) })
+			}
+			if body.PWAIconBadgeURL != nil {
+				v := strings.TrimSpace(*body.PWAIconBadgeURL)
+				set("pwaIconBadgeUrl", func() { record.Set("pwa_icon_badge_url", v) })
 			}
 
 			// The trail records the command, not its values: every key that

@@ -96,9 +96,9 @@ const BackgroundUploadField = ({ id, label, value, onUpload, onClear, disabled }
   };
 
   return (
-    <div className="designs-bg-field">
-      <span className="designs-form__label">{label}</span>
-      <div className="designs-bg-field__row">
+    <div className="admin-form__group">
+      <span className="admin-form__label">{label}</span>
+      <div className="admin-actions admin-actions--wide">
         <div className="designs-bg-field__preview">
           {displaySrc ? (
             <a href={displaySrc} target="_blank" rel="noreferrer" title={t('admin.designs.background_view')}>
@@ -108,10 +108,10 @@ const BackgroundUploadField = ({ id, label, value, onUpload, onClear, disabled }
             <ImageIcon size={18} aria-hidden="true" />
           )}
         </div>
-        <div className="designs-bg-field__actions">
+        <div className="admin-actions">
           <button
             type="button"
-            className="designs-btn designs-btn--secondary designs-btn--sm"
+            className="admin-btn admin-btn--secondary admin-btn--sm"
             disabled={disabled || uploading}
             onClick={() => inputRef.current?.click()}
           >
@@ -120,7 +120,7 @@ const BackgroundUploadField = ({ id, label, value, onUpload, onClear, disabled }
           </button>
           {displaySrc && (
             <a
-              className="designs-btn designs-btn--ghost designs-btn--sm"
+              className="admin-btn admin-btn--ghost admin-btn--sm"
               href={displaySrc}
               target="_blank"
               rel="noreferrer"
@@ -131,7 +131,7 @@ const BackgroundUploadField = ({ id, label, value, onUpload, onClear, disabled }
           {Boolean(value) && (
             <button
               type="button"
-              className="designs-btn designs-btn--ghost designs-btn--sm designs-btn--danger"
+              className="admin-btn admin-btn--ghost admin-btn--sm admin-btn--danger"
               disabled={disabled || uploading}
               onClick={onClear}
             >
@@ -141,7 +141,7 @@ const BackgroundUploadField = ({ id, label, value, onUpload, onClear, disabled }
           )}
         </div>
       </div>
-      {error && <div className="designs-form__error">{error}</div>}
+      {error && <div className="admin-form__error">{error}</div>}
       <input
         ref={inputRef}
         id={id}
@@ -161,11 +161,11 @@ const BackgroundUploadField = ({ id, label, value, onUpload, onClear, disabled }
 // switching it on does.
 const OverwriteField = ({ label, overwrite, onToggle, children }) => {
   return (
-    <div className="designs-form__group">
-      <label className="designs-switch">
+    <div className="admin-form__group">
+      <label className="admin-switch">
         <input
           type="checkbox"
-          className="designs-switch__input"
+          className="admin-switch__input"
           checked={Boolean(overwrite)}
           onChange={(e) => onToggle(e.target.checked)}
         />
@@ -699,17 +699,17 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
 
   const renderSurface1 = () => (
     <section className="designs-surface" aria-label={t('admin.designs.defaults_title')}>
-      <h4 className="designs-surface__title">{t('admin.designs.defaults_title')}</h4>
-      <p className="designs-surface__desc">{t('admin.designs.defaults_desc')}</p>
-      <div className="designs-form">
-        <div className="designs-form__group">
-          <label className="designs-form__label" htmlFor="defaults-forum-title">
+      <h4 className="admin-subtitle">{t('admin.designs.defaults_title')}</h4>
+      <p className="admin-form__hint">{t('admin.designs.defaults_desc')}</p>
+      <div className="admin-form">
+        <div className="admin-form__group">
+          <label className="admin-form__label" htmlFor="defaults-forum-title">
             {t('admin.designs.modal_title')}
           </label>
           <input
             id="defaults-forum-title"
             type="text"
-            className="designs-form__control"
+            className="admin-form__control"
             value={settings?.forumName || ''}
             onChange={(e) => setSettings((prev) => ({ ...prev, forumName: e.target.value }))}
           />
@@ -734,8 +734,8 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
           onValidityChange={setS1ValidityFor('footer')}
           minHeight="120px"
         />
-        <div className="designs-form__group">
-          <span className="designs-form__label">{t('admin.designs.footer_preview')}</span>
+        <div className="admin-form__group">
+          <span className="admin-form__label">{t('admin.designs.footer_preview')}</span>
           {sanitizedFooterPreview ? (
             <div className="designs-preview" dangerouslySetInnerHTML={{ __html: sanitizedFooterPreview }} />
           ) : (
@@ -743,8 +743,8 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
           )}
         </div>
 
-        <div className="designs-form__group">
-          <label className="designs-form__label" htmlFor="defaults-favicon">
+        <div className="admin-form__group">
+          <label className="admin-form__label" htmlFor="defaults-favicon">
             {t('admin.designs.modal_favicon')}
           </label>
           <FaviconUploader
@@ -758,8 +758,8 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
         </div>
 
         <div className="designs-form__row">
-          <div className="designs-form__group">
-            <label className="designs-form__label" htmlFor="defaults-placeholder-deleted">
+          <div className="admin-form__group">
+            <label className="admin-form__label" htmlFor="defaults-placeholder-deleted">
               {t('admin.settings.placeholder_deleted')}
             </label>
             <AvatarUploader
@@ -774,7 +774,7 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
             {settings?.deletedAvatar && (
               <button
                 type="button"
-                className="designs-btn designs-btn--secondary designs-btn--sm"
+                className="admin-btn admin-btn--secondary admin-btn--sm"
                 onClick={() => handleResetSettingsPlaceholder('deleted')}
                 disabled={s1Saving}
               >
@@ -782,8 +782,8 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
               </button>
             )}
           </div>
-          <div className="designs-form__group">
-            <label className="designs-form__label" htmlFor="defaults-placeholder-guest">
+          <div className="admin-form__group">
+            <label className="admin-form__label" htmlFor="defaults-placeholder-guest">
               {t('admin.settings.placeholder_guest')}
             </label>
             <AvatarUploader
@@ -798,7 +798,7 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
             {settings?.guestAvatar && (
               <button
                 type="button"
-                className="designs-btn designs-btn--secondary designs-btn--sm"
+                className="admin-btn admin-btn--secondary admin-btn--sm"
                 onClick={() => handleResetSettingsPlaceholder('guest')}
                 disabled={s1Saving}
               >
@@ -808,27 +808,27 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
           </div>
         </div>
 
-        <div className="designs-form__group">
-          <label className="designs-switch" htmlFor="defaults-allow-custom">
+        <div className="admin-form__group">
+          <label className="admin-switch" htmlFor="defaults-allow-custom">
             <input
               type="checkbox"
               id="defaults-allow-custom"
-              className="designs-switch__input"
+              className="admin-switch__input"
               checked={settings?.allowUserCustomDesign ?? true}
               onChange={(e) => setSettings((prev) => ({ ...prev, allowUserCustomDesign: e.target.checked }))}
             />
             <span>{t('admin.settings.allow_user_custom_design')}</span>
           </label>
-          <div className="designs-form__hint">{t('admin.settings.allow_user_custom_design_help')}</div>
+          <div className="admin-form__hint">{t('admin.settings.allow_user_custom_design_help')}</div>
         </div>
 
-        <div className="designs-form__group">
-          <label className="designs-form__label" htmlFor="defaults-default-design">
+        <div className="admin-form__group">
+          <label className="admin-form__label" htmlFor="defaults-default-design">
             {t('admin.settings.default_design')}
           </label>
           <select
             id="defaults-default-design"
-            className="designs-form__select"
+            className="admin-form__select"
             value={settings?.defaultDesignId || 'dark'}
             onChange={(e) => setSettings((prev) => ({ ...prev, defaultDesignId: e.target.value }))}
           >
@@ -845,13 +845,13 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
               </optgroup>
             )}
           </select>
-          <div className="designs-form__hint">{t('admin.settings.default_design_help')}</div>
+          <div className="admin-form__hint">{t('admin.settings.default_design_help')}</div>
         </div>
 
         <div>
           <button
             type="button"
-            className="designs-btn designs-btn--primary"
+            className="admin-btn admin-btn--primary"
             onClick={handleSaveDefaults}
             disabled={s1Saving || s1Validity.header === false || s1Validity.footer === false}
           >
@@ -883,7 +883,7 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
         {(surface === 'custom' || surface === 'all') && (
           <button
             type="button"
-            className="designs-btn designs-btn--primary"
+            className="admin-btn admin-btn--primary"
             onClick={() => handleOpenModal()}
           >
             <PlusCircle size={18} />
@@ -897,7 +897,7 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
       {/* Surface 2 — custom designs */}
       {(surface === 'custom' || surface === 'all') && (
       <section className="designs-surface" aria-label={t('admin.designs.custom_title')}>
-        <h4 className="designs-surface__title">{t('admin.designs.custom_title')}</h4>
+        <h4 className="admin-subtitle">{t('admin.designs.custom_title')}</h4>
         {designs.length === 0 ? (
           <div className="designs-empty">{t('admin.designs.empty_list')}</div>
         ) : (
@@ -940,8 +940,8 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
                 <div className="designs-card__actions">
                   <button
                     type="button"
-                    className={`designs-btn designs-btn--ghost designs-btn--icon ${
-                      design.isActive ? 'designs-btn--deactivate' : 'designs-btn--activate'
+                    className={`admin-btn admin-btn--ghost admin-btn--icon ${
+                      design.isActive ? 'admin-btn--deactivate' : 'admin-btn--activate'
                     }`}
                     onClick={() => toggleActivate(design)}
                     title={design.isActive ? t('admin.designs.deactivate') : t('admin.designs.activate')}
@@ -951,7 +951,7 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
                   </button>
                   <button
                     type="button"
-                    className="designs-btn designs-btn--ghost designs-btn--icon designs-btn--preview"
+                    className="admin-btn admin-btn--ghost admin-btn--icon admin-btn--preview"
                     onClick={() => handlePreview(design.id)}
                     title={t('admin.designs.preview')}
                     aria-label={t('admin.designs.preview')}
@@ -960,7 +960,7 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
                   </button>
                   <button
                     type="button"
-                    className="designs-btn designs-btn--ghost designs-btn--icon"
+                    className="admin-btn admin-btn--ghost admin-btn--icon"
                     onClick={() => handleOpenModal({ kind: 'custom', id: design.id, card: design })}
                     title={t('admin.designs.edit')}
                     aria-label={t('admin.designs.edit')}
@@ -969,7 +969,7 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
                   </button>
                   <button
                     type="button"
-                    className="designs-btn designs-btn--ghost designs-btn--icon"
+                    className="admin-btn admin-btn--ghost admin-btn--icon"
                     onClick={() => handleClone(design)}
                     title={t('admin.designs.clone')}
                     aria-label={t('admin.designs.clone')}
@@ -978,7 +978,7 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
                   </button>
                   <button
                     type="button"
-                    className="designs-btn designs-btn--ghost designs-btn--icon designs-btn--danger"
+                    className="admin-btn admin-btn--ghost admin-btn--icon admin-btn--danger"
                     onClick={() => handleDelete(design)}
                     title={t('admin.designs.delete')}
                     aria-label={t('admin.designs.delete')}
@@ -996,8 +996,8 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
       {/* Surface 3 — built-in (default) designs */}
       {(surface === 'builtin' || surface === 'all') && (
       <section className="designs-surface" aria-label={t('admin.designs.default_designs_title')}>
-        <h4 className="designs-surface__title">{t('admin.designs.default_designs_title')}</h4>
-        <p className="designs-surface__desc">{t('admin.designs.default_designs_desc')}</p>
+        <h4 className="admin-subtitle">{t('admin.designs.default_designs_title')}</h4>
+        <p className="admin-form__hint">{t('admin.designs.default_designs_desc')}</p>
         {defaultDesigns.length === 0 ? (
           <div className="designs-empty">{t('admin.designs.empty_default_list')}</div>
         ) : (
@@ -1027,7 +1027,7 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
                 <div className="designs-card__actions">
                   <button
                     type="button"
-                    className="designs-btn designs-btn--ghost designs-btn--icon designs-btn--preview"
+                    className="admin-btn admin-btn--ghost admin-btn--icon admin-btn--preview"
                     onClick={() => handlePreview(card.id)}
                     title={t('admin.designs.preview')}
                     aria-label={t('admin.designs.preview')}
@@ -1036,17 +1036,17 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
                   </button>
                   <button
                     type="button"
-                    className="designs-btn designs-btn--ghost designs-btn--icon"
+                    className="admin-btn admin-btn--ghost admin-btn--icon"
                     onClick={() => handleOpenModal({ kind: 'default', id: card.id, key: card.key, card })}
                     title={t('admin.designs.edit')}
                     aria-label={t('admin.designs.edit')}
                   >
                     <Edit2 size={16} />
                   </button>
-                  <label className="designs-switch designs-switch--inline">
+                  <label className="admin-switch">
                     <input
                       type="checkbox"
-                      className="designs-switch__input"
+                      className="admin-switch__input"
                       checked={Boolean(card.showInList)}
                       onChange={() => toggleDefaultShowInList(card)}
                     />
@@ -1076,7 +1076,7 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
               <span className="designs-modal-footer__try">
                 <button
                   type="button"
-                  className="designs-btn designs-btn--secondary"
+                  className="admin-btn admin-btn--secondary"
                   onClick={() => handlePreview(editingTarget.id)}
                 >
                   {t('admin.designs.preview')}
@@ -1085,14 +1085,14 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
                   <>
                     <button
                       type="button"
-                      className="designs-btn designs-btn--secondary"
+                      className="admin-btn admin-btn--secondary"
                       onClick={handleSetAsMyTheme}
                     >
                       {t('admin.designs.set_as_my_theme')}
                     </button>
                     <button
                       type="button"
-                      className="designs-btn designs-btn--secondary"
+                      className="admin-btn admin-btn--secondary"
                       onClick={handleSetAsForumDefault}
                     >
                       {t('admin.designs.set_as_forum_default')}
@@ -1103,14 +1103,14 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
             )}
             <button
               type="button"
-              className="designs-btn designs-btn--secondary"
+              className="admin-btn admin-btn--secondary"
               onClick={handleCloseModal}
             >
               {t('common.cancel')}
             </button>
             <button
               type="button"
-              className="designs-btn designs-btn--primary"
+              className="admin-btn admin-btn--primary"
               onClick={handleSave}
               disabled={modalLoading || !form.name.trim() || saveBlocked}
             >
@@ -1120,25 +1120,25 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
         }
       >
         <form
-          className="designs-form"
+          className="admin-form"
           onSubmit={(e) => {
             e.preventDefault();
             handleSave();
           }}
         >
           {modalLoading && (
-            <div className="designs-form__loading">{t('common.loading')}</div>
+            <div className="admin-muted">{t('common.loading')}</div>
           )}
           <section className="designs-modal-section" aria-label={t('admin.designs.section_general')}>
           <h5 className="designs-modal-section__title">{t('admin.designs.section_general')}</h5>
           {!isDefaultTarget && (
-            <div className="designs-form__group">
-              <label className="designs-form__label" htmlFor="design-base-theme">
+            <div className="admin-form__group">
+              <label className="admin-form__label" htmlFor="design-base-theme">
                 {t('admin.designs.modal_base_theme')}
               </label>
               <select
                 id="design-base-theme"
-                className="designs-form__select"
+                className="admin-form__select"
                 value={form.baseTheme}
                 onChange={(e) => setForm({ ...form, baseTheme: e.target.value })}
               >
@@ -1146,21 +1146,21 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
                 <option value="light">{t('profile.theme_light')}</option>
                 <option value="neutral">{t('profile.theme_neutral')}</option>
               </select>
-              <div className="designs-form__hint">
+              <div className="admin-form__hint">
                 {t('admin.designs.modal_base_theme_help')}
               </div>
             </div>
           )}
 
-          <div className="designs-form__group">
+          <div className="admin-form__group">
             <label
-              className={`designs-switch ${showInListDisabled ? 'designs-switch--disabled' : ''}`}
+              className={`admin-switch ${showInListDisabled ? 'admin-switch--disabled' : ''}`}
               htmlFor="show-in-list"
             >
               <input
                 type="checkbox"
                 id="show-in-list"
-                className="designs-switch__input"
+                className="admin-switch__input"
                 disabled={showInListDisabled}
                 checked={showInListDisabled ? false : form.showInList}
                 onChange={(e) => setForm({ ...form, showInList: e.target.checked })}
@@ -1168,20 +1168,20 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
               <span>{t('admin.designs.modal_show_in_list')}</span>
             </label>
             {showInListDisabled && (
-              <div className="designs-form__hint">
+              <div className="admin-form__hint">
                 {t('admin.designs.show_in_list_disabled_hint')}
               </div>
             )}
           </div>
 
-          <div className="designs-form__group">
-            <label className="designs-form__label" htmlFor="design-name">
+          <div className="admin-form__group">
+            <label className="admin-form__label" htmlFor="design-name">
               {t('admin.designs.modal_name')}
             </label>
             <input
               id="design-name"
               type="text"
-              className={`designs-form__control ${nameInvalid ? 'designs-form__control--invalid' : ''}`}
+              className={`admin-form__control ${nameInvalid ? 'admin-form__control--invalid' : ''}`}
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
             />
@@ -1258,14 +1258,14 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
             overwrite={form.overwriteTitle}
             onToggle={(val) => setForm((prev) => ({ ...prev, overwriteTitle: val }))}
           >
-            <div className="designs-form__group">
-              <label className="designs-form__label" htmlFor="design-forum-title">
+            <div className="admin-form__group">
+              <label className="admin-form__label" htmlFor="design-forum-title">
                 {t('admin.designs.modal_title')}
               </label>
               <input
                 id="design-forum-title"
                 type="text"
-                className="designs-form__control"
+                className="admin-form__control"
                 value={form.forumTitle}
                 onChange={(e) => setForm({ ...form, forumTitle: e.target.value })}
               />
@@ -1277,8 +1277,8 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
             overwrite={form.overwriteFavicon}
             onToggle={(val) => setForm((prev) => ({ ...prev, overwriteFavicon: val }))}
           >
-            <div className="designs-form__group">
-              <label className="designs-form__label" htmlFor="design-favicon">
+            <div className="admin-form__group">
+              <label className="admin-form__label" htmlFor="design-favicon">
                 {t('admin.designs.modal_favicon')}
               </label>
               <FaviconUploader
@@ -1305,8 +1305,8 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
             overwrite={form.overwritePlaceholderDeleted}
             onToggle={(val) => setForm((prev) => ({ ...prev, overwritePlaceholderDeleted: val }))}
           >
-            <div className="designs-form__group">
-              <label className="designs-form__label" htmlFor="design-placeholder-deleted">
+            <div className="admin-form__group">
+              <label className="admin-form__label" htmlFor="design-placeholder-deleted">
                 {t('admin.settings.placeholder_deleted')}
               </label>
               <AvatarUploader
@@ -1320,7 +1320,7 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
               {form.placeholderDeletedUrl && !form.placeholderDeletedUrl.startsWith('blob:') && (
                 <button
                   type="button"
-                  className="designs-btn designs-btn--secondary designs-btn--sm"
+                  className="admin-btn admin-btn--secondary admin-btn--sm"
                   onClick={() => handlePlaceholderClear('deleted')}
                 >
                   {t('admin.settings.placeholder_reset')}
@@ -1334,8 +1334,8 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
             overwrite={form.overwritePlaceholderGuest}
             onToggle={(val) => setForm((prev) => ({ ...prev, overwritePlaceholderGuest: val }))}
           >
-            <div className="designs-form__group">
-              <label className="designs-form__label" htmlFor="design-placeholder-guest">
+            <div className="admin-form__group">
+              <label className="admin-form__label" htmlFor="design-placeholder-guest">
                 {t('admin.settings.placeholder_guest')}
               </label>
               <AvatarUploader
@@ -1349,7 +1349,7 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
               {form.placeholderGuestUrl && !form.placeholderGuestUrl.startsWith('blob:') && (
                 <button
                   type="button"
-                  className="designs-btn designs-btn--secondary designs-btn--sm"
+                  className="admin-btn admin-btn--secondary admin-btn--sm"
                   onClick={() => handlePlaceholderClear('guest')}
                 >
                   {t('admin.settings.placeholder_reset')}
@@ -1410,7 +1410,7 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
           <>
             <button
               type="button"
-              className="designs-btn designs-btn--secondary"
+              className="admin-btn admin-btn--secondary"
               onClick={() =>
                 setDeactivateModal({ show: false, designIdToDeactivate: null, replacementId: '' })
               }
@@ -1419,7 +1419,7 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
             </button>
             <button
               type="button"
-              className="designs-btn designs-btn--primary"
+              className="admin-btn admin-btn--primary"
               onClick={handleConfirmDeactivate}
             >
               {t('common.confirm')}
@@ -1431,13 +1431,13 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
           <p className="designs-deactivate-body__msg">
             {t('admin.designs.confirm_deactivate_message')}
           </p>
-          <div className="designs-form__group">
-            <label className="designs-form__label" htmlFor="design-replacement">
+          <div className="admin-form__group">
+            <label className="admin-form__label" htmlFor="design-replacement">
               {t('admin.designs.select_replacement')}
             </label>
             <select
               id="design-replacement"
-              className="designs-form__select"
+              className="admin-form__select"
               value={deactivateModal.replacementId}
               onChange={(e) =>
                 setDeactivateModal({ ...deactivateModal, replacementId: e.target.value })

@@ -20,8 +20,8 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/types"
 
-	"github.com/SiJunma/aerun/backend/internal/auth"
 	"github.com/SherClockHolmes/webpush-go"
+	"github.com/SiJunma/aerun/backend/internal/auth"
 )
 
 const forumSettingsCollectionName = "forum_settings"
@@ -95,6 +95,51 @@ type forumSettings struct {
 	VAPIDPublicKey  string
 	VAPIDPrivateKey string
 	PushEnabled     bool
+
+	// PWA manifest values (migration 1780100001). The manifest is served
+	// dynamically from these columns instead of a hardcoded file in public/,
+	// so the admin panel owns the name, the description and the icons.
+	// Empty means "use the built-in default below", so a forum that
+	// upgraded before anyone opened the panel keeps the manifest it had.
+	PWAName              string
+	PWAShortName         string
+	PWADescription       string
+	PWAIcon192URL        string
+	PWAIcon512URL        string
+	PWAIconMaskableURL   string
+	PWAIconAppleTouchURL string
+	PWAIconBadgeURL      string
+}
+
+// Default PWA manifest values: what the hardcoded public/manifest.webmanifest
+// served before 1780100001, so an unconfigured forum keeps its old manifest.
+const (
+	defaultPWAName        = "Aerun — Текстовая ролевая игра"
+	defaultPWAShortName   = "Aerun"
+	defaultPWADescription = "Форум текстовых ролевых игр, авторского творчества и общения"
+)
+
+// pwaManifestSettings resolves the effective PWA values: the stored column
+// when set, the built-in default otherwise.
+func (s forumSettings) pwaName() string {
+	if s.PWAName != "" {
+		return s.PWAName
+	}
+	return defaultPWAName
+}
+
+func (s forumSettings) pwaShortName() string {
+	if s.PWAShortName != "" {
+		return s.PWAShortName
+	}
+	return defaultPWAShortName
+}
+
+func (s forumSettings) pwaDescription() string {
+	if s.PWADescription != "" {
+		return s.PWADescription
+	}
+	return defaultPWADescription
 }
 
 // ensureVAPIDKeys generates and saves VAPID keys if they don't exist.
@@ -195,6 +240,14 @@ func loadForumSettings(app core.App) forumSettings {
 	settings.VAPIDPublicKey = record.GetString("vapid_public_key")
 	settings.VAPIDPrivateKey = record.GetString("vapid_private_key")
 	settings.PushEnabled = record.GetBool("push_enabled")
+	settings.PWAName = record.GetString("pwa_name")
+	settings.PWAShortName = record.GetString("pwa_short_name")
+	settings.PWADescription = record.GetString("pwa_description")
+	settings.PWAIcon192URL = record.GetString("pwa_icon_192_url")
+	settings.PWAIcon512URL = record.GetString("pwa_icon_512_url")
+	settings.PWAIconMaskableURL = record.GetString("pwa_icon_maskable_url")
+	settings.PWAIconAppleTouchURL = record.GetString("pwa_icon_apple_touch_url")
+	settings.PWAIconBadgeURL = record.GetString("pwa_icon_badge_url")
 	if v := record.GetString("reputation_style"); v != "" {
 		settings.ReputationStyle = v
 	}

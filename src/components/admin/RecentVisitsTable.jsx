@@ -1,5 +1,4 @@
 import React from 'react';
-import { Button } from 'react-bootstrap';
 import { useI18n } from '../../contexts/I18nProvider';
 import ForumPagination from '../common/ForumPagination';
 
@@ -29,15 +28,14 @@ export default function RecentVisitsTable({
             { id: 'guests', label: t('admin.visits.table.filter_guests', 'Guests') },
             { id: 'bots', label: t('admin.visits.table.filter_bots', 'Bots') },
           ].map((f) => (
-            <Button
+            <button
               key={f.id}
               type="button"
-              size="sm"
-              variant={filter === f.id ? 'primary' : 'outline-secondary'}
+              className={filter === f.id ? 'admin-btn admin-btn--primary admin-btn--sm' : 'admin-btn admin-btn--secondary admin-btn--sm'}
               onClick={() => onFilterChange && onFilterChange(f.id)}
             >
               {f.label}
-            </Button>
+            </button>
           ))}
         </div>
 
@@ -105,7 +103,7 @@ export default function RecentVisitsTable({
 
                 return (
                   <tr key={v.id}>
-                    <td className="visits-text-muted visits-text-nowrap">{dateStr}</td>
+                    <td className="admin-muted visits-text-nowrap">{dateStr}</td>
                     <td>{identityBadge}</td>
                     <td>
                       <button

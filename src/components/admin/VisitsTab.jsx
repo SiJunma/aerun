@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { Button, Form } from 'react-bootstrap';
 import { RotateCw, ShieldBan } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
 import { useAuth } from '../../contexts/AuthProvider';
@@ -206,7 +205,7 @@ export default function VisitsTab() {
     <div className="visits-dashboard">
       {/* Header controls */}
       <div className="visits-header-bar">
-        <div className="visits-period-selector">
+        <div className="admin-actions">
           {[
             { id: 'today', label: t('admin.visits.periods.today', 'Today') },
             { id: '7d', label: t('admin.visits.periods.seven_days', '7 Days') },
@@ -214,28 +213,26 @@ export default function VisitsTab() {
             { id: 'day', label: t('admin.visits.periods.single_day', 'Day') },
             { id: 'custom', label: t('admin.visits.periods.custom_range', 'Range') },
           ].map((p) => (
-            <Button
+            <button
               key={p.id}
               type="button"
-              size="sm"
-              variant={periodMode === p.id ? 'primary' : 'outline-secondary'}
+              className={periodMode === p.id ? 'admin-btn admin-btn--primary admin-btn--sm' : 'admin-btn admin-btn--secondary admin-btn--sm'}
               onClick={() => {
                 setPeriodMode(p.id);
                 setVisitsPage(1);
               }}
             >
               {p.label}
-            </Button>
+            </button>
           ))}
 
           {periodMode === 'day' && (
-            <div className="visits-date-controls">
+            <div className="admin-actions">
               <label className="visits-date-field">
                 <span className="visits-date-label">{t('admin.visits.periods.date_label', 'Date')}:</span>
-                <Form.Control
+                <input
                   type="date"
-                  size="sm"
-                  className="visits-date-input"
+                  className="admin-form__control visits-date-input"
                   value={singleDate}
                   max={todayStr}
                   onChange={(e) => {
@@ -248,13 +245,12 @@ export default function VisitsTab() {
           )}
 
           {periodMode === 'custom' && (
-            <div className="visits-date-controls">
+            <div className="admin-actions">
               <label className="visits-date-field">
                 <span className="visits-date-label">{t('admin.visits.periods.from_label', 'From')}:</span>
-                <Form.Control
+                <input
                   type="date"
-                  size="sm"
-                  className="visits-date-input"
+                  className="admin-form__control visits-date-input"
                   value={rangeFrom}
                   max={rangeTo || todayStr}
                   onChange={(e) => {
@@ -265,10 +261,9 @@ export default function VisitsTab() {
               </label>
               <label className="visits-date-field">
                 <span className="visits-date-label">{t('admin.visits.periods.to_label', 'To')}:</span>
-                <Form.Control
+                <input
                   type="date"
-                  size="sm"
-                  className="visits-date-input"
+                  className="admin-form__control visits-date-input"
                   value={rangeTo}
                   min={rangeFrom || undefined}
                   max={todayStr}
@@ -288,7 +283,7 @@ export default function VisitsTab() {
           )}
         </div>
 
-        <div className="visits-header-actions">
+        <div className="admin-actions admin-actions--wide">
           {canManageBans && (
             <button
               type="button"
@@ -301,7 +296,7 @@ export default function VisitsTab() {
           )}
           <button
             type="button"
-            className="visits-refresh-btn"
+            className="admin-btn admin-btn--secondary"
             onClick={refreshAll}
             disabled={loading}
           >
@@ -577,18 +572,17 @@ export default function VisitsTab() {
                 { id: 'active', label: t('admin.visits.ban_table.status_active', 'Active Bans') },
                 { id: 'all', label: t('admin.visits.ban_table.status_all', 'All History') },
               ].map((st) => (
-                <Button
+                <button
                   key={st.id}
                   type="button"
-                  size="sm"
-                  variant={bansStatus === st.id ? 'primary' : 'outline-secondary'}
+                  className={bansStatus === st.id ? 'admin-btn admin-btn--primary admin-btn--sm' : 'admin-btn admin-btn--secondary admin-btn--sm'}
                   onClick={() => {
                     setBansStatus(st.id);
                     setBansPage(1);
                   }}
                 >
                   {st.label}
-                </Button>
+                </button>
               ))}
             </div>
           </div>
@@ -617,27 +611,26 @@ export default function VisitsTab() {
                             <span className="visits-ip-badge">{b.ip_or_subnet}</span>
                           </td>
                           <td>{b.reason}</td>
-                          <td className="visits-text-muted visits-text-nowrap">
+                          <td className="admin-muted visits-text-nowrap">
                             {b.created_at ? new Date(b.created_at).toLocaleDateString() : '—'}
                           </td>
-                          <td className="visits-text-muted visits-text-nowrap">
+                          <td className="admin-muted visits-text-nowrap">
                             {b.expires_at
                               ? new Date(b.expires_at).toLocaleString()
                               : t('admin.visits.ban_table.permanent', 'Permanent')}
                           </td>
                           <td>
                             {b.is_active ? (
-                              <Button
+                              <button
                                 type="button"
-                                size="sm"
-                                variant="outline-secondary"
+                                className="admin-btn admin-btn--secondary admin-btn--sm"
                                 disabled={unbanningId === b.id}
                                 onClick={() => handleUnbanRow(b.id)}
                               >
                                 {t('admin.visits.ban_table.unban', 'Unban')}
-                              </Button>
+                              </button>
                             ) : (
-                              <span className="visits-text-muted">—</span>
+                              <span className="admin-muted">—</span>
                             )}
                           </td>
                         </tr>

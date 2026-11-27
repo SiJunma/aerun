@@ -28,9 +28,9 @@ export default function RankedBarList({ items = [], maxCount = 0 }) {
         const name = item.name || 'Unknown';
 
         return (
-          <div key={idx} className="visits-ranked-item">
+          <div key={idx} className="admin-stack admin-stack--xs">
             <div className="visits-ranked-header">
-              <span className="visits-ranked-name" title={name}>{name}</span>
+              <span className="admin-truncate" title={name}>{name}</span>
               <span className="visits-text-nowrap">
                 {count.toLocaleString()} ({sharePercent}%)
               </span>

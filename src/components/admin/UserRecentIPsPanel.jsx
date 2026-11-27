@@ -37,13 +37,13 @@ export default function UserRecentIPsPanel({ userId, onSelectIP }) {
         {t('admin.visits.user_ips.title', 'Activity IP Addresses')}
       </h6>
       {loading ? (
-        <div className="visits-text-muted">
+        <div className="admin-muted">
           {t('admin.visits.user_ips.loading', 'Loading IP history...')}
         </div>
       ) : error ? (
         <ErrorCard error={error} onRetry={loadIPs} />
       ) : items.length === 0 ? (
-        <div className="visits-text-muted">
+        <div className="admin-muted">
           {t('admin.visits.user_ips.empty', 'No recorded IP visits for this user yet.')}
         </div>
       ) : (
@@ -73,10 +73,10 @@ export default function UserRecentIPsPanel({ userId, onSelectIP }) {
                   <td>
                     {row.country || 'XX'} {row.city ? `(${row.city})` : ''}
                   </td>
-                  <td className="visits-text-muted visits-text-nowrap">
+                  <td className="admin-muted visits-text-nowrap">
                     {row.first_seen ? new Date(row.first_seen).toLocaleDateString() : '—'}
                   </td>
-                  <td className="visits-text-muted visits-text-nowrap">
+                  <td className="admin-muted visits-text-nowrap">
                     {row.last_seen ? new Date(row.last_seen).toLocaleDateString() : '—'}
                   </td>
                   <td>{row.visits}</td>

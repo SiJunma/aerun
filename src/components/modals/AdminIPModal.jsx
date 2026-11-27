@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Button } from 'react-bootstrap';
 import ForumModal from '../common/ForumModal';
 import ErrorCard from '../common/ErrorCard';
 import { useI18n } from '../../contexts/I18nProvider';
@@ -84,18 +83,20 @@ export default function AdminIPModal({
           <div>
             {canManageBans && dossier && (
               dossier.is_banned ? (
-                <Button
-                  variant="outline-success"
+                <button
+                  type="button"
+                  className="admin-btn admin-btn--ghost admin-btn--activate"
                   onClick={handleUnban}
                   disabled={unbanning}
                 >
                   {unbanning
                     ? t('admin.visits.dossier.processing', 'Processing...')
                     : t('admin.visits.dossier.unban_action', 'Unban IP')}
-                </Button>
+                </button>
               ) : rawBanTarget ? (
-                <Button
-                  variant="danger"
+                <button
+                  type="button"
+                  className="admin-btn admin-btn--ghost admin-btn--danger"
                   onClick={() => {
                     onHide();
                     if (onOpenBanModal) {
@@ -104,13 +105,13 @@ export default function AdminIPModal({
                   }}
                 >
                   {t('admin.visits.dossier.ban_action', 'Ban IP')}
-                </Button>
+                </button>
               ) : null
             )}
           </div>
-          <Button variant="secondary" onClick={onHide}>
+          <button type="button" className="admin-btn admin-btn--secondary" onClick={onHide}>
             {t('admin.visits.dossier.close', 'Close')}
-          </Button>
+          </button>
         </div>
       }
     >
@@ -164,7 +165,7 @@ export default function AdminIPModal({
               {(dossier.associated_accounts || []).length})
             </h5>
             {!dossier.associated_accounts || dossier.associated_accounts.length === 0 ? (
-              <div className="visits-text-muted">
+              <div className="admin-muted">
                 {t('admin.visits.dossier.no_accounts', 'No registered accounts recorded from this IP')}
               </div>
             ) : (
@@ -186,10 +187,10 @@ export default function AdminIPModal({
                           <strong>{acc.user?.nickname || acc.user?.id}</strong>
                         </td>
                         <td>{acc.user?.role}</td>
-                        <td className="visits-text-muted">
+                        <td className="admin-muted">
                           {acc.first_seen ? new Date(acc.first_seen).toLocaleDateString() : '—'}
                         </td>
-                        <td className="visits-text-muted">
+                        <td className="admin-muted">
                           {acc.last_seen ? new Date(acc.last_seen).toLocaleDateString() : '—'}
                         </td>
                         <td>{acc.visits}</td>
@@ -202,7 +203,7 @@ export default function AdminIPModal({
           </div>
 
           {/* Guest Stats */}
-          <div className="visits-text-muted">
+          <div className="admin-muted">
             <strong>{t('admin.visits.dossier.guest_sessions', 'Guest Sessions')}:</strong>{' '}
             {dossier.guest_count || 0}
           </div>
@@ -257,7 +258,7 @@ export default function AdminIPModal({
 
                     return (
                       <tr key={rv.id}>
-                        <td className="visits-text-muted visits-text-nowrap">{dateStr}</td>
+                        <td className="admin-muted visits-text-nowrap">{dateStr}</td>
                         <td>{identityBadge}</td>
                         <td>
                           {rv.device || 'unknown'} · {rv.browser || rv.os || 'Other'}

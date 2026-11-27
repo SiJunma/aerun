@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { Button, Form, Alert } from 'react-bootstrap';
 import ForumModal from '../common/ForumModal';
 import { useI18n } from '../../contexts/I18nProvider';
 import { createIPBan } from '../../api/analytics';
@@ -72,62 +71,63 @@ export default function BanIPModal({
       size="md"
       footer={
         <>
-          <Button variant="secondary" onClick={onHide} disabled={saving}>
+          <button type="button" className="admin-btn admin-btn--secondary" onClick={onHide} disabled={saving}>
             {t('admin.visits.ban_modal.cancel', 'Cancel')}
-          </Button>
-          <Button variant="danger" onClick={handleSubmit} disabled={saving}>
+          </button>
+          <button type="button" className="admin-btn admin-btn--ghost admin-btn--danger" onClick={handleSubmit} disabled={saving}>
             {saving
               ? t('admin.visits.ban_modal.saving', 'Saving...')
               : t('admin.visits.ban_modal.confirm', 'Apply Ban')}
-          </Button>
+          </button>
         </>
       }
     >
-      {error && <Alert variant="danger">{error}</Alert>}
+      {error && <div className="admin-notice admin-notice--danger" role="alert">{error}</div>}
 
       {associatedAccountsCount > 3 && (
-        <Alert variant="warning">
+        <div className="admin-notice admin-notice--warning">
           {t(
             'admin.visits.ban_modal.nat_warning',
             'Warning: Over {count} accounts have been active from this IP. Banning may affect innocent users on shared NAT/network.'
           ).replace('{count}', String(associatedAccountsCount))}
-        </Alert>
+        </div>
       )}
 
-      <Form onSubmit={handleSubmit}>
-        <Form.Group className="mb-3">
-          <Form.Label>{t('admin.visits.ban_modal.ip_label', 'IP Address or CIDR Subnet')}</Form.Label>
-          <Form.Control
+      <form className="admin-form" onSubmit={handleSubmit}>
+        <div className="admin-form__group">
+          <label className="admin-form__label">{t('admin.visits.ban_modal.ip_label', 'IP Address or CIDR Subnet')}</label>
+          <input
             type="text"
+            className="admin-form__control"
             value={ipOrSubnet}
             onChange={(e) => setIpOrSubnet(e.target.value)}
             placeholder={t('admin.visits.ban_modal.ip_placeholder', 'e.g., 198.51.100.1 or 198.51.100.0/24')}
             required
           />
-        </Form.Group>
+        </div>
 
-        <Form.Group className="mb-3">
-          <Form.Label>{t('admin.visits.ban_modal.reason_label', 'Reason for Blocking')}</Form.Label>
-          <Form.Control
-            as="textarea"
+        <div className="admin-form__group">
+          <label className="admin-form__label">{t('admin.visits.ban_modal.reason_label', 'Reason for Blocking')}</label>
+          <textarea
             rows={2}
+            className="admin-form__control admin-form__textarea"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             placeholder={t('admin.visits.ban_modal.reason_placeholder', 'e.g., spammer botnet, brute force')}
             required
           />
-        </Form.Group>
+        </div>
 
-        <Form.Group className="mb-3">
-          <Form.Label>{t('admin.visits.ban_modal.duration_label', 'Ban Duration')}</Form.Label>
-          <Form.Select value={duration} onChange={(e) => setDuration(e.target.value)}>
+        <div className="admin-form__group">
+          <label className="admin-form__label">{t('admin.visits.ban_modal.duration_label', 'Ban Duration')}</label>
+          <select className="admin-form__control admin-form__select" value={duration} onChange={(e) => setDuration(e.target.value)}>
             <option value="permanent">{t('admin.visits.ban_modal.permanent', 'Permanent')}</option>
             <option value="24h">{t('admin.visits.ban_modal.one_day', '24 Hours')}</option>
             <option value="7d">{t('admin.visits.ban_modal.seven_days', '7 Days')}</option>
             <option value="30d">{t('admin.visits.ban_modal.thirty_days', '30 Days')}</option>
-          </Form.Select>
-        </Form.Group>
-      </Form>
+          </select>
+        </div>
+      </form>
     </ForumModal>
   );
 }

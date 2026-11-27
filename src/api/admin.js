@@ -30,6 +30,17 @@ export const DEFAULT_GLOBAL_SETTINGS = {
   // account the same way a signed-in member does.
   deletedAvatar: '',
   guestAvatar: '',
+  // Web Push / PWA (migration 1780100001). Empty text/icon fields mean "use
+  // the built-in default" — the dynamic manifest resolves them server-side.
+  pushEnabled: true,
+  pwaName: '',
+  pwaShortName: '',
+  pwaDescription: '',
+  pwaIcon192Url: '',
+  pwaIcon512Url: '',
+  pwaIconMaskableUrl: '',
+  pwaIconAppleTouchUrl: '',
+  pwaIconBadgeUrl: '',
 };
 
 let _settingsCache = null;
@@ -132,6 +143,40 @@ export const uploadSettingsFavicon = async (blob, filename = 'favicon.png') => {
     });
   }
   return res?.favicon_url || '';
+};
+
+/**
+ * uploadPwaIcon stores an admin-uploaded PWA icon on the forum_settings
+ * singleton and returns the new `/api/files/...` path.
+ *
+ * `kind` is one of 'icon-192', 'icon-512', 'icon-maskable', 'apple-touch',
+ * 'badge'. The bytes go to the server as multipart, exactly like the
+ * favicon: the reference column is a short /api/files path and can never
+ * hold the bytes themselves.
+ */
+export const uploadPwaIcon = async (kind, blob, filename = `${kind}.png`) => {
+  const form = new FormData();
+  form.append('file', blob, filename);
+  const res = await sendApi(`/api/aerun/admin/settings/pwa-icon/${kind}`, {
+    method: 'PUT',
+    body: form
+  });
+  if (res?.icon_url) {
+    const key = {
+      'icon-192': 'pwaIcon192Url',
+      'icon-512': 'pwaIcon512Url',
+      'icon-maskable': 'pwaIconMaskableUrl',
+      'apple-touch': 'pwaIconAppleTouchUrl',
+      badge: 'pwaIconBadgeUrl',
+    }[kind];
+    if (key) {
+      _settingsCache = { ...DEFAULT_GLOBAL_SETTINGS, ...(_settingsCache || {}), [key]: res.icon_url };
+      _settingsSubscribers.forEach(cb => {
+        try { cb(_settingsCache); } catch (e) { console.error(e); }
+      });
+    }
+  }
+  return res?.icon_url || '';
 };
 
 // --- Admin Secrets & Integrations ---

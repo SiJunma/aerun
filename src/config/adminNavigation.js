@@ -124,6 +124,13 @@ export const ADMIN_NAV_GROUPS = [
         anyOf: [PERMISSIONS.MANAGE_FORUM],
       },
       {
+        id: 'push',
+        path: 'push',
+        title: 'admin.tabs.push',
+        icon: 'Bell',
+        anyOf: [PERMISSIONS.MANAGE_FORUM],
+      },
+      {
         id: 'visits',
         path: 'visits',
         title: 'admin.tabs.visits',

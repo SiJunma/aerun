@@ -36,7 +36,7 @@ export default function TopTopicsTable({ topics = [] }) {
                 <strong>{(top.unique_readers || 0).toLocaleString()}</strong>
               </td>
               <td>{(top.views || 0).toLocaleString()}</td>
-              <td className="visits-text-muted">
+              <td className="admin-muted">
                 {top.last_visited ? new Date(top.last_visited).toLocaleString() : '—'}
               </td>
             </tr>

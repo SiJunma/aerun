@@ -6,13 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
+	"github.com/SherClockHolmes/webpush-go"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/types"
-	"github.com/SherClockHolmes/webpush-go"
 
 	"github.com/SiJunma/aerun/backend/internal/messaging"
 )
@@ -21,10 +22,10 @@ const pushSubscriptionsCollectionName = "push_subscriptions"
 
 // pushSubscriptionForm is the payload for subscribing a device to push.
 type pushSubscriptionForm struct {
-	Endpoint   string `json:"endpoint"`
-	P256DHKey  string `json:"p256dhKey"`
-	AuthKey    string `json:"authKey"`
-	UserAgent  string `json:"userAgent"`
+	Endpoint  string `json:"endpoint"`
+	P256DHKey string `json:"p256dhKey"`
+	AuthKey   string `json:"authKey"`
+	UserAgent string `json:"userAgent"`
 }
 
 // vapidKeys holds the VAPID key pair for signing push requests.
@@ -33,11 +34,17 @@ type vapidKeys struct {
 	PrivateKey string
 }
 
-// PushEventPayload is the serialized payload stored in outbox_events for push dispatch.
-type PushEventPayload struct {
-	RecipientID string `json:"recipient_id"`
-	EventType   string `json:"event_type"`
-	Payload     any    `json:"payload"`
+// PushContent is the notification itself: what the device shows and where
+// a tap leads. maybeEnqueuePushNotification stores it FLAT in the outbox
+// row — recipient_id, event_type, title, body, url, badge_count at the top
+// level — which is exactly the shape processPushEvent reads. The previous
+// shape wrapped a whole PushEventPayload inside another one, so the dispatch
+// side always read empty title/body/url.
+type PushContent struct {
+	Title      string `json:"title"`
+	Body       string `json:"body"`
+	URL        string `json:"url"`
+	BadgeCount int    `json:"badge_count"`
 }
 
 // getVAPIDKeys resolves the forum's VAPID keys from forum_settings.
@@ -116,14 +123,21 @@ func pushNotificationEnabled(user *core.Record) bool {
 	return true
 }
 
-// deriveVAPIDSubject builds the VAPID JWT subject (mailto) from the forum's public URL.
+// deriveVAPIDSubject builds the VAPID JWT subject from the forum's public
+// URL. The subject must be a mailto: URI or an https: URL (RFC 8292): the
+// previous shape — "mailto:" + the whole URL + "/admin" — was neither, so
+// it is now a plain admin mailbox on the forum's host.
 func deriveVAPIDSubject(app core.App) string {
-	appURL := app.Settings().Meta.AppURL
-	if appURL == "" {
-		appURL = "https://aerun.example.com"
+	appURL := strings.TrimSpace(app.Settings().Meta.AppURL)
+	if appURL != "" {
+		if u, err := url.Parse(appURL); err == nil && u.Hostname() != "" {
+			return "mailto:admin@" + u.Hostname()
+		}
+		if strings.HasPrefix(appURL, "mailto:") {
+			return appURL
+		}
 	}
-	appURL = strings.TrimRight(appURL, "/")
-	return "mailto:" + appURL + "/admin"
+	return "mailto:admin@aerun.invalid"
 }
 
 // computeHMACSHA256 computes an HMAC-SHA256 signature.
@@ -254,8 +268,8 @@ func listPushSubscriptionsHandler(e *core.RequestEvent) error {
 	}
 
 	return e.JSON(http.StatusOK, map[string]any{
-		"items":       items,
-		"request_id":  requestIDFrom(e),
+		"items":      items,
+		"request_id": requestIDFrom(e),
 	})
 }
 
@@ -280,8 +294,8 @@ func deletePushSubscriptionHandler(e *core.RequestEvent) error {
 	}
 
 	return e.JSON(http.StatusOK, map[string]any{
-		"deleted":     true,
-		"request_id":  requestIDFrom(e),
+		"deleted":    true,
+		"request_id": requestIDFrom(e),
 	})
 }
 
@@ -301,15 +315,50 @@ func getVAPIDPublicKeyHandler(e *core.RequestEvent) error {
 	}
 
 	return e.JSON(http.StatusOK, map[string]any{
-		"publicKey": keys.PublicKey,
+		"publicKey":  keys.PublicKey,
 		"request_id": requestIDFrom(e),
 	})
+}
+
+// pushContentForNotification derives the push content of an in-app
+// notification from the title createNotification already computed and the
+// payload its caller attached. Topic notifications carry topic_id/post_id
+// and author_nickname, so the tap opens the post itself; anything else
+// links to the notifications feed, with the acting nickname as the body
+// when the payload names one.
+func pushContentForNotification(title string, payload any) PushContent {
+	content := PushContent{Title: title, URL: "/notifications"}
+	fields, ok := payload.(map[string]any)
+	if !ok {
+		return content
+	}
+	if topicID, _ := fields["topic_id"].(string); topicID != "" {
+		url := "/topic/" + topicID
+		if postID, _ := fields["post_id"].(string); postID != "" {
+			url += "?post=" + postID
+		}
+		content.URL = url
+	}
+	if nick, _ := fields["author_nickname"].(string); nick != "" {
+		content.Body = nick
+	} else if nick, _ := fields["voter_nickname"].(string); nick != "" {
+		content.Body = nick
+	}
+	return content
 }
 
 // maybeEnqueuePushNotification queues a push notification for a recipient.
 // It is called inside the same DB transaction as the triggering event (post,
 // DM, etc.). The actual dispatch happens asynchronously via the outbox worker.
-func maybeEnqueuePushNotification(txApp core.App, recipientID string, eventType string, payload PushEventPayload) error {
+//
+// dedupeKey must identify the triggering event (notification id, message id):
+// the same key enqueued twice is one outbox row, so a retried transaction can
+// never double-notify. A timestamp is NOT a dedupe key — it is unique on
+// every call, which is how the previous shape silently disabled deduping.
+//
+// The payload is stored flat (see PushContent): processPushEvent reads
+// title/body/url/badge_count from the top level of the row.
+func maybeEnqueuePushNotification(txApp core.App, recipientID string, eventType string, dedupeKey string, content PushContent) error {
 	if !pushEnabled(txApp) {
 		return nil
 	}
@@ -328,14 +377,14 @@ func maybeEnqueuePushNotification(txApp core.App, recipientID string, eventType 
 		return nil
 	}
 
-	dedupeKey := fmt.Sprintf("push:%s:%s:%d", eventType, recipientID, now.UnixMilli())
-	pushPayload := PushEventPayload{
-		RecipientID: recipientID,
-		EventType:   eventType,
-		Payload:     payload,
-	}
-
-	raw, err := json.Marshal(pushPayload)
+	raw, err := json.Marshal(map[string]any{
+		"recipient_id": recipientID,
+		"event_type":   eventType,
+		"title":        content.Title,
+		"body":         content.Body,
+		"url":          content.URL,
+		"badge_count":  content.BadgeCount,
+	})
 	if err != nil {
 		return internalError("failed to serialize push payload", err)
 	}
@@ -394,11 +443,16 @@ func sendPushToSubscription(app core.App, rec *core.Record, title, body, url str
 	}
 
 	payload := map[string]any{
-		"title":       title,
-		"body":        body,
-		"url":         url,
-		"badge_count": badgeCount,
-		"tag":         "aerun-notification",
+		"title": title,
+		"body":  body,
+		"url":   url,
+		"tag":   "aerun-notification",
+	}
+	// badge_count is sent only when it means something: a 0 would clear the
+	// badge on the device, and the dispatcher passes 0 when it could not
+	// compute the unread count — not when the count is actually zero.
+	if badgeCount > 0 {
+		payload["badge_count"] = badgeCount
 	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {

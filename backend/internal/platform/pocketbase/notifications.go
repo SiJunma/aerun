@@ -343,6 +343,14 @@ func createNotification(txApp core.App, recipientID, senderID, notifType, title 
 	// /api/aerun and gets nothing, which is the correct answer, not a phantom.
 	publishSignal(txApp, realtimeSignalNotificationNew, record.Id, recipientID)
 
+	// Push, best-effort and inside the same transaction. A push that cannot be
+	// queued must not cost the notification itself, so a failure is logged
+	// and the record still returns.
+	if err := maybeEnqueuePushNotification(txApp, recipientID, "push:notification", "push:notification:"+record.Id, pushContentForNotification(title, payload)); err != nil {
+		txApp.Logger().Warn("push enqueue failed",
+			"error", err, "recipient_id", recipientID, "notification_id", record.Id)
+	}
+
 	return record, nil
 }
 

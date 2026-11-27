@@ -165,9 +165,13 @@ func (w *OutboxWorker) ProcessBatch(ctx context.Context, app core.App, sender Ma
 			continue
 		}
 
-		// If no sender configured (e.g. AERUN_MAIL_MODE=disabled / explicit no-SMTP mode),
-		// we skip delivery without failing or crashing.
-		if sender == nil {
+		// No mail transport (SMTP hard-disabled, dispatchOutboxOnce passes a
+		// nil sender): mail events stay pending, untouched (ADR-6) — but push
+		// events have no mail transport and must still flow. The old
+		// top-of-loop skip starved them too.
+		eventType := rec.GetString("event_type")
+		isPushEvent := eventType == "push:notification" || eventType == "push:dm"
+		if sender == nil && !isPushEvent {
 			continue
 		}
 
@@ -215,15 +219,21 @@ func (w *OutboxWorker) ProcessBatch(ctx context.Context, app core.App, sender Ma
 					"event_type", rec.GetString("event_type"),
 					"error", err,
 				)
-				// Fall through to the normal error handling below (backoff, retry)
-			} else {
-				rec.Set("status", "sent")
-				rec.Set("sent_at", time.Now().UTC().Format(time.RFC3339))
-				rec.Set("last_error", "")
-				_ = app.Save(rec)
+				// A failed push is retried with the same backoff as a failed
+				// mail — but it must NOT fall through to sender.Send below:
+				// the payload is not a mail, and the send would burn the
+				// retry budget on an "outbox event has no recipient address"
+				// error.
+				w.failOutboxEvent(app, rec, err)
 				processed++
 				continue
 			}
+			rec.Set("status", "sent")
+			rec.Set("sent_at", time.Now().UTC().Format(time.RFC3339))
+			rec.Set("last_error", "")
+			_ = app.Save(rec)
+			processed++
+			continue
 		}
 
 		sendErr := sender.Send(ctx, payload)
@@ -235,30 +245,36 @@ func (w *OutboxWorker) ProcessBatch(ctx context.Context, app core.App, sender Ma
 			_ = app.Save(rec)
 			processed++
 		} else {
-			// Delivery failed: apply exponential backoff
-			attempts := rec.GetInt("attempts") + 1
-			maxAttempts := rec.GetInt("max_attempts")
-			if maxAttempts <= 0 {
-				maxAttempts = messaging.MaxOutboxAttempts
-			}
-
-			rec.Set("attempts", attempts)
-			rec.Set("last_error", sendErr.Error())
-
-			if attempts >= maxAttempts {
-				rec.Set("status", "failed")
-			} else {
-				backoffMultiplier := math.Pow(2, float64(attempts-1))
-				delay := time.Duration(float64(w.BaseDelay) * backoffMultiplier)
-				nextAttempt := time.Now().UTC().Add(delay).Format(time.RFC3339)
-				rec.Set("next_attempt_at", nextAttempt)
-			}
-			_ = app.Save(rec)
+			w.failOutboxEvent(app, rec, sendErr)
 			processed++
 		}
 	}
 
 	return processed, nil
+}
+
+// failOutboxEvent records a failed delivery attempt with exponential backoff:
+// attempts climb, the error is kept for the audit trail, and the row either
+// fails outright at max_attempts or waits for its next attempt.
+func (w *OutboxWorker) failOutboxEvent(app core.App, rec *core.Record, sendErr error) {
+	attempts := rec.GetInt("attempts") + 1
+	maxAttempts := rec.GetInt("max_attempts")
+	if maxAttempts <= 0 {
+		maxAttempts = messaging.MaxOutboxAttempts
+	}
+
+	rec.Set("attempts", attempts)
+	rec.Set("last_error", sendErr.Error())
+
+	if attempts >= maxAttempts {
+		rec.Set("status", "failed")
+	} else {
+		backoffMultiplier := math.Pow(2, float64(attempts-1))
+		delay := time.Duration(float64(w.BaseDelay) * backoffMultiplier)
+		nextAttempt := time.Now().UTC().Add(delay).Format(time.RFC3339)
+		rec.Set("next_attempt_at", nextAttempt)
+	}
+	_ = app.Save(rec)
 }
 
 // dmEmailSkipReason reports why a queued DM email must NOT be sent, or ""
@@ -389,16 +405,13 @@ func adminRetryOutboxEventHandler(e *core.RequestEvent) error {
 	})
 }
 
-// processPushEvent dispatches a queued push notification to all of the
-// recipient's active subscriptions.
-//
-// The payload is expected to be a PushEventPayload JSON with:
-//   - recipient_id: the user to notify
-//   - event_type: "push:notification" or "push:dm"
-//   - payload: arbitrary notification content (title, body, url, badge_count, …)
-func processPushEvent(app core.App, rec *core.Record) error {
+// parsePushPayload reads the flat JSON maybeEnqueuePushNotification stores
+// in an outbox row: recipient_id, event_type, title, body, url and
+// badge_count at the top level. A nested "payload" object means the writer
+// double-wrapped the content — the old bug — and reads back empty here.
+func parsePushPayload(raw any) (recipientID, title, body, url string, badgeCount int, err error) {
 	var rawPayload any
-	if raw := rec.Get("payload"); raw != nil {
+	if raw != nil {
 		switch p := raw.(type) {
 		case types.JSONRaw:
 			_ = json.Unmarshal([]byte(p), &rawPayload)
@@ -412,20 +425,36 @@ func processPushEvent(app core.App, rec *core.Record) error {
 
 	payloadMap, ok := rawPayload.(map[string]any)
 	if !ok {
-		return fmt.Errorf("unparseable push payload")
+		return "", "", "", "", 0, fmt.Errorf("unparseable push payload")
 	}
 
-	recipientID, _ := payloadMap["recipient_id"].(string)
-	title, _ := payloadMap["title"].(string)
-	body, _ := payloadMap["body"].(string)
-	url, _ := payloadMap["url"].(string)
-	badgeCount := 0
+	recipientID, _ = payloadMap["recipient_id"].(string)
+	title, _ = payloadMap["title"].(string)
+	body, _ = payloadMap["body"].(string)
+	url, _ = payloadMap["url"].(string)
 	if bc, ok := payloadMap["badge_count"].(float64); ok {
 		badgeCount = int(bc)
 	}
 
 	if recipientID == "" {
-		return fmt.Errorf("push payload missing recipient_id")
+		return "", "", "", "", 0, fmt.Errorf("push payload missing recipient_id")
+	}
+	return recipientID, title, body, url, badgeCount, nil
+}
+
+// processPushEvent dispatches a queued push notification to all of the
+// recipient's active subscriptions.
+//
+// The payload is the flat JSON maybeEnqueuePushNotification stores:
+//   - recipient_id: the user to notify
+//   - event_type: "push:notification" or "push:dm"
+//   - title, body, url: what the device shows and where a tap leads
+//   - badge_count: unread badge number, 0 when the enqueue side could not
+//     compute one (then no badge value is sent at all)
+func processPushEvent(app core.App, rec *core.Record) error {
+	recipientID, title, body, url, badgeCount, err := parsePushPayload(rec.Get("payload"))
+	if err != nil {
+		return err
 	}
 
 	// Load all active subscriptions for the recipient.

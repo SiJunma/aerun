@@ -134,12 +134,12 @@ const CodeEditor = ({
       }`}
     >
       <div className="designs-code-field__header">
-        <label className="designs-form__label" htmlFor={id}>
+        <label className="admin-form__label" htmlFor={id}>
           {label}
         </label>
         <button
           type="button"
-          className="designs-btn designs-btn--secondary designs-btn--sm"
+          className="admin-btn admin-btn--secondary admin-btn--sm"
           onClick={handleBeautifyClick}
         >
           <Wand2 size={15} />
@@ -163,7 +163,7 @@ const CodeEditor = ({
 
       {errorMessage && (
         <div
-          className={`designs-code-field__feedback designs-code-field__feedback--${severity}`}
+          className={`admin-notice admin-notice--${severity}`}
           role="alert"
         >
           {errorMessage}

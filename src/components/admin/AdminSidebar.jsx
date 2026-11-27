@@ -13,6 +13,7 @@ import {
   ChevronDown,
   Menu,
   BarChart3,
+  Bell,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
@@ -51,6 +52,7 @@ const ICON_MAP = {
   ChevronDown,
   Menu,
   BarChart3,
+  Bell,
 };
 
 /** Renders the icon named by the navigation config, if it is a known one. */
@@ -120,7 +122,7 @@ const AdminSidebar = ({
         return (
           <div
             key={group.id}
-            className={`admin-sidebar__group ${isCollapsed ? 'is-collapsed' : 'is-open'}`}
+            className={`admin-stack admin-stack--xs admin-sidebar__group ${isCollapsed ? 'is-collapsed' : 'is-open'}`}
             data-group={group.id}
           >
             {!isCollapsedMode && (
@@ -145,7 +147,7 @@ const AdminSidebar = ({
             )}
 
             {(!isCollapsed || isCollapsedMode) && (
-              <div id={`admin-group-${group.id}`} className="admin-sidebar__group-items">
+              <div id={`admin-group-${group.id}`} className="admin-stack admin-stack--xs admin-sidebar__group-items">
                 {group.children.map((item) => {
                   const isActive = activeTab === item.path || activeTab === item.id;
                   const itemTitle = t(item.title);
@@ -165,7 +167,7 @@ const AdminSidebar = ({
                         <NavIcon name={item.icon} size={18} />
                       </span>
                       {!isCollapsedMode && (
-                        <span className="admin-nav-item__label">{itemTitle}</span>
+                        <span className="admin-truncate admin-nav-item__label">{itemTitle}</span>
                       )}
                     </button>
                   );

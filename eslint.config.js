@@ -78,6 +78,18 @@ export default defineConfig([
     },
   },
   {
+    // public/sw.js runs as a service worker, not a page script: `clients`,
+    // `self`, `caches` and `registration` are worker globals, and linting it
+    // with the browser set flags `clients` as undefined (the two errors that
+    // turned `npm test` red after the Web Push commit).
+    files: ['public/sw.js'],
+    languageOptions: {
+      globals: {
+        ...globals.serviceworker,
+      },
+    },
+  },
+  {
     files: ['functions/**/*.js', 'functions/**/*.eslintrc.js'],
     languageOptions: {
       ecmaVersion: 2018,

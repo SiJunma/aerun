@@ -11,13 +11,15 @@ package pocketbase
 //
 // Three properties this file exists to guarantee:
 //
-//   - ADR-6: with SMTP disabled the worker must not even look at the rows.
-//     Marking a pending event `failed` because mail is switched off would
-//     destroy the queue's only guarantee (invariant 4: delivery happens after
-//     commit and can fail without losing the action), and it would do so during
-//     the entire window before Sprint 8 — which is "now", in every deployment
-//     that exists. Events stay `pending`, untouched, and are drained when SMTP
-//     is enabled.
+//   - ADR-6: with SMTP disabled the worker must not even look at the MAIL
+//     rows. Marking a pending mail event `failed` because mail is switched
+//     off would destroy the queue's only guarantee (invariant 4: delivery
+//     happens after commit and can fail without losing the action), and it
+//     would do so during the entire window before Sprint 8 — which is "now",
+//     in every deployment that exists. Mail events stay `pending`, untouched,
+//     and are drained when SMTP is enabled. Push events are exempt: they
+//     have no mail transport, so the batch still runs for them with a nil
+//     sender (ProcessBatch leaves mail rows alone when the sender is nil).
 //   - No two batches may run at once. SQLite allows one writer; a slow SMTP
 //     handshake can easily outlast the one-minute tick, and the overlap would
 //     surface as SQLITE_BUSY rather than as anything recognisable.
@@ -78,12 +80,14 @@ func registerOutboxWorkerCron(app core.App) error {
 // it never returns an error to the caller: a failed batch is logged and retried
 // on the next tick, which is exactly what the per-row backoff already assumes.
 func dispatchOutboxOnce(app core.App, now time.Time) int {
-	// ADR-6 first, before the overlap flag and before any query: with SMTP off
-	// the correct action is to do nothing at all.
-	if !app.Settings().SMTP.Enabled {
-		app.Logger().Debug("outbox dispatch skipped: SMTP is disabled",
-			"reason", "mail hard-disabled; events stay pending (ADR-6)")
-		return 0
+	// ADR-6, narrowed to mail: with SMTP off the mail rows stay pending,
+	// untouched — but the batch still runs, with a nil sender, so queued
+	// push events (which need no mail transport) keep flowing. ProcessBatch
+	// leaves mail rows alone when the sender is nil.
+	mailDisabled := !app.Settings().SMTP.Enabled
+	if mailDisabled {
+		app.Logger().Debug("outbox dispatch: SMTP is disabled, mail events stay pending (ADR-6)",
+			"reason", "mail hard-disabled; only push events dispatch")
 	}
 
 	if !outboxDispatchInFlight.CompareAndSwap(false, true) {
@@ -96,7 +100,11 @@ func dispatchOutboxOnce(app core.App, now time.Time) int {
 	defer cancel()
 
 	worker := NewOutboxWorker()
-	processed, err := worker.ProcessBatch(ctx, app, pocketBaseMailSender{app: app}, outboxDispatchBatch)
+	var sender MailSender
+	if !mailDisabled {
+		sender = pocketBaseMailSender{app: app}
+	}
+	processed, err := worker.ProcessBatch(ctx, app, sender, outboxDispatchBatch)
 	if err != nil {
 		app.Logger().Error("outbox dispatch failed", "error", err)
 		return processed

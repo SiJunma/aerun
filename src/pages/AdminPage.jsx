@@ -41,10 +41,12 @@ import DesignsTab from '../components/admin/DesignsTab';
 import EmailTemplatesSettings from '../components/admin/EmailTemplatesSettings';
 import AdminSecretsSettings from '../components/admin/AdminSecretsSettings';
 import VisitsTab from '../components/admin/VisitsTab';
+import PushSettingsTab from '../components/admin/PushSettingsTab';
 import UserRecentIPsPanel from '../components/admin/UserRecentIPsPanel';
 import AdminIPModal from '../components/modals/AdminIPModal';
 import BanIPModal from '../components/modals/BanIPModal';
 import '../components/admin/VisitsTab.css';
+import '../components/admin/admin.css';
 import AvatarUploader from '../components/common/AvatarUploader';
 import FaviconUploader from '../components/admin/FaviconUploader';
 import CodeEditorField from '../components/admin/CodeEditorField';
@@ -510,6 +512,7 @@ const AdminPage = () => {
   const canAccessTab = useCallback((tab) => {
     switch (tab) {
       case 'settings': return hasPermission(PERMISSIONS.MANAGE_FORUM);
+      case 'push': return hasPermission(PERMISSIONS.MANAGE_FORUM);
       case 'designs-defaults':
       case 'designs-custom':
       case 'designs-builtin': return hasPermission(PERMISSIONS.MANAGE_DESIGNS);
@@ -866,7 +869,7 @@ const AdminPage = () => {
 
   useEffect(() => {
     if (!canAccessTab(activeTab)) {
-      const tabs = ['settings', 'designs-defaults', 'designs-custom', 'designs-builtin', 'users', 'roles', 'categories', 'visits', 'audit'];
+      const tabs = ['settings', 'push', 'designs-defaults', 'designs-custom', 'designs-builtin', 'users', 'roles', 'categories', 'visits', 'audit'];
       const firstAvailable = tabs.find(t => canAccessTab(t));
       if (firstAvailable) {
         setActiveTab(firstAvailable);
@@ -3213,7 +3216,12 @@ const AdminPage = () => {
             ]}
           />
 
-          {activeTab === 'settings' && hasPermission(PERMISSIONS.MANAGE_FORUM) && renderSettings()}
+          {/* Per-tab scope for the shared admin classes: the same element
+              everywhere is .admin-btn, one element in one place is
+              .admin-tab[data-tab="<tab-id>"] ... */}
+          <div className="admin-tab" data-tab={activeTab}>
+            {activeTab === 'settings' && hasPermission(PERMISSIONS.MANAGE_FORUM) && renderSettings()}
+          {activeTab === 'push' && hasPermission(PERMISSIONS.MANAGE_FORUM) && <PushSettingsTab />}
           {activeTab === 'designs-defaults' && hasPermission(PERMISSIONS.MANAGE_DESIGNS) && (
             <DesignsTab
               surface="defaults"
@@ -3252,6 +3260,7 @@ const AdminPage = () => {
           {activeTab === 'categories' && hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && renderCategories()}
           {activeTab === 'visits' && hasPermission(PERMISSIONS.VIEW_VISITS_DASHBOARD) && <VisitsTab />}
           {activeTab === 'audit' && hasPermission(PERMISSIONS.VIEW_AUDIT_LOG) && renderAuditLog()}
+          </div>
         </div>
       </div>
 

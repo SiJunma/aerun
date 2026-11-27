@@ -25,6 +25,7 @@ import SkeletonDebugPage from './pages/SkeletonDebugPage';
 import { useAuth } from './contexts/AuthProvider';
 import GlobalModals from './components/common/GlobalModals';
 import UnsentReplyNotice from './components/common/UnsentReplyNotice';
+import PwaManifestLink from './components/PwaManifestLink';
 import RealtimeStatusBanner from './components/common/RealtimeStatusBanner';
 import { sendTelemetryVisit } from './utils/telemetrySession';
 
@@ -118,6 +119,7 @@ const App = () => {
   return (
     <>
       <ActivityTracker />
+      <PwaManifestLink />
       <ScrollToTop />
       <IdentityRedirect />
       <GlobalModals />
