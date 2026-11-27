@@ -1,0 +1,10 @@
+{
+  "schema": "aerun-ci-report/1",
+  "run_number": 158,
+  "status": "success",
+  "branch": "main",
+  "commit": "89680f64057dbb7f299b17bbf1183850318ae6c5",
+  "checks": {"gofmt":"ok","build":"ok","vet":"ok","test":"ok"},
+  "run_url": "https://github.com/SiJunma/aerun/actions/runs/46059266888",
+  "finished_at": "2026-11-27T20:02:00Z"
+}
