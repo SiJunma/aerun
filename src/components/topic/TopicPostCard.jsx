@@ -1,11 +1,12 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Pin, Edit, Award, Send, FilePen, Dices, Mail, Heart, User, MessageCircle, Quote, Trash2 } from 'lucide-react';
+import { Pin, Edit, Award, Send, FilePen, Dices, Mail, Heart, User, MessageCircle, Quote, Trash2, Share2 } from 'lucide-react';
 import ForumAuthorAvatar from '../common/ForumAuthorAvatar';
 import ForumAuthorName from '../common/ForumAuthorName';
 import Timestamp from '../common/Timestamp';
 import BBCode from '../common/BBCode';
 import Skeleton from '../common/Skeleton';
+import { shareOrCopy } from '../../utils/share';
 
 /**
  * TopicPostCard: semantic DOM per SPEC_forum-topic-view-theme-dom.md.
@@ -315,8 +316,12 @@ export const TopicPostCard = ({
                     onClick={(e) => {
                       e.preventDefault();
                       const url = `${window.location.origin}/topic/${topicId}?post=${post.id}`;
-                      navigator.clipboard.writeText(url);
-                      showToast?.(t('forum.link_copied'), 'success');
+                      shareOrCopy({
+                        title: topic?.title || 'Post',
+                        url,
+                        onCopied: () => showToast?.(t('forum.link_copied'), 'success'),
+                        onError: () => showToast?.(t('forum.copy_failed'), 'danger')
+                      });
                     }}
                   >
                     <Timestamp date={post.created_at} className="post-date" />

@@ -97,6 +97,10 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 		if err := verifyPresenceSchema(se.App); err != nil {
 			return err
 		}
+		// Ensure VAPID keys exist for Web Push (migration 1780100000).
+		if err := ensureVAPIDKeys(se.App); err != nil {
+			return err
+		}
 		if err := verifyDeletedUserSchema(se.App); err != nil {
 			return err
 		}
@@ -588,6 +592,13 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	group.POST("/me/notifications/archive-all", archiveAllNotificationsHandler)
 	group.PATCH("/me/notifications/{id}/archive", archiveNotificationHandler)
 	group.GET("/me/unread-counts", getUnreadCountsHandler)
+
+	// Web Push subscription management (migration 1780100000)
+	group.GET("/me/push/vapid-public-key", getVAPIDPublicKeyHandler)
+	group.POST("/me/push/subscribe", subscribePushHandler).BindFunc(enforceIdempotency)
+	group.DELETE("/me/push/subscribe", unsubscribePushHandler).BindFunc(enforceIdempotency)
+	group.GET("/me/push/subscriptions", listPushSubscriptionsHandler)
+	group.DELETE("/me/push/subscriptions/{id}", deletePushSubscriptionHandler).BindFunc(enforceIdempotency)
 
 	group.GET("/admin/outbox-events", adminListOutboxEventsHandler).BindFunc(RequirePermission(auth.PermViewAuditLog))
 	group.POST("/admin/outbox-events/{id}/retry", adminRetryOutboxEventHandler).BindFunc(RequirePermission(auth.PermViewAuditLog))

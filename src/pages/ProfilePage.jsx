@@ -32,6 +32,7 @@ import ForumEmptyState from '../components/common/ForumEmptyState';
 import Skeleton from '../components/common/Skeleton';
 import SecurityTab from '../components/profile/SecurityTab';
 import ProfileSkeleton from '../components/profile/ProfileSkeleton';
+import { usePushNotifications } from '../hooks/usePushNotifications';
 
 
 import { usePageTitle } from '../contexts/TitleProvider';
@@ -50,7 +51,7 @@ import { usePageTitle } from '../contexts/TitleProvider';
  */
 const PROFILE_TAB_KEYS = ['nickname', 'status_line', 'bio', 'location', 'birthday', 'occupation', 'interests', 'contacts'];
 const PROFILE_TAB_SETTINGS_KEYS = ['signature'];
-const SETTINGS_TAB_KEYS = ['theme', 'language', 'rep_show_history', 'rep_show_comments', 'notif_topic_reply', 'notif_post_quoted', 'notif_reputation', 'notif_new_registration', 'email_notif_dms', 'email_notif_topic_replies', 'soundEnabled', 'soundVolume'];
+const SETTINGS_TAB_KEYS = ['theme', 'language', 'rep_show_history', 'rep_show_comments', 'notif_topic_reply', 'notif_post_quoted', 'notif_reputation', 'notif_new_registration', 'email_notif_dms', 'email_notif_topic_replies', 'soundEnabled', 'soundVolume', 'push_notifications_enabled'];
 
 /**
  * Mints a throwaway Storage slot for a mask that has not been saved yet.
@@ -83,6 +84,14 @@ const ProfilePage = () => {
   const { profile, hasPermission, PERMISSIONS, settings, updateProfile, recordActivity, categories, scheduleForumStateRefresh } = useAuth();
   const { showToast } = useToast();
   const { setPageTitle } = usePageTitle();
+  const {
+    supported: pushSupported,
+    subscribing: pushSubscribing,
+    subscribed: pushSubscribed,
+    devices: pushDevices,
+    subscribe: pushSubscribe,
+    unsubscribe: pushUnsubscribe,
+  } = usePushNotifications();
   // Live theme for seeding the form when the account holds no stored theme
   // (see buildAccountForm): never a hardcoded 'dark'.
   const { theme: liveTheme } = useTheme() || {};
@@ -167,7 +176,8 @@ const ProfilePage = () => {
     email_notif_dms: true,
     email_notif_topic_replies: true,
     soundEnabled: false,
-    soundVolume: 40
+    soundVolume: 40,
+    push_notifications_enabled: true
   });
 
   // Reputation Voting State
@@ -433,7 +443,8 @@ const ProfilePage = () => {
     email_notif_dms: source.settings?.email_notifications?.dms !== false,
     email_notif_topic_replies: source.settings?.email_notifications?.topic_replies !== false,
     soundEnabled: source.settings?.sound?.enabled ?? false,
-    soundVolume:  source.settings?.sound?.volume  ?? 40
+    soundVolume:  source.settings?.sound?.volume  ?? 40,
+    push_notifications_enabled: source.settings?.push_notifications?.enabled !== false
   }), [liveTheme, settings, lang]);
 
   const seedAccountForm = (source) => setAccountFormData(buildAccountForm(source));
@@ -484,6 +495,12 @@ const ProfilePage = () => {
       patch.sound = {
         enabled: diff.soundEnabled !== undefined ? diff.soundEnabled : accountFormData.soundEnabled,
         volume: diff.soundVolume !== undefined ? diff.soundVolume : accountFormData.soundVolume
+      };
+    }
+    if (diff.push_notifications_enabled !== undefined) {
+      patch.push_notifications = {
+        ...(profile?.settings?.push_notifications || {}),
+        enabled: diff.push_notifications_enabled
       };
     }
     return patch;
@@ -2101,6 +2118,83 @@ const ProfilePage = () => {
                         onClick={() => playNotificationSound(accountFormData.soundEnabled ? accountFormData.soundVolume : 40)}
                       >
                         <Volume2 size={14} /> {t('profile.sound_test')}
+                      </Button>
+
+                      {/* ── Push Notifications ────────────────────────── */}
+
+{/* ── Push Notifications ────────────────────────── */}
+                      <hr className="my-4" />
+                      <h6 className="mb-1 text-primary small fw-bold d-flex align-items-center gap-2">
+                        <Bell size={15} /> {t('profile.push_notifications_title')}
+                      </h6>
+                      <p className="small text-muted mb-3" style={{ maxWidth: '520px' }}>
+                        {t('profile.push_notifications_desc')}
+                      </p>
+
+                      {profile?.uid === uid && (
+                        <div className="mb-3">
+                          <Form.Check
+                            type="switch"
+                            id="push-notifications-enabled-switch"
+                            label={t('profile.push_notifications_enabled')}
+                            className="mb-2"
+                            checked={accountFormData.push_notifications_enabled}
+                            onChange={(e) => setAccountFormData({ ...accountFormData, push_notifications_enabled: e.target.checked })}
+                          />
+                        </div>
+                      )}
+
+                      <div className="mb-4">
+                        <small className="text-muted d-block mb-2">{t('profile.push_devices_title')}</small>
+                        {pushDevices.length > 0 ? (
+                          <Table striped bordered size="sm" className="w-100">
+                            <thead>
+                              <tr>
+                                <th>{t('common.device')}</th>
+                                <th>{t('common.status')}</th>
+                                <th className="text-end">{t('common.action')}</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {pushDevices.map((device) => (
+                                <tr key={device.id} className="align-middle">
+                                  <td>
+                                    <span className="badge bg-secondary rounded-pill me-2">
+                                      {device.user_agent?.split(' ')[0] || '—'}
+                                    </span>
+                                    {device.user_agent}
+                                  </td>
+                                  <td>
+                                    <span className="badge bg-success">Активно</span>
+                                  </td>
+                                  <td className="text-end">
+                                    <Button
+                                      variant="outline-danger"
+                                      size="sm"
+                                      onClick={() => pushUnsubscribe(device.id)}
+                                    >
+                                      {t('common.remove')}
+                                    </Button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </Table>
+                        ) : (
+                          <div className="text-muted small text-center py-3">
+                            {t('profile.push_no_devices')}
+                          </div>
+                        )}
+                      </div>
+
+                      <Button
+                        variant="outline-secondary"
+                        size="sm"
+                        className="w-auto"
+                        disabled={pushSubscribing || !pushSupported}
+                        onClick={pushSubscribe}
+                      >
+                        {pushSubscribed ? t('profile.push_subscribed') : t('profile.push_subscribe_btn')}
                       </Button>
 
                       <Button variant="primary" onClick={handleSaveSettingsTab} className="px-4">

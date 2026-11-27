@@ -1,0 +1,48 @@
+{
+  "name": "Aerun — Текстовая ролевая игра",
+  "short_name": "Aerun",
+  "description": "Форум текстовых ролевых игр, авторского творчества и общения",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#12121c",
+  "theme_color": "#4f46e5",
+  "lang": "ru",
+  "icons": [
+    {
+      "src": "/icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Новые ответы",
+      "short_name": "Ответы",
+      "description": "Просмотр новых ответов в темах",
+      "url": "/new-replies",
+      "icons": [{ "src": "/icons/shortcut-replies.png", "sizes": "96x96", "type": "image/png" }]
+    },
+    {
+      "name": "Личные сообщения",
+      "short_name": "Диалоги",
+      "description": "Открыть входящие сообщения",
+      "url": "/messages",
+      "icons": [{ "src": "/icons/shortcut-messages.png", "sizes": "96x96", "type": "image/png" }]
+    }
+  ]
+}

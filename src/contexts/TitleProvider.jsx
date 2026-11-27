@@ -204,6 +204,25 @@ export const TitleProvider = ({ children }) => {
     };
   }, [user?.uid, profile?.status, hasPermission, PERMISSIONS?.USE_DIRECT_MESSAGES]);
 
+  // Синхронизация системного бейджа (Badging API)
+  useEffect(() => {
+    const syncAppBadge = (count) => {
+      if ('setAppBadge' in navigator) {
+        if (count > 0) {
+          navigator.setAppBadge(count).catch((err) => {
+            console.debug('[Badging API] setAppBadge suppressed:', err);
+          });
+        } else {
+          navigator.clearAppBadge().catch((err) => {
+            console.debug('[Badging API] clearAppBadge suppressed:', err);
+          });
+        }
+      }
+    };
+
+    syncAppBadge(unreadCount);
+  }, [unreadCount]);
+
   useEffect(() => {
     // forumName is a plain string now; resolveField keeps the defensive
     // object fallback for a snapshot that still carries the old {en, ru} shape.

@@ -59,5 +59,28 @@ func purgeUserContent(txApp core.App, userID string, adminPerformerID string) er
 	if err := purgeUserProfileVotes(txApp, userID); err != nil {
 		return err
 	}
+
+	// Purge push subscriptions for the deleted user.
+	if err := purgePushSubscriptions(txApp, userID); err != nil {
+		return err
+	}
+	return nil
+}
+
+// purgePushSubscriptions removes all push subscriptions belonging to userID.
+// Called from purgeUserContent when an account is deleted.
+func purgePushSubscriptions(txApp core.App, userID string) error {
+	records, err := txApp.FindAllRecords(
+		pushSubscriptionsCollectionName,
+		dbx.HashExp{"user_id": userID},
+	)
+	if err != nil {
+		return internalError("failed to list push subscriptions for user deletion", err)
+	}
+	for _, rec := range records {
+		if err := txApp.Delete(rec); err != nil {
+			return internalError("failed to delete push subscription for user deletion", err)
+		}
+	}
 	return nil
 }

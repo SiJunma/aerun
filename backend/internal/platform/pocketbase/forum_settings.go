@@ -21,6 +21,7 @@ import (
 	"github.com/pocketbase/pocketbase/tools/types"
 
 	"github.com/SiJunma/aerun/backend/internal/auth"
+	"github.com/SherClockHolmes/webpush-go"
 )
 
 const forumSettingsCollectionName = "forum_settings"
@@ -89,6 +90,44 @@ type forumSettings struct {
 	// writes it back, which is what makes an admin's edit survive restarts
 	// the same way SMTP settings do.
 	EmailTemplates string
+
+	// VAPID keys for Web Push (migration 1780100000)
+	VAPIDPublicKey  string
+	VAPIDPrivateKey string
+	PushEnabled     bool
+}
+
+// ensureVAPIDKeys generates and saves VAPID keys if they don't exist.
+// Called at startup to ensure the forum has valid push keys.
+func ensureVAPIDKeys(app core.App) error {
+	record, err := app.FindRecordById(forumSettingsCollectionName, forumSettingsID)
+	if err != nil || record == nil {
+		// No settings row yet - will be created on first admin settings save
+		return nil
+	}
+
+	publicKey := record.GetString("vapid_public_key")
+	privateKey := record.GetString("vapid_private_key")
+
+	if publicKey != "" && privateKey != "" {
+		return nil // Already configured
+	}
+
+	// Generate new VAPID keys. webpush.GenerateVAPIDKeys returns (privateKey, publicKey, err).
+	var genErr error
+	privateKey, publicKey, genErr = webpush.GenerateVAPIDKeys()
+	if genErr != nil {
+		return genErr
+	}
+
+	record.Set("vapid_public_key", publicKey)
+	record.Set("vapid_private_key", privateKey)
+	// Push enabled by default
+	if !record.GetBool("push_enabled") {
+		record.Set("push_enabled", true)
+	}
+
+	return app.Save(record)
 }
 
 // loadForumSettings reads the singleton row and clamps it.
@@ -153,6 +192,9 @@ func loadForumSettings(app core.App) forumSettings {
 	settings.FaviconURL = record.GetString("favicon_url")
 	settings.DeletedAvatarURL = record.GetString("deleted_avatar_url")
 	settings.GuestAvatarURL = record.GetString("guest_avatar_url")
+	settings.VAPIDPublicKey = record.GetString("vapid_public_key")
+	settings.VAPIDPrivateKey = record.GetString("vapid_private_key")
+	settings.PushEnabled = record.GetBool("push_enabled")
 	if v := record.GetString("reputation_style"); v != "" {
 		settings.ReputationStyle = v
 	}

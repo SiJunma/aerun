@@ -28,6 +28,19 @@ window.addEventListener('vite:preloadError', (event) => {
   window.location.reload();
 });
 
+// Service Worker registration for PWA
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .then((registration) => {
+        console.log('[SW] Service Worker registered with scope:', registration.scope);
+      })
+      .catch((error) => {
+        console.warn('[SW] Service Worker registration failed:', error);
+      });
+  });
+}
+
 if (typeof __APP_BUILD_TIME__ !== 'undefined') {
   console.info(`[Aerun] Build time: ${__APP_BUILD_TIME__}`);
 }

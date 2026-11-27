@@ -3,6 +3,7 @@ package pocketbase
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"net/http"
 	"strings"
@@ -207,6 +208,22 @@ func (w *OutboxWorker) ProcessBatch(ctx context.Context, app core.App, sender Ma
 				processed++
 				continue
 			}
+		case "push:notification", "push:dm":
+			if err := processPushEvent(app, rec); err != nil {
+				app.Logger().Warn("push dispatch failed",
+					"event_id", rec.Id,
+					"event_type", rec.GetString("event_type"),
+					"error", err,
+				)
+				// Fall through to the normal error handling below (backoff, retry)
+			} else {
+				rec.Set("status", "sent")
+				rec.Set("sent_at", time.Now().UTC().Format(time.RFC3339))
+				rec.Set("last_error", "")
+				_ = app.Save(rec)
+				processed++
+				continue
+			}
 		}
 
 		sendErr := sender.Send(ctx, payload)
@@ -370,4 +387,75 @@ func adminRetryOutboxEventHandler(e *core.RequestEvent) error {
 		"event":      outboxEventPayload(rec),
 		"request_id": requestIDFrom(e),
 	})
+}
+
+// processPushEvent dispatches a queued push notification to all of the
+// recipient's active subscriptions.
+//
+// The payload is expected to be a PushEventPayload JSON with:
+//   - recipient_id: the user to notify
+//   - event_type: "push:notification" or "push:dm"
+//   - payload: arbitrary notification content (title, body, url, badge_count, …)
+func processPushEvent(app core.App, rec *core.Record) error {
+	var rawPayload any
+	if raw := rec.Get("payload"); raw != nil {
+		switch p := raw.(type) {
+		case types.JSONRaw:
+			_ = json.Unmarshal([]byte(p), &rawPayload)
+		case string:
+			_ = json.Unmarshal([]byte(p), &rawPayload)
+		default:
+			data, _ := json.Marshal(p)
+			_ = json.Unmarshal(data, &rawPayload)
+		}
+	}
+
+	payloadMap, ok := rawPayload.(map[string]any)
+	if !ok {
+		return fmt.Errorf("unparseable push payload")
+	}
+
+	recipientID, _ := payloadMap["recipient_id"].(string)
+	title, _ := payloadMap["title"].(string)
+	body, _ := payloadMap["body"].(string)
+	url, _ := payloadMap["url"].(string)
+	badgeCount := 0
+	if bc, ok := payloadMap["badge_count"].(float64); ok {
+		badgeCount = int(bc)
+	}
+
+	if recipientID == "" {
+		return fmt.Errorf("push payload missing recipient_id")
+	}
+
+	// Load all active subscriptions for the recipient.
+	subscriptions, err := app.FindRecordsByFilter(
+		pushSubscriptionsCollectionName,
+		"user_id = {:user}",
+		"created",
+		100, 0,
+		dbx.Params{"user": recipientID},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to load push subscriptions: %w", err)
+	}
+
+	if len(subscriptions) == 0 {
+		// No subscriptions — nothing to deliver, mark as done.
+		return nil
+	}
+
+	// Best-effort: badge count could be derived from unread counts here.
+	if _, err := app.FindRecordById(usersCollectionName, recipientID); err != nil {
+		app.Logger().Debug("push event recipient not found", "recipient_id", recipientID)
+	}
+
+	var lastErr error
+	for _, sub := range subscriptions {
+		if err := sendPushToSubscription(app, sub, title, body, url, badgeCount); err != nil {
+			lastErr = err
+		}
+	}
+
+	return lastErr
 }

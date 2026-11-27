@@ -1,6 +1,7 @@
 import React from 'react';
-import { Bell, BellOff } from 'lucide-react';
+import { Bell, BellOff, Share2 } from 'lucide-react';
 import ForumPagination from '../common/ForumPagination';
+import { shareOrCopy } from '../../utils/share';
 
 /**
  * TopicActionsBar: Pagination bar and optional follow/unfollow button for top or bottom.
@@ -14,7 +15,8 @@ export const TopicActionsBar = ({
   isSubscribed = false,
   togglingSub = false,
   onToggleSubscription = null,
-  t
+  t,
+  topicTitle
 }) => {
   if (position === 'top') {
     if (totalPages <= 1) return null;
@@ -47,6 +49,17 @@ export const TopicActionsBar = ({
           </button>
         </div>
       )}
+      
+      {/* Share button */}
+      <button
+        type="button"
+        className="topic-action-btn topic-share-btn"
+        onClick={() => shareOrCopy({ title: topicTitle, url: window.location.href })}
+        aria-label={t('forum.share_topic') || 'Share topic'}
+      >
+        <Share2 size={14} />
+      </button>
+
       <nav
         id="topic-pagination-bottom"
         className="topic-pagination topic-pagination-bottom"
