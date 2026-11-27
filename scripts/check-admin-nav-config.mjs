@@ -56,7 +56,7 @@ const adminPageSource = read('../src/pages/AdminPage.jsx');
 const failures = [];
 const fail = (message) => failures.push(message);
 
-const TABS = ['settings', 'designs', 'users', 'roles', 'categories', 'visits', 'audit'];
+const TABS = ['settings', 'designs-defaults', 'designs-custom', 'designs-builtin', 'users', 'roles', 'categories', 'visits', 'audit'];
 const allPaths = collectVisibleTabPaths(ADMIN_NAV_GROUPS);
 
 // -- 1. Every permission named by the tree really exists ---------------------

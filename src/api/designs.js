@@ -1,4 +1,5 @@
-import { sendApi } from './pocketbase';
+import { sendApi } from './pocketbase.js';
+import { resolveAvatarUrl } from './avatars.js';
 
 const LOCAL_STORAGE_KEY = 'aerun_custom_designs';
 
@@ -64,7 +65,6 @@ export function toDesign(raw) {
     bgDefaultUrl: readString(raw, 'bg_default_url', 'bgDefaultUrl'),
     bgTabletUrl: readString(raw, 'bg_tablet_url', 'bgTabletUrl'),
     bgMobileUrl: readString(raw, 'bg_mobile_url', 'bgMobileUrl'),
-    bgOpacity: raw.bg_opacity ?? raw.bgOpacity ?? 0.5,
     placeholderDeletedUrl: readString(raw, 'placeholder_deleted_url', 'placeholderDeletedUrl'),
     placeholderGuestUrl: readString(raw, 'placeholder_guest_url', 'placeholderGuestUrl'),
     createdAt: raw.created_at || raw.createdAt || '',
@@ -103,8 +103,6 @@ export function toDesignPayload(data) {
   else if (data.bg_tablet_url !== undefined) payload.bg_tablet_url = data.bg_tablet_url;
   if (data.bgMobileUrl !== undefined) payload.bg_mobile_url = data.bgMobileUrl;
   else if (data.bg_mobile_url !== undefined) payload.bg_mobile_url = data.bg_mobile_url;
-  if (data.bgOpacity !== undefined) payload.bg_opacity = data.bgOpacity;
-  else if (data.bg_opacity !== undefined) payload.bg_opacity = data.bg_opacity;
   if (data.placeholderDeletedUrl !== undefined) payload.placeholder_deleted_url = data.placeholderDeletedUrl;
   else if (data.placeholder_deleted_url !== undefined) payload.placeholder_deleted_url = data.placeholder_deleted_url;
   if (data.placeholderGuestUrl !== undefined) payload.placeholder_guest_url = data.placeholderGuestUrl;
@@ -144,6 +142,18 @@ function toDefaultDesignPayload(data) {
 // lives only on the card. CSS/JS are not part of this resolver: they flow via
 // activeDesign.css/js injection (DesignProvider applies the overwrite toggle
 // there, OFF meaning "no own code").
+//
+// Every URL this returns is something an <img src> / link href can actually
+// load: a relative /api/files path is resolved against the backend origin
+// (pbUrl) through resolveAvatarUrl, the same helper avatars, placeholders
+// and the favicon already use. A bare relative path would resolve against
+// the FRONTEND origin — in local dev that is the Vite server (:5173) while
+// PocketBase serves files at :8090, so the browser got HTML (a 304 with
+// Type text/html) instead of the image and the background never appeared,
+// even though the upload, the card and the theme were all correct. Absolute
+// URLs pass through unchanged. Render sites must use these values raw and
+// must NOT resolve them a second time (resolveAvatarUrl is idempotent, so a
+// second pass is harmless, but the single mechanism lives here).
 export function resolveActiveDesign(settings, activeCard) {
   const settingsTitle = (() => {
     const raw = settings?.forumName;
@@ -162,20 +172,19 @@ export function resolveActiveDesign(settings, activeCard) {
   const background = (() => {
     if (!activeCard || !activeCard.bgDefaultUrl) return null;
     return {
-      default: activeCard.bgDefaultUrl,
-      tablet: activeCard.bgTabletUrl || activeCard.bgDefaultUrl,
-      mobile: activeCard.bgMobileUrl || activeCard.bgDefaultUrl,
+      default: resolveAvatarUrl(activeCard.bgDefaultUrl),
+      tablet: resolveAvatarUrl(activeCard.bgTabletUrl || activeCard.bgDefaultUrl),
+      mobile: resolveAvatarUrl(activeCard.bgMobileUrl || activeCard.bgDefaultUrl),
     };
   })();
   return {
     background,
-    opacity: activeCard?.bgOpacity ?? 0.5,
     headerHtml: pick(activeCard?.headerHtml, activeCard?.overwriteHeader, settingsHeader),
     footerHtml: pick(activeCard?.customFooterHtml, activeCard?.overwriteFooter, settings?.customFooterHtml || ''),
     forumTitle: pick(activeCard?.forumTitle, activeCard?.overwriteTitle, settingsTitle, 'Aerun Forum'),
-    faviconUrl: pick(activeCard?.faviconUrl, activeCard?.overwriteFavicon, settings?.faviconUrl || ''),
-    placeholderDeleted: pick(activeCard?.placeholderDeletedUrl, activeCard?.overwritePlaceholderDeleted, settings?.deletedAvatar || ''),
-    placeholderGuest: pick(activeCard?.placeholderGuestUrl, activeCard?.overwritePlaceholderGuest, settings?.guestAvatar || ''),
+    faviconUrl: resolveAvatarUrl(pick(activeCard?.faviconUrl, activeCard?.overwriteFavicon, settings?.faviconUrl || '')),
+    placeholderDeleted: resolveAvatarUrl(pick(activeCard?.placeholderDeletedUrl, activeCard?.overwritePlaceholderDeleted, settings?.deletedAvatar || '')),
+    placeholderGuest: resolveAvatarUrl(pick(activeCard?.placeholderGuestUrl, activeCard?.overwritePlaceholderGuest, settings?.guestAvatar || '')),
   };
 }
 
@@ -258,6 +267,21 @@ export const getDesigns = async (force = false) => {
   return flight;
 };
 
+// --- List summaries vs full records ---------------------------------------
+// The list endpoints return LIGHTWEIGHT summaries only — no css/js/header/
+// footer/title/favicon/placeholder/overwrite fields:
+//
+//   custom:  id, name, show_in_list, bg_default_url, is_active, base_theme
+//   default: id, key, name, show_in_list, bg_default_url
+//
+// toDesign/toDefaultDesign stay valid inputs for both shapes: every
+// full-only field defaults to ''/false when the summary omits it, so a
+// summary card renders (name, flags, background) without ever pretending
+// to carry the full record. Anything that needs a full field — the active
+// design, the edit modal, a clone — must use a single-record GET below
+// (getDesign / getDefaultDesign / fetchSingleDesign / loadDesignForEdit),
+// never the lists.
+
 export const getDesign = async (id) => {
   try {
     const record = await sendApi(`/api/aerun/designs/${id}`);
@@ -291,7 +315,11 @@ export const updateDesign = async (id, designData) => {
     body: payload
   });
   notifySubscribers();
-  return record ? toDesign(record) : null;
+  const updated = record ? toDesign(record) : null;
+  // A successful save overwrites the modal's session copy, so the next open
+  // shows what was just saved instead of the pre-edit snapshot.
+  if (updated) writeDesignCache('custom', id, updated);
+  return updated;
 };
 
 export const uploadDesignFavicon = async (id, blob, filename = 'favicon.png') => {
@@ -309,6 +337,7 @@ export const deleteDesign = async (id) => {
   await sendApi(`/api/aerun/designs/${id}`, {
     method: 'DELETE'
   });
+  removeDesignCache('custom', id);
   notifySubscribers();
 };
 
@@ -419,8 +448,100 @@ export const getDefaultDesign = async (key) => {
   } catch (err) {
     console.warn(`[default-designs] failed to fetch default design ${key}`, err);
   }
-  return (_cachedDefaultDesigns || []).find(d => d.key === key || d.id === key) || null;
+  // No list-cache fallback here on purpose: the cached lists are SUMMARIES
+  // now, and handing one out as a full record would let the edit modal save
+  // its empty css/js/header over the card's real values. A failed single
+  // GET answers null, and the caller falls back to the built-in theme.
+  return null;
 };
+
+// --- Single-record fetch + edit-modal session cache ------------------------
+// One theme, one GET: a built-in key ('dark'/'light'/'neutral') resolves to
+// the default-design record by key, anything else to the custom record by
+// id. This is the only way the active design is resolved once the embedded
+// settings card cannot answer the target — full lists are never fetched
+// for it, and the theme picker never fetches lists to apply a theme either.
+export async function fetchSingleDesign(targetId) {
+  if (!targetId) return null;
+  if (BUILTIN_THEMES.includes(targetId)) return getDefaultDesign(targetId);
+  return getDesign(targetId);
+}
+
+// The edit modal loads its full record once per session and reuses it:
+// sessionStorage, keyed by design id, with custom and default designs in
+// separate namespaces so a custom id can never collide with a default key.
+// Stale-within-session is acceptable (the user asked for it); a successful
+// save overwrites the entry (see updateDesign/updateDefaultDesign below),
+// and a delete drops it. `options.storage` exists so the node test can
+// inject a fake store — in the browser it defaults to sessionStorage, and
+// when storage is unavailable the helpers degrade to fetch-every-time.
+export const DESIGN_CACHE_KEY_PREFIX = {
+  custom: 'aerun_design_cache:custom:',
+  default: 'aerun_design_cache:default:',
+};
+
+export function designCacheKey(kind, identifier) {
+  return `${DESIGN_CACHE_KEY_PREFIX[kind] || DESIGN_CACHE_KEY_PREFIX.custom}${identifier}`;
+}
+
+function resolveDesignCacheStorage(options) {
+  if (options?.storage) return options.storage;
+  try {
+    return typeof sessionStorage !== 'undefined' ? sessionStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+function mapCachedDesign(kind, raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  return kind === 'default' ? toDefaultDesign(raw) : toDesign(raw);
+}
+
+export function readDesignCache(kind, identifier, options = {}) {
+  const storage = resolveDesignCacheStorage(options);
+  if (!storage) return null;
+  try {
+    const raw = storage.getItem(designCacheKey(kind, identifier));
+    if (!raw) return null;
+    return mapCachedDesign(kind, JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+export function writeDesignCache(kind, identifier, design, options = {}) {
+  const storage = resolveDesignCacheStorage(options);
+  if (!storage || !design) return;
+  try {
+    storage.setItem(designCacheKey(kind, identifier), JSON.stringify(design));
+  } catch {
+    // Storage full or unavailable — the next open just refetches.
+  }
+}
+
+export function removeDesignCache(kind, identifier, options = {}) {
+  const storage = resolveDesignCacheStorage(options);
+  if (!storage) return;
+  try {
+    storage.removeItem(designCacheKey(kind, identifier));
+  } catch {
+    // Nothing to do — the entry is gone or unreachable either way.
+  }
+}
+
+// Load the FULL record for the edit modal: cached copy first, one
+// single-record GET on a miss, and the fetched record cached for the next
+// open in the same session. Returns { design, fromCache }.
+export async function loadDesignForEdit(kind, identifier, options = {}) {
+  const cached = readDesignCache(kind, identifier, options);
+  if (cached) return { design: cached, fromCache: true };
+  const design = kind === 'default'
+    ? await getDefaultDesign(identifier)
+    : await getDesign(identifier);
+  if (design) writeDesignCache(kind, identifier, design, options);
+  return { design, fromCache: false };
+}
 
 export const updateDefaultDesign = async (key, designData) => {
   const payload = toDefaultDesignPayload(designData);
@@ -429,7 +550,11 @@ export const updateDefaultDesign = async (key, designData) => {
     body: payload
   });
   notifyDefaultDesignSubscribers();
-  return record ? toDefaultDesign(record) : null;
+  const updated = record ? toDefaultDesign(record) : null;
+  // A successful save overwrites the modal's session copy, so the next open
+  // shows what was just saved instead of the pre-edit snapshot.
+  if (updated) writeDesignCache('default', key, updated);
+  return updated;
 };
 
 export const uploadDefaultDesignBackground = async (key, kind, blob, filename = `${kind}.png`) => {

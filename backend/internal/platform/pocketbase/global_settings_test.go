@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+
+	"github.com/pocketbase/pocketbase/tests"
 )
 
 func TestGetGlobalSettingsPublic(t *testing.T) {
@@ -209,5 +211,253 @@ func TestUpdateGlobalSettingsValidatesBounds(t *testing.T) {
 	status, _, _ = categoryCall(t, http.MethodPatch, ts.URL+"/api/aerun/admin/settings", `{"maxCharsPerPost":1000001}`, tokens["root"], "test-idem-settings-chars-over")
 	if status != http.StatusBadRequest {
 		t.Fatalf("expected 400 for over-ceiling maxCharsPerPost, got %d", status)
+	}
+}
+
+// setTestUserTheme writes users.settings.theme for one fixture account
+// ("" clears the key). The snapshot resolves the active card for the
+// REQUESTING user, so the tests below set the theme on the record and then
+// read the snapshot as that user.
+func setTestUserTheme(t testing.TB, app *tests.TestApp, userID, theme string) {
+	t.Helper()
+	rec, err := app.FindRecordById(usersCollectionName, userID)
+	if err != nil {
+		t.Fatalf("find user %s: %v", userID, err)
+	}
+	settings, err := decodeSettings(rec)
+	if err != nil {
+		t.Fatalf("decode user settings: %v", err)
+	}
+	if theme == "" {
+		delete(settings, "theme")
+	} else {
+		settings["theme"] = theme
+	}
+	rec.Set("settings", settings)
+	if err := app.Save(rec); err != nil {
+		t.Fatalf("save user theme: %v", err)
+	}
+}
+
+// fetchSettingsActiveDesign reads GET /api/aerun/settings as one actor and
+// returns the embedded activeDesign card. It fails the test when the
+// snapshot carries no card: the chrome must never boot without one.
+func fetchSettingsActiveDesign(t testing.TB, serverURL, token string) map[string]any {
+	t.Helper()
+	status, body := getAerunAuthed(t, serverURL+"/api/aerun/settings", token)
+	if status != http.StatusOK {
+		t.Fatalf("GET /settings = %d: %s", status, body)
+	}
+	var resp struct {
+		Settings map[string]any `json:"settings"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("invalid settings json: %v", err)
+	}
+	card, _ := resp.Settings["activeDesign"].(map[string]any)
+	if card == nil {
+		t.Fatalf("settings must embed activeDesign: %s", body)
+	}
+	return card
+}
+
+// TestGlobalSettingsEmbedsActiveDesign pins the init payload: the snapshot
+// carries the requesting visitor's resolved active card, so the chrome can
+// apply it the moment the settings arrive instead of waiting for the full
+// design lists.
+//
+// The seeded light card is «Светлая» (migration 1781000012): the brief's
+// "Snow Mountains" is the name that card carries on the user's own stand,
+// where it was renamed through the admin panel — the seed, and therefore
+// this test, uses the seeded name.
+func TestGlobalSettingsEmbedsActiveDesign(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	// Logged-in member with theme 'light' gets the light card embedded.
+	setTestUserTheme(t, app, fixPlayerID, "light")
+	card := fetchSettingsActiveDesign(t, ts.URL, tokens["player"])
+	if card["kind"] != "default" || card["key"] != "light" {
+		t.Fatalf("player theme light: activeDesign = %v, want the light default card", card)
+	}
+	if card["name"] != "Светлая" {
+		t.Fatalf("player theme light: name = %v, want «Светлая»", card["name"])
+	}
+	// The card must carry everything the chrome needs — background URLs,
+	// header/footer, title, favicon, placeholders, css/js and the
+	// overwrite flags — not just an id the client would have to resolve.
+	// (No bg_opacity assertion: item G removes the background-opacity
+	// feature, so this test must not depend on it.)
+	for _, field := range []string{
+		"bg_default_url", "bg_tablet_url", "bg_mobile_url",
+		"header_html", "custom_footer_html", "forum_title", "favicon_url",
+		"placeholder_deleted_url", "placeholder_guest_url",
+		"css", "js",
+		"overwrite_header", "overwrite_footer", "overwrite_title",
+		"overwrite_favicon", "overwrite_css", "overwrite_js",
+		"overwrite_placeholder_deleted", "overwrite_placeholder_guest",
+	} {
+		if _, ok := card[field]; !ok {
+			t.Errorf("activeDesign is missing %q", field)
+		}
+	}
+
+	// Guest and member without a theme get the forum default. The seed
+	// leaves default_design_id empty, so the forum default is unresolvable
+	// and the ultimate fallback — the built-in dark card — applies.
+	card = fetchSettingsActiveDesign(t, ts.URL, "")
+	if card["kind"] != "default" || card["key"] != "dark" {
+		t.Fatalf("guest: activeDesign = %v, want the dark fallback card", card)
+	}
+	setTestUserTheme(t, app, fixPlayerID, "")
+	card = fetchSettingsActiveDesign(t, ts.URL, tokens["player"])
+	if card["kind"] != "default" || card["key"] != "dark" {
+		t.Fatalf("member without theme: activeDesign = %v, want the dark fallback card", card)
+	}
+}
+
+// TestGlobalSettingsActiveDesignFollowsForumDefault pins the guest path:
+// with no theme of their own, a visitor gets the forum's configured
+// default — and a member's own theme still wins over it.
+func TestGlobalSettingsActiveDesignFollowsForumDefault(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	status, body, _ := categoryCall(t, http.MethodPatch, ts.URL+"/api/aerun/admin/settings",
+		`{"defaultDesignId":"light"}`, tokens["root"], "test-idem-settings-default-light")
+	if status != http.StatusOK {
+		t.Fatalf("admin set defaultDesignId = %d: %s", status, body)
+	}
+	// The PATCH response itself carries the snapshot, resolved for the
+	// requesting admin (no theme of their own) — so it already shows the
+	// new default.
+	var patched struct {
+		Settings map[string]any `json:"settings"`
+	}
+	if err := json.Unmarshal(body, &patched); err != nil {
+		t.Fatal(err)
+	}
+	patchedCard, _ := patched.Settings["activeDesign"].(map[string]any)
+	if patchedCard == nil || patchedCard["key"] != "light" {
+		t.Fatalf("PATCH response activeDesign = %v, want the light card", patchedCard)
+	}
+
+	card := fetchSettingsActiveDesign(t, ts.URL, "")
+	if card["kind"] != "default" || card["key"] != "light" {
+		t.Fatalf("guest: activeDesign = %v, want the forum default (light)", card)
+	}
+	card = fetchSettingsActiveDesign(t, ts.URL, tokens["player"])
+	if card["kind"] != "default" || card["key"] != "light" {
+		t.Fatalf("member without theme: activeDesign = %v, want the forum default (light)", card)
+	}
+
+	setTestUserTheme(t, app, fixPlayerID, "dark")
+	card = fetchSettingsActiveDesign(t, ts.URL, tokens["player"])
+	if card["kind"] != "default" || card["key"] != "dark" {
+		t.Fatalf("member theme dark: activeDesign = %v, want dark, not the forum default", card)
+	}
+}
+
+// TestGlobalSettingsEmbedsActiveCustomDesign pins the custom-design branch:
+// a member whose theme is a custom design id gets that design embedded,
+// with its base theme — and a deactivated design falls back safely.
+func TestGlobalSettingsEmbedsActiveCustomDesign(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	id := createTestDesign(t, ts.URL, tokens["root"], "MemberTheme")
+	// New designs are born inactive (the admin panel creates with
+	// is_active=false and activates explicitly), so activate it first —
+	// otherwise the resolver correctly falls back to the forum default.
+	status, _, _ := categoryCall(t, http.MethodPatch, ts.URL+"/api/aerun/designs/"+id,
+		`{"is_active":true}`, tokens["root"], "test-idem-settings-activate-theme")
+	if status != http.StatusOK {
+		t.Fatalf("activate design = %d", status)
+	}
+	setTestUserTheme(t, app, fixPlayerID, id)
+
+	card := fetchSettingsActiveDesign(t, ts.URL, tokens["player"])
+	if card["kind"] != "custom" || card["id"] != id {
+		t.Fatalf("member custom theme: activeDesign = %v, want the custom design %s", card, id)
+	}
+	if card["name"] != "MemberTheme" {
+		t.Fatalf("member custom theme: name = %v, want MemberTheme", card["name"])
+	}
+	if card["base_theme"] != "dark" {
+		t.Fatalf("member custom theme: base_theme = %v, want dark (create default)", card["base_theme"])
+	}
+
+	status, _, _ = categoryCall(t, http.MethodPatch, ts.URL+"/api/aerun/designs/"+id,
+		`{"is_active":false}`, tokens["root"], "test-idem-settings-deactivate-theme")
+	if status != http.StatusOK {
+		t.Fatalf("deactivate design = %d", status)
+	}
+	card = fetchSettingsActiveDesign(t, ts.URL, tokens["player"])
+	if card["kind"] != "default" || card["key"] != "dark" {
+		t.Fatalf("deactivated custom theme: activeDesign = %v, want the dark fallback card", card)
+	}
+}
+
+// TestGlobalSettingsActiveDesignFallbacks pins the fallback chain for
+// targets that cannot be used: an unknown id, a built-in removed from the
+// list, and — the exception that proves the rule — a forum default removed
+// from the list, which stays usable as the fallback.
+func TestGlobalSettingsActiveDesignFallbacks(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	// Unknown/removed theme: a custom design id that was never created (or
+	// has since been deleted) falls back to the forum default, then dark.
+	setTestUserTheme(t, app, fixPlayerID, "design-that-does-not-exist")
+	card := fetchSettingsActiveDesign(t, ts.URL, tokens["player"])
+	if card["kind"] != "default" || card["key"] != "dark" {
+		t.Fatalf("unknown theme: activeDesign = %v, want the dark fallback card", card)
+	}
+
+	// Built-in removed from the list: hiding the light card un-lists it, so
+	// a member who still has it selected falls back to the forum default.
+	setTestUserTheme(t, app, fixPlayerID, "light")
+	status, _, _ := categoryCall(t, http.MethodPatch, ts.URL+"/api/aerun/default-designs/light",
+		`{"show_in_list":false}`, tokens["root"], "test-idem-settings-hide-light")
+	if status != http.StatusOK {
+		t.Fatalf("hide light card = %d", status)
+	}
+	card = fetchSettingsActiveDesign(t, ts.URL, tokens["player"])
+	if card["kind"] != "default" || card["key"] != "dark" {
+		t.Fatalf("hidden light theme: activeDesign = %v, want the dark fallback card", card)
+	}
+
+	// Hidden forum default: the default itself stays usable as the fallback
+	// even when removed from the list — it just can no longer be
+	// (re-)selected. The member above keeps their (hidden) light theme as
+	// the forum default now, so the snapshot must still embed it.
+	status, _, _ = categoryCall(t, http.MethodPatch, ts.URL+"/api/aerun/admin/settings",
+		`{"defaultDesignId":"light"}`, tokens["root"], "test-idem-settings-default-hidden-light")
+	if status != http.StatusOK {
+		t.Fatalf("set defaultDesignId to hidden light = %d", status)
+	}
+	card = fetchSettingsActiveDesign(t, ts.URL, tokens["player"])
+	if card["kind"] != "default" || card["key"] != "light" {
+		t.Fatalf("hidden forum default: activeDesign = %v, want the light card anyway", card)
+	}
+	card = fetchSettingsActiveDesign(t, ts.URL, "")
+	if card["kind"] != "default" || card["key"] != "light" {
+		t.Fatalf("guest with hidden forum default: activeDesign = %v, want the light card", card)
 	}
 }

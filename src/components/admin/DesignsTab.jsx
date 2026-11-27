@@ -4,6 +4,7 @@ import ForumModal from '../common/ForumModal';
 import ConfirmModal from '../common/ConfirmModal';
 import { useI18n } from '../../contexts/I18nProvider';
 import { useToast } from '../../contexts/ToastProvider';
+import { useAuth } from '../../contexts/AuthProvider';
 import {
   createDesign,
   updateDesign,
@@ -16,6 +17,7 @@ import {
   uploadDefaultDesignPlaceholder,
   uploadDefaultDesignFavicon,
   resolveDesignBaseTheme,
+  loadDesignForEdit,
 } from '../../api/designs';
 import { uploadSettingsFavicon, uploadIdentityPlaceholder } from '../../api/admin';
 import { validateCode } from './codeValidation';
@@ -30,7 +32,6 @@ const MAX_BACKGROUND_BYTES = 10 * 1024 * 1024;
 
 const DEFAULT_FORM = {
   name: '',
-  description: '',
   faviconUrl: '',
   forumTitle: '',
   headerHtml: '',
@@ -51,7 +52,6 @@ const DEFAULT_FORM = {
   bgDefaultUrl: '',
   bgTabletUrl: '',
   bgMobileUrl: '',
-  bgOpacity: 0.5,
   placeholderDeletedUrl: '',
   placeholderGuestUrl: '',
 };
@@ -155,10 +155,11 @@ const BackgroundUploadField = ({ id, label, value, onUpload, onClear, disabled }
 };
 
 // One overwritable field: a switch ("use this card's own value") above the
-// field itself. Switch OFF disables the field — its value is kept stored but
-// the resolver falls back to surface 1 instead.
-const OverwriteField = ({ label, overwrite, onToggle, hint, children }) => {
-  const { t } = useI18n();
+// field itself. Switch OFF hides the field entirely — its value stays stored
+// but the resolver falls back to surface 1 instead. No greyed-out field and
+// no repetitive "off" hint under every toggle: the switch label says what
+// switching it on does.
+const OverwriteField = ({ label, overwrite, onToggle, children }) => {
   return (
     <div className="designs-form__group">
       <label className="designs-switch">
@@ -170,24 +171,26 @@ const OverwriteField = ({ label, overwrite, onToggle, hint, children }) => {
         />
         <span>{label}</span>
       </label>
-      {!overwrite && (
-        <div className="designs-form__hint">{t('admin.designs.overwrite_off_hint')}</div>
-      )}
-      {hint && <div className="designs-form__hint">{hint}</div>}
-      <div className={overwrite ? '' : 'designs-field--disabled'}>
-        {children}
-      </div>
+      {overwrite ? children : null}
     </div>
   );
 };
 
-const DesignsTab = ({ designs, defaultDesigns = [], settings, setSettings, updateSettings }) => {
+const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, setSettings, updateSettings }) => {
   const { t } = useI18n();
   const { showToast } = useToast();
+  // The forum-settings updater arrives as the `updateSettings` prop; the
+  // viewer's OWN theme goes through AuthProvider's updateSettings instead.
+  const { updateSettings: updateMySettings } = useAuth();
 
   const [showModal, setShowModal] = useState(false);
   // { kind: 'custom' | 'default', id, key? } — null when creating a custom design.
   const [editingTarget, setEditingTarget] = useState(null);
+  // True while the modal waits for the FULL record (see handleOpenModal).
+  const [modalLoading, setModalLoading] = useState(false);
+  // Guards the async open: a close (or a second open) while a fetch is in
+  // flight must not let the late answer fill the form afterwards.
+  const openNonceRef = useRef(0);
   const [form, setForm] = useState(DEFAULT_FORM);
   const [nameAttempted, setNameAttempted] = useState(false);
   const [fieldValidity, setFieldValidity] = useState({});
@@ -239,7 +242,6 @@ const DesignsTab = ({ designs, defaultDesigns = [], settings, setSettings, updat
 
   const formFromCard = (card) => ({
     name: card.name || '',
-    description: card.description || '',
     faviconUrl: card.faviconUrl || '',
     forumTitle: card.forumTitle || '',
     headerHtml: card.headerHtml || '',
@@ -260,27 +262,58 @@ const DesignsTab = ({ designs, defaultDesigns = [], settings, setSettings, updat
     bgDefaultUrl: card.bgDefaultUrl || '',
     bgTabletUrl: card.bgTabletUrl || '',
     bgMobileUrl: card.bgMobileUrl || '',
-    bgOpacity: card.bgOpacity ?? 0.5,
     placeholderDeletedUrl: card.placeholderDeletedUrl || '',
     placeholderGuestUrl: card.placeholderGuestUrl || '',
   });
 
+  // The cards this tab renders are LIST SUMMARIES (id/name/show_in_list/
+  // bg_default_url/is_active/base_theme) — they carry no css/js/header/
+  // footer/title/favicon/placeholder/overwrite fields. The modal therefore
+  // never builds its form from the card: on open it loads the FULL record
+  // with one single-record GET via loadDesignForEdit, cached in
+  // sessionStorage for the session (a second open reuses the cached copy
+  // with no refetch; a successful save overwrites it). While the record
+  // loads the modal shows a loading state and the Save button stays off.
   const handleOpenModal = (target = null) => {
     setNameAttempted(false);
     setFieldValidity({});
     resetFaviconStaging();
     resetPendingUploads();
-    if (target) {
-      setEditingTarget(target);
-      setForm(formFromCard(target.card));
-    } else {
+    if (!target) {
       setEditingTarget(null);
+      setModalLoading(false);
       setForm({ ...DEFAULT_FORM, baseTheme: resolveDesignBaseTheme(null, settings) });
+      setShowModal(true);
+      return;
     }
+    const nonce = ++openNonceRef.current;
+    setEditingTarget(target);
+    setModalLoading(true);
+    setForm({ ...DEFAULT_FORM, baseTheme: resolveDesignBaseTheme(target.card, settings) });
     setShowModal(true);
+    loadDesignForEdit(target.kind, target.kind === 'default' ? target.key : target.id)
+      .then(({ design }) => {
+        if (nonce !== openNonceRef.current) return;
+        if (!design) {
+          showToast(t('admin.designs.error_save'), 'danger');
+          setShowModal(false);
+          return;
+        }
+        setForm(formFromCard(design));
+      })
+      .catch((err) => {
+        console.error(err);
+        if (nonce !== openNonceRef.current) return;
+        showToast(t('admin.designs.error_save'), 'danger');
+        setShowModal(false);
+      })
+      .finally(() => {
+        if (nonce === openNonceRef.current) setModalLoading(false);
+      });
   };
 
   const handleCloseModal = () => {
+    openNonceRef.current++;
     resetFaviconStaging();
     resetPendingUploads();
     setShowModal(false);
@@ -378,10 +411,12 @@ const DesignsTab = ({ designs, defaultDesigns = [], settings, setSettings, updat
 
     // Backstop re-validation at save time: the fields also report validity
     // live through CodeEditorField, but a value that never changed since the
-    // modal opened must still block the save.
-    const headerError = validateCode('html', form.headerHtml, t);
-    const footerError = validateCode('html', form.customFooterHtml, t);
-    const jsError = validateCode('javascript', form.js, t);
+    // modal opened must still block the save. Only fields whose overwrite
+    // switch is ON are validated — a hidden field's stored value is unused
+    // (surface 1 applies instead) and must not block the save.
+    const headerError = form.overwriteHeader ? validateCode('html', form.headerHtml, t) : null;
+    const footerError = form.overwriteFooter ? validateCode('html', form.customFooterHtml, t) : null;
+    const jsError = form.overwriteJs ? validateCode('javascript', form.js, t) : null;
     if (headerError || footerError || jsError) {
       showToast(t('admin.designs.validation_save_blocked'), 'danger');
       return;
@@ -454,7 +489,17 @@ const DesignsTab = ({ designs, defaultDesigns = [], settings, setSettings, updat
 
   const handleClone = async (design) => {
     try {
-      const { id: _id, ...data } = design;
+      // A clone needs the FULL record — the card is a list summary and
+      // cloning from it would silently drop the css/js/header/footer and
+      // every other full-only field. One single-record GET (cached).
+      const { design: full } = await loadDesignForEdit('custom', design.id);
+      if (!full) {
+        showToast(t('admin.designs.error_save'), 'danger');
+        return;
+      }
+      // The description field was removed from the modal (F): a clone must
+      // not carry the stale, now uneditable value along.
+      const { id: _id, description: _description, ...data } = full;
       await createDesign({
         ...data,
         name: `${data.name} (Copy)`,
@@ -546,11 +591,46 @@ const DesignsTab = ({ designs, defaultDesigns = [], settings, setSettings, updat
     window.open(`/?preview_design=${designId}`, '_blank');
   };
 
+  // ── B2: see / apply the design being edited, from the modal ─────────────
+  // The theme value is the built-in key ('dark'/'light'/'neutral') for a
+  // built-in card and the record id for a custom one. Applying a design only
+  // makes sense when it can actually render: built-in cards always can, a
+  // custom design only while it is active (an inactive one falls back to the
+  // forum default, so offering the buttons would silently do nothing).
+  const modalThemeValue = isDefaultTarget ? editingTarget?.key : editingTarget?.id;
+  const canApplyModalDesign = Boolean(editingTarget) && (isDefaultTarget || form.isActive);
+
+  const handleSetAsMyTheme = async () => {
+    if (!modalThemeValue) return;
+    try {
+      await updateMySettings({ theme: modalThemeValue });
+      showToast(t('admin.designs.toast_theme_set'), 'success');
+    } catch (err) {
+      console.error(err);
+      showToast(t('admin.designs.error_save'), 'danger');
+    }
+  };
+
+  const handleSetAsForumDefault = async () => {
+    if (!modalThemeValue) return;
+    try {
+      const next = { ...settings, defaultDesignId: modalThemeValue };
+      await updateSettings(next);
+      setSettings((prev) => ({ ...prev, defaultDesignId: modalThemeValue }));
+      showToast(t('admin.designs.toast_default_set'), 'success');
+    } catch (err) {
+      console.error(err);
+      showToast(t('admin.designs.error_save'), 'danger');
+    }
+  };
+
   const showInListDisabled = !isDefaultTarget && (!editingTarget || !form.isActive);
   const nameInvalid = nameAttempted && !form.name.trim();
-  const saveBlocked = fieldValidity.header === false
-    || fieldValidity.footer === false
-    || fieldValidity.js === false;
+  // Only overwrite-ON fields can block the save: a hidden field's stored
+  // value is unused (surface 1 applies instead).
+  const saveBlocked = (form.overwriteHeader && fieldValidity.header === false)
+    || (form.overwriteFooter && fieldValidity.footer === false)
+    || (form.overwriteJs && fieldValidity.js === false);
 
   // ── Surface 1: default settings (the fallback for every card) ──────────
   // Edits write straight into AdminPage's settings draft (the same pattern
@@ -782,26 +862,40 @@ const DesignsTab = ({ designs, defaultDesigns = [], settings, setSettings, updat
     </section>
   );
 
+  // D: one component, three pages. `surface` picks which surface this page
+  // shows ('defaults' | 'custom' | 'builtin'); 'all' renders everything, as
+  // the old single tab did. The edit modal and the confirmation modals are
+  // shared by all three pages.
+  const surfaceTitle = {
+    defaults: t('admin.designs.defaults_title'),
+    custom: t('admin.designs.custom_title'),
+    builtin: t('admin.designs.default_designs_title'),
+    all: t('admin.designs.title'),
+  }[surface] || t('admin.designs.title');
+
   return (
     <div className="designs-tab">
       <div className="designs-header">
         <h4 className="designs-header__title">
           <Palette size={22} />
-          <span>{t('admin.designs.title')}</span>
+          <span>{surfaceTitle}</span>
         </h4>
-        <button
-          type="button"
-          className="designs-btn designs-btn--primary"
-          onClick={() => handleOpenModal()}
-        >
-          <PlusCircle size={18} />
-          <span>{t('admin.designs.create_btn')}</span>
-        </button>
+        {(surface === 'custom' || surface === 'all') && (
+          <button
+            type="button"
+            className="designs-btn designs-btn--primary"
+            onClick={() => handleOpenModal()}
+          >
+            <PlusCircle size={18} />
+            <span>{t('admin.designs.create_btn')}</span>
+          </button>
+        )}
       </div>
 
-      {renderSurface1()}
+      {(surface === 'defaults' || surface === 'all') && renderSurface1()}
 
       {/* Surface 2 — custom designs */}
+      {(surface === 'custom' || surface === 'all') && (
       <section className="designs-surface" aria-label={t('admin.designs.custom_title')}>
         <h4 className="designs-surface__title">{t('admin.designs.custom_title')}</h4>
         {designs.length === 0 ? (
@@ -813,6 +907,15 @@ const DesignsTab = ({ designs, defaultDesigns = [], settings, setSettings, updat
                 key={design.id}
                 className={`designs-card ${!design.isActive ? 'designs-card--inactive' : ''}`}
               >
+                {design.bgDefaultUrl ? (
+                  <div className="designs-card__cover">
+                    <img
+                      src={resolveAvatarUrl(design.bgDefaultUrl)}
+                      alt=""
+                      className="designs-card__cover-img"
+                    />
+                  </div>
+                ) : null}
                 <div className="designs-card__header">
                   <h5 className="designs-card__title">{design.name}</h5>
                   <span
@@ -825,8 +928,6 @@ const DesignsTab = ({ designs, defaultDesigns = [], settings, setSettings, updat
                     {design.isActive ? t('admin.designs.active') : t('admin.designs.inactive')}
                   </span>
                 </div>
-
-                <p className="designs-card__desc">{design.description}</p>
 
                 <p className="designs-card__base">
                   {t('admin.designs.modal_base_theme')}: {{
@@ -890,8 +991,10 @@ const DesignsTab = ({ designs, defaultDesigns = [], settings, setSettings, updat
           </div>
         )}
       </section>
+      )}
 
       {/* Surface 3 — built-in (default) designs */}
+      {(surface === 'builtin' || surface === 'all') && (
       <section className="designs-surface" aria-label={t('admin.designs.default_designs_title')}>
         <h4 className="designs-surface__title">{t('admin.designs.default_designs_title')}</h4>
         <p className="designs-surface__desc">{t('admin.designs.default_designs_desc')}</p>
@@ -901,14 +1004,21 @@ const DesignsTab = ({ designs, defaultDesigns = [], settings, setSettings, updat
           <div className="designs-grid">
             {defaultDesigns.map((card) => (
               <article key={card.id || card.key} className="designs-card">
+                {card.bgDefaultUrl ? (
+                  <div className="designs-card__cover">
+                    <img
+                      src={resolveAvatarUrl(card.bgDefaultUrl)}
+                      alt=""
+                      className="designs-card__cover-img"
+                    />
+                  </div>
+                ) : null}
                 <div className="designs-card__header">
                   <h5 className="designs-card__title">{card.name}</h5>
                   <span className="designs-card__badge designs-card__badge--builtin">
                     {t('admin.designs.builtin_badge')}
                   </span>
                 </div>
-
-                <p className="designs-card__desc">{card.description}</p>
 
                 {settings?.defaultDesignId === card.key && (
                   <p className="designs-card__base">{t('admin.designs.default_badge')}</p>
@@ -948,6 +1058,7 @@ const DesignsTab = ({ designs, defaultDesigns = [], settings, setSettings, updat
           </div>
         )}
       </section>
+      )}
 
       {/* Edit/Create Modal */}
       <ForumModal
@@ -961,6 +1072,35 @@ const DesignsTab = ({ designs, defaultDesigns = [], settings, setSettings, updat
         footerClassName=""
         footer={
           <>
+            {editingTarget && (
+              <span className="designs-modal-footer__try">
+                <button
+                  type="button"
+                  className="designs-btn designs-btn--secondary"
+                  onClick={() => handlePreview(editingTarget.id)}
+                >
+                  {t('admin.designs.preview')}
+                </button>
+                {canApplyModalDesign && (
+                  <>
+                    <button
+                      type="button"
+                      className="designs-btn designs-btn--secondary"
+                      onClick={handleSetAsMyTheme}
+                    >
+                      {t('admin.designs.set_as_my_theme')}
+                    </button>
+                    <button
+                      type="button"
+                      className="designs-btn designs-btn--secondary"
+                      onClick={handleSetAsForumDefault}
+                    >
+                      {t('admin.designs.set_as_forum_default')}
+                    </button>
+                  </>
+                )}
+              </span>
+            )}
             <button
               type="button"
               className="designs-btn designs-btn--secondary"
@@ -972,7 +1112,7 @@ const DesignsTab = ({ designs, defaultDesigns = [], settings, setSettings, updat
               type="button"
               className="designs-btn designs-btn--primary"
               onClick={handleSave}
-              disabled={!form.name.trim() || saveBlocked}
+              disabled={modalLoading || !form.name.trim() || saveBlocked}
             >
               {t('admin.designs.save_btn')}
             </button>
@@ -986,6 +1126,11 @@ const DesignsTab = ({ designs, defaultDesigns = [], settings, setSettings, updat
             handleSave();
           }}
         >
+          {modalLoading && (
+            <div className="designs-form__loading">{t('common.loading')}</div>
+          )}
+          <section className="designs-modal-section" aria-label={t('admin.designs.section_general')}>
+          <h5 className="designs-modal-section__title">{t('admin.designs.section_general')}</h5>
           {!isDefaultTarget && (
             <div className="designs-form__group">
               <label className="designs-form__label" htmlFor="design-base-theme">
@@ -1029,34 +1174,21 @@ const DesignsTab = ({ designs, defaultDesigns = [], settings, setSettings, updat
             )}
           </div>
 
-          <div className="designs-form__row">
-            <div className="designs-form__group">
-              <label className="designs-form__label" htmlFor="design-name">
-                {t('admin.designs.modal_name')}
-              </label>
-              <input
-                id="design-name"
-                type="text"
-                className={`designs-form__control ${nameInvalid ? 'designs-form__control--invalid' : ''}`}
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-              />
-            </div>
-
-            <div className="designs-form__group">
-              <label className="designs-form__label" htmlFor="design-desc">
-                {t('admin.designs.modal_desc')}
-              </label>
-              <textarea
-                id="design-desc"
-                rows={2}
-                className="designs-form__textarea"
-                value={form.description}
-                onChange={(e) => setForm({ ...form, description: e.target.value })}
-              />
-            </div>
+          <div className="designs-form__group">
+            <label className="designs-form__label" htmlFor="design-name">
+              {t('admin.designs.modal_name')}
+            </label>
+            <input
+              id="design-name"
+              type="text"
+              className={`designs-form__control ${nameInvalid ? 'designs-form__control--invalid' : ''}`}
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+            />
           </div>
+        </section>
 
+        <section className="designs-modal-section" aria-label={t('admin.designs.background_title')}>
           <details className="designs-bg-section">
             <summary className="designs-bg-section__summary">
               {t('admin.designs.background_title')}
@@ -1083,28 +1215,12 @@ const DesignsTab = ({ designs, defaultDesigns = [], settings, setSettings, updat
                 onUpload={(blob, filename) => handleBackgroundUpload('mobile', blob, filename)}
                 onClear={() => handleBackgroundClear('mobile')}
               />
-              <div className="designs-form__group">
-                <label className="designs-form__label" htmlFor="design-bg-opacity">
-                  {t('admin.designs.background_opacity')}
-                </label>
-                <div className="designs-opacity-row">
-                  <input
-                    id="design-bg-opacity"
-                    type="range"
-                    min="0"
-                    max="100"
-                    step="5"
-                    className="designs-opacity-row__range"
-                    value={Math.round((form.bgOpacity ?? 0.5) * 100)}
-                    onChange={(e) => setForm({ ...form, bgOpacity: Number(e.target.value) / 100 })}
-                  />
-                  <span className="designs-opacity-row__value">{Math.round((form.bgOpacity ?? 0.5) * 100)}%</span>
-                </div>
-                <div className="designs-form__hint">{t('admin.designs.background_opacity_help')}</div>
-              </div>
             </div>
           </details>
+        </section>
 
+        <section className="designs-modal-section" aria-label={t('admin.designs.section_content')}>
+          <h5 className="designs-modal-section__title">{t('admin.designs.section_content')}</h5>
           <OverwriteField
             label={t('admin.designs.overwrite_header')}
             overwrite={form.overwriteHeader}
@@ -1241,12 +1357,14 @@ const DesignsTab = ({ designs, defaultDesigns = [], settings, setSettings, updat
               )}
             </div>
           </OverwriteField>
+        </section>
 
+        <section className="designs-modal-section" aria-label={t('admin.designs.section_code')}>
+          <h5 className="designs-modal-section__title">{t('admin.designs.section_code')}</h5>
           <OverwriteField
             label={t('admin.designs.overwrite_css')}
             overwrite={form.overwriteCss}
             onToggle={(val) => setForm((prev) => ({ ...prev, overwriteCss: val }))}
-            hint={t('admin.designs.overwrite_css_hint')}
           >
             <CodeEditorField
               id="design-css"
@@ -1263,7 +1381,6 @@ const DesignsTab = ({ designs, defaultDesigns = [], settings, setSettings, updat
             label={t('admin.designs.overwrite_js')}
             overwrite={form.overwriteJs}
             onToggle={(val) => setForm((prev) => ({ ...prev, overwriteJs: val }))}
-            hint={t('admin.designs.overwrite_js_hint')}
           >
             <CodeEditorField
               id="design-js"
@@ -1275,6 +1392,7 @@ const DesignsTab = ({ designs, defaultDesigns = [], settings, setSettings, updat
               minHeight="120px"
             />
           </OverwriteField>
+        </section>
 
         </form>
       </ForumModal>

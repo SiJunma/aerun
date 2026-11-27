@@ -177,6 +177,12 @@ const ProfilePage = () => {
   const [designs, setDesigns] = useState([]);
   const [defaultDesigns, setDefaultDesigns] = useState([]);
 
+  // The picker lists are LIST SUMMARIES (id/name/show_in_list/bg_default_url/
+  // is_active/base_theme) — everything the picker renders (names, visibility,
+  // active flags). Applying a theme never fetches a list: saving the choice
+  // changes profile.settings.theme, and DesignProvider then fetches that ONE
+  // theme with a single-record GET; on reload the theme comes from the
+  // settings endpoint (activeDesign).
   useEffect(() => {
     const unsubDesigns = subscribeToDesigns(setDesigns);
     const unsubDefaults = subscribeToDefaultDesigns(setDefaultDesigns);

@@ -164,9 +164,25 @@
   background-color: color-mix(in srgb, var(--card-bg) 92%, var(--block-bg));
 }
 
-.designs-card--inactive .designs-card__title,
-.designs-card--inactive .designs-card__desc {
+.designs-card--inactive .designs-card__title {
   opacity: 0.75;
+}
+
+.designs-card__cover {
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.designs-card__cover-img {
+  display: block;
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+}
+
+.designs-form__loading {
+  font-size: 14px;
+  color: var(--secondary-color);
 }
 
 .designs-card__header {
@@ -208,20 +224,12 @@
   border-color: var(--border-color);
 }
 
-.designs-card__desc {
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.5;
-  color: var(--secondary-color);
-  flex: 1 1 auto;
-  word-break: break-word;
-}
-
 .designs-card__base {
   margin: 0;
   font-size: 14px;
   line-height: 1.5;
   color: var(--secondary-color);
+  flex: 1 1 auto;
 }
 
 .designs-card__actions {
@@ -506,10 +514,39 @@
   color: var(--secondary-color);
 }
 
-/* Overwrite toggle: OFF disables the field below it (value kept stored). */
-.designs-field--disabled {
-  opacity: 0.55;
-  pointer-events: none;
+/* ── Modal sections (E) ──────────────────────────────────────────────────── */
+/* The edit modal reads as distinct blocks: each section has a heading and
+   is divided from the next by a border, so the overwrite switches and their
+   fields do not run together into one long form. */
+
+.designs-modal-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding-bottom: 1.25rem;
+  margin-bottom: 1.25rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.designs-modal-section:last-child {
+  padding-bottom: 0;
+  margin-bottom: 0;
+  border-bottom: none;
+}
+
+.designs-modal-section__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-color);
+}
+
+/* B2 actions in the modal footer sit on the left, clear of Cancel/Save. */
+.designs-modal-footer__try {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-right: auto;
 }
 
 /* ── Background section (modal) ──────────────────────────────────────────── */
@@ -584,26 +621,6 @@
 
 .designs-bg-field__input {
   display: none;
-}
-
-.designs-opacity-row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.designs-opacity-row__range {
-  flex: 1 1 auto;
-  min-width: 120px;
-  accent-color: var(--content-link-color);
-}
-
-.designs-opacity-row__value {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-color);
-  min-width: 44px;
-  text-align: right;
 }
 
 /* ── Deactivate Modal ────────────────────────────────────────────────────── */

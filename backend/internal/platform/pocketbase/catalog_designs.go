@@ -26,27 +26,6 @@ var overwriteFieldNames = []string{
 	"overwrite_placeholder_guest",
 }
 
-// cardBgOpacity reads a card's background opacity.
-//
-// The stored value is clamped to 0..1. Only an UNSET value reads as 0.5:
-// a fresh card must not render its background fully transparent just
-// because nobody touched the slider yet. An explicit 0 is a real value
-// (fully transparent) and reads back as 0 — unlike the old per-theme
-// opacities, whose clampOpacity could not tell unset from 0.
-func cardBgOpacity(r *core.Record) float64 {
-	if r.Get("bg_opacity") == nil {
-		return 0.5
-	}
-	v := r.GetFloat("bg_opacity")
-	if v < 0 {
-		return 0
-	}
-	if v > 1 {
-		return 1
-	}
-	return v
-}
-
 func designRecordPayload(r *core.Record) map[string]any {
 	payload := map[string]any{
 		"id":                      r.Id,
@@ -64,7 +43,7 @@ func designRecordPayload(r *core.Record) map[string]any {
 		"bg_default_url":          r.GetString("bg_default_url"),
 		"bg_tablet_url":           r.GetString("bg_tablet_url"),
 		"bg_mobile_url":           r.GetString("bg_mobile_url"),
-		"bg_opacity":              cardBgOpacity(r),
+		"bg_opacity":              r.GetFloat("bg_opacity"),
 		"placeholder_deleted_url": r.GetString("placeholder_deleted_url"),
 		"placeholder_guest_url":   r.GetString("placeholder_guest_url"),
 		"created_at":              r.GetDateTime("created_at").String(),
@@ -74,6 +53,25 @@ func designRecordPayload(r *core.Record) map[string]any {
 		payload[name] = r.GetBool(name)
 	}
 	return payload
+}
+
+// designSummaryPayload is the lightweight list shape for GET /api/aerun/designs:
+// only the fields the theme picker and admin cards need to render a row.
+// The heavy fields (css, js, header_html, custom_footer_html, forum_title,
+// favicon_url, placeholders, overwrite_* toggles, description, breakpoint
+// backgrounds, opacity) stay out of lists — the single GET returns the full
+// record. is_active and base_theme stay: the admin cards and the provider
+// branch on those tiny scalars. bg_default_url is the raw stored relative
+// /api/files/... path; the client resolves it against the backend origin.
+func designSummaryPayload(r *core.Record) map[string]any {
+	return map[string]any{
+		"id":             r.Id,
+		"name":           r.GetString("name"),
+		"show_in_list":   r.GetBool("show_in_list"),
+		"bg_default_url": r.GetString("bg_default_url"),
+		"is_active":      r.GetBool("is_active"),
+		"base_theme":     r.GetString("base_theme"),
+	}
 }
 
 // listDesignsHandler serves GET /api/aerun/designs.
@@ -91,7 +89,7 @@ func listDesignsHandler(e *core.RequestEvent) error {
 
 	items := make([]map[string]any, 0, len(records))
 	for _, r := range records {
-		items = append(items, designRecordPayload(r))
+		items = append(items, designSummaryPayload(r))
 	}
 
 	return e.JSON(http.StatusOK, map[string]any{
@@ -248,12 +246,6 @@ func createDesignHandler(e *core.RequestEvent) error {
 		setOverwriteToggles(rec, form.toggles())
 		if form.BgOpacity != nil {
 			rec.Set("bg_opacity", *form.BgOpacity)
-		} else {
-			// A fresh card defaults to 0.5: without this the create response
-			// (built from the in-memory record, whose unset number field
-			// reads as 0) would disagree with a later GET (NULL in the
-			// row reads as the 0.5 default in cardBgOpacity).
-			rec.Set("bg_opacity", 0.5)
 		}
 		if form.PlaceholderDeletedURL != nil {
 			rec.Set("placeholder_deleted_url", *form.PlaceholderDeletedURL)

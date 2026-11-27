@@ -1,4 +1,4 @@
-import { pb, pbUrl, sendApi } from './pocketbase';
+import { pb, pbUrl, sendApi } from './pocketbase.js';
 
 /**
  * Avatar URLs come in three shapes, and every render site has to handle all

@@ -39,10 +39,24 @@ export const ADMIN_NAV_GROUPS = [
         anyOf: [PERMISSIONS.MANAGE_CATEGORIES]
       },
       {
-        id: 'designs',
-        path: 'designs',
-        title: 'admin.tabs.designs',
+        id: 'designs-defaults',
+        path: 'designs-defaults',
+        title: 'admin.tabs.designs_defaults',
+        icon: 'Sliders',
+        anyOf: [PERMISSIONS.MANAGE_DESIGNS]
+      },
+      {
+        id: 'designs-custom',
+        path: 'designs-custom',
+        title: 'admin.tabs.designs_custom',
         icon: 'Palette',
+        anyOf: [PERMISSIONS.MANAGE_DESIGNS]
+      },
+      {
+        id: 'designs-builtin',
+        path: 'designs-builtin',
+        title: 'admin.tabs.designs_builtin',
+        icon: 'Layers',
         anyOf: [PERMISSIONS.MANAGE_DESIGNS]
       }
     ]

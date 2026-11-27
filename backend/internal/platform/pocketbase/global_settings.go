@@ -129,9 +129,14 @@ func forumName(app core.App, lang string) string {
 // globalSettingsSnapshot is what the public read returns. It is the camelCase
 // shape the client already expects from `getGlobalSettings`, so the frontend
 // change is a transport swap rather than a reshape.
-func globalSettingsSnapshot(app core.App) map[string]any {
+//
+// `activeDesign` is additive: the requesting visitor's resolved active card
+// (see resolveActiveDesignCard), embedded so the chrome can apply it the
+// moment the settings arrive instead of waiting for the full design lists.
+// It is absent only when even the built-in dark card cannot be resolved.
+func globalSettingsSnapshot(app core.App, auth *core.Record) map[string]any {
 	settings := loadForumSettings(app)
-	return map[string]any{
+	snapshot := map[string]any{
 		"forumName":             forumName(app, ""),
 		"headerHtml":            readPlainString(app, "header_html"),
 		"customFooterHtml":      readPlainString(app, "custom_footer_html"),
@@ -156,6 +161,10 @@ func globalSettingsSnapshot(app core.App) map[string]any {
 		"deletedAvatar":         settings.DeletedAvatarURL,
 		"guestAvatar":           settings.GuestAvatarURL,
 	}
+	if card := resolveActiveDesignCard(app, auth); card != nil {
+		snapshot["activeDesign"] = card
+	}
+	return snapshot
 }
 
 // getGlobalSettingsHandler serves the snapshot to every visitor.
@@ -165,7 +174,7 @@ func globalSettingsSnapshot(app core.App) map[string]any {
 // push the client back to a localStorage copy that no admin edit can reach.
 func getGlobalSettingsHandler(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, map[string]any{
-		"settings":   globalSettingsSnapshot(e.App),
+		"settings":   globalSettingsSnapshot(e.App, e.Auth),
 		"request_id": requestIDFrom(e),
 	})
 }
@@ -402,7 +411,7 @@ func updateGlobalSettingsHandler(cfg config.Config) func(e *core.RequestEvent) e
 		// renders its own optimistic value is how a clamp or a rejected field turns
 		// into a panel that lies about what the forum is set to.
 		return e.JSON(http.StatusOK, map[string]any{
-			"settings":   globalSettingsSnapshot(e.App),
+			"settings":   globalSettingsSnapshot(e.App, e.Auth),
 			"request_id": requestIDFrom(e),
 		})
 	}

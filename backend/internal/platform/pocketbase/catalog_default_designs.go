@@ -32,7 +32,7 @@ func defaultDesignRecordPayload(r *core.Record) map[string]any {
 		"bg_default_url":          r.GetString("bg_default_url"),
 		"bg_tablet_url":           r.GetString("bg_tablet_url"),
 		"bg_mobile_url":           r.GetString("bg_mobile_url"),
-		"bg_opacity":              cardBgOpacity(r),
+		"bg_opacity":              r.GetFloat("bg_opacity"),
 		"placeholder_deleted_url": r.GetString("placeholder_deleted_url"),
 		"placeholder_guest_url":   r.GetString("placeholder_guest_url"),
 		"created_at":              r.GetDateTime("created_at").String(),
@@ -52,6 +52,24 @@ func findDefaultDesignByKey(app core.App, key string) (*core.Record, error) {
 	return app.FindFirstRecordByFilter(col, "key = {:key}", dbx.Params{"key": key})
 }
 
+// defaultDesignSummaryPayload is the lightweight list shape for
+// GET /api/aerun/default-designs: the same minimal card fields as the custom
+// design summary, plus `key`, and with neither is_active nor base_theme —
+// a default design IS the base and has no activation. The heavy fields
+// (css, js, header_html, custom_footer_html, forum_title, favicon_url,
+// placeholders, overwrite_* toggles, description, breakpoint backgrounds,
+// opacity) stay out of lists — the single GET returns the full record.
+// bg_default_url is the raw stored relative /api/files/... path.
+func defaultDesignSummaryPayload(r *core.Record) map[string]any {
+	return map[string]any{
+		"id":             r.Id,
+		"key":            r.GetString("key"),
+		"name":           r.GetString("name"),
+		"show_in_list":   r.GetBool("show_in_list"),
+		"bg_default_url": r.GetString("bg_default_url"),
+	}
+}
+
 // listDefaultDesignsHandler serves GET /api/aerun/default-designs.
 // Public read, like GET /api/aerun/designs: the theme picker and the
 // providers need the cards before anyone signs in. Ordered by key, which is
@@ -69,7 +87,7 @@ func listDefaultDesignsHandler(e *core.RequestEvent) error {
 
 	items := make([]map[string]any, 0, len(records))
 	for _, r := range records {
-		items = append(items, defaultDesignRecordPayload(r))
+		items = append(items, defaultDesignSummaryPayload(r))
 	}
 
 	return e.JSON(http.StatusOK, map[string]any{

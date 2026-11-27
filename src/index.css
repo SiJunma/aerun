@@ -3005,13 +3005,6 @@ a.rep-preview-name:hover {
   /* Main highlights */
 }
 
-/* Forum Banner */
-.forum-banner {
-  background-color: var(--bs-dark);
-  color: var(--bs-light);
-  overflow: hidden;
-}
-
 .banner-content img {
   max-width: 100%;
   height: auto;
@@ -3282,7 +3275,10 @@ a.rep-preview-name:hover {
   z-index: -1;
   object-fit: cover;
   object-position: top;
-  opacity: 0.5;
+  /* Full opacity by design: the background-opacity card setting was
+     removed (custom CSS covers transparency now), so no inline style or
+     per-card value dims it anymore. */
+  opacity: 1;
   pointer-events: none;
 }
 

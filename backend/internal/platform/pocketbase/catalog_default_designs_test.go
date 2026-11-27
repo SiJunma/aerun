@@ -69,10 +69,23 @@ func TestDefaultDesignsPublicListAndGet(t *testing.T) {
 		if got["show_in_list"] != true {
 			t.Errorf("item %d show_in_list = %v, want true", i, got["show_in_list"])
 		}
-		if got["overwrite_header"] != false {
-			t.Errorf("item %d overwrite_header = %v, want false", i, got["overwrite_header"])
+		// List items are summaries: exactly id, key, name, show_in_list,
+		// bg_default_url. The heavy fields live only on the single GET.
+		for _, present := range []string{"id", "bg_default_url"} {
+			if _, ok := got[present]; !ok {
+				t.Errorf("item %d must carry %q", i, present)
+			}
 		}
-		for _, absent := range []string{"is_active", "base_theme"} {
+		for _, absent := range []string{
+			"is_active", "base_theme",
+			"css", "js", "header_html", "custom_footer_html", "forum_title",
+			"favicon_url", "placeholder_deleted_url", "placeholder_guest_url",
+			"description", "bg_tablet_url", "bg_mobile_url", "bg_opacity",
+			"created_at", "updated_at",
+			"overwrite_header", "overwrite_footer", "overwrite_title",
+			"overwrite_favicon", "overwrite_css", "overwrite_js",
+			"overwrite_placeholder_deleted", "overwrite_placeholder_guest",
+		} {
 			if _, ok := got[absent]; ok {
 				t.Errorf("item %d must not carry %q", i, absent)
 			}
@@ -90,10 +103,109 @@ func TestDefaultDesignsPublicListAndGet(t *testing.T) {
 	if one["key"] != "dark" || one["name"] != "Тёмная" {
 		t.Fatalf("GET dark = %v", one)
 	}
+	// The single GET still returns the FULL record, including the heavy
+	// fields the list summaries drop.
+	for _, present := range []string{
+		"css", "js", "header_html", "custom_footer_html", "forum_title",
+		"favicon_url", "placeholder_deleted_url", "placeholder_guest_url",
+		"description", "bg_default_url", "bg_tablet_url", "bg_mobile_url",
+		"bg_opacity", "overwrite_header", "created_at", "updated_at",
+	} {
+		if _, ok := one[present]; !ok {
+			t.Errorf("single GET dark must carry %q", present)
+		}
+	}
 
 	status, _ = getAerun(t, server.URL+"/api/aerun/default-designs/nope")
 	if status != http.StatusNotFound {
 		t.Fatalf("GET unknown default design = %d, want 404", status)
+	}
+}
+
+// TestDesignsListReturnsSummaries pins the custom-design list contract:
+// GET /api/aerun/designs returns lightweight summaries — exactly id, name,
+// show_in_list, bg_default_url, is_active, base_theme — even when the
+// design carries heavy fields, while the single GET returns the full record.
+func TestDesignsListReturnsSummaries(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	server := newTestServer(t, app)
+	defer server.Close()
+
+	id := createTestDesign(t, server.URL, tokens["root"], "ListSummary")
+	status, body, _ := categoryCall(t, http.MethodPatch, server.URL+"/api/aerun/designs/"+id,
+		`{"description":"A heavy design","css":".x{color:red}","js":"window.__x=1;","forum_title":"Heavy","favicon_url":"/api/files/fav.png","header_html":"<p>Head</p>","custom_footer_html":"<p>Foot</p>","placeholder_deleted_url":"/api/files/del.png","placeholder_guest_url":"/api/files/guest.png","overwrite_header":true,"overwrite_footer":true,"overwrite_title":true,"overwrite_favicon":true,"overwrite_css":true,"overwrite_js":true,"overwrite_placeholder_deleted":true,"overwrite_placeholder_guest":true,"bg_opacity":0.5,"is_active":true,"base_theme":"light","show_in_list":true}`,
+		tokens["root"], "test-idem-design-list-summary-patch")
+	if status != http.StatusOK {
+		t.Fatalf("PATCH heavy fields = %d: %s", status, body)
+	}
+
+	status, body = getAerun(t, server.URL+"/api/aerun/designs")
+	if status != http.StatusOK {
+		t.Fatalf("GET /designs = %d: %s", status, body)
+	}
+	var resp struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatal(err)
+	}
+	var item map[string]any
+	for _, it := range resp.Items {
+		if it["id"] == id {
+			item = it
+			break
+		}
+	}
+	if item == nil {
+		t.Fatalf("list must include the created design %s: %s", id, body)
+	}
+	for key, want := range map[string]any{
+		"name": "ListSummary", "show_in_list": true,
+		"bg_default_url": "", "is_active": true, "base_theme": "light",
+	} {
+		if item[key] != want {
+			t.Errorf("list item[%q] = %v, want %v", key, item[key], want)
+		}
+	}
+	for _, absent := range []string{
+		"css", "js", "header_html", "custom_footer_html", "forum_title",
+		"favicon_url", "placeholder_deleted_url", "placeholder_guest_url",
+		"description", "bg_tablet_url", "bg_mobile_url", "bg_opacity",
+		"created_at", "updated_at",
+		"overwrite_header", "overwrite_footer", "overwrite_title",
+		"overwrite_favicon", "overwrite_css", "overwrite_js",
+		"overwrite_placeholder_deleted", "overwrite_placeholder_guest",
+	} {
+		if _, ok := item[absent]; ok {
+			t.Errorf("list item must not carry %q", absent)
+		}
+	}
+
+	// The single GET still returns the FULL record with the heavy values.
+	status, body = getAerun(t, server.URL+"/api/aerun/designs/"+id)
+	if status != http.StatusOK {
+		t.Fatalf("GET /designs/%s = %d: %s", id, status, body)
+	}
+	var one map[string]any
+	if err := json.Unmarshal(body, &one); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]any{
+		"description": "A heavy design", "css": ".x{color:red}",
+		"js": "window.__x=1;", "forum_title": "Heavy",
+		"favicon_url": "/api/files/fav.png", "header_html": "<p>Head</p>",
+		"custom_footer_html": "<p>Foot</p>",
+		"placeholder_deleted_url": "/api/files/del.png",
+		"placeholder_guest_url":   "/api/files/guest.png",
+		"overwrite_header": true, "overwrite_css": true,
+		"bg_opacity": float64(0.5),
+	} {
+		if one[key] != want {
+			t.Errorf("single GET[%q] = %v, want %v", key, one[key], want)
+		}
 	}
 }
 
@@ -417,12 +529,15 @@ func TestDesignPlaceholderUpload(t *testing.T) {
 	}
 }
 
-// TestCardBgOpacity pins the opacity read rule through the real API: only an
-// UNSET value reads as 0.5 (a fresh card must not render its background fully
-// transparent just because nobody touched the slider yet); an explicit 0 is a
-// real value and reads back as 0, and out-of-range values are refused, not
-// clamped (see TestDefaultDesignPatch for the 400 case).
-func TestCardBgOpacity(t *testing.T) {
+// TestDefaultDesignLightBackgroundResolves proves the background-switch path
+// for the reported case: backgrounds uploaded to the "Snow Mountains"
+// default design (key 'light') are stored on THAT card and come back with
+// its bg URLs and opacity — so resolveActiveDesign can hand them to
+// ForumBackground when the active theme is 'light'. Uploading to 'light'
+// does not switch anyone to it: the 'dark' card keeps no background at all,
+// which is why the forum (active theme 'dark', "Space", no background)
+// showed no background despite the uploads.
+func TestDefaultDesignLightBackgroundResolves(t *testing.T) {
 	app := newAerunTestApp(t)
 	defer app.Cleanup()
 
@@ -430,46 +545,187 @@ func TestCardBgOpacity(t *testing.T) {
 	server := newTestServer(t, app)
 	defer server.Close()
 
-	id := createTestDesign(t, server.URL, tokens["root"], "opacity")
-	base := server.URL + "/api/aerun/designs/" + id
+	lightBase := server.URL + "/api/aerun/default-designs/light"
 
-	getOpacity := func(t testing.TB) float64 {
-		t.Helper()
-		status, body := getAerun(t, base)
-		if status != http.StatusOK {
-			t.Fatalf("GET design = %d: %s", status, body)
+	// Upload all three breakpoint variants to the 'light' card.
+	for _, kind := range []string{"default", "tablet", "mobile"} {
+		st, raw := putFaviconMultipart(t, lightBase+"/background/"+kind, tokens["root"], "bg.png", uploadPNGBytes)
+		if st != http.StatusOK {
+			t.Fatalf("upload light background %s = %d: %s", kind, st, raw)
 		}
-		var got map[string]any
-		if err := json.Unmarshal(body, &got); err != nil {
-			t.Fatal(err)
-		}
-		v, _ := got["bg_opacity"].(float64)
-		return v
-	}
-	if got := getOpacity(t); got != 0.5 {
-		t.Fatalf("fresh design bg_opacity = %v, want 0.5", got)
 	}
 
-	patchOpacity := func(t testing.TB, key, payload string) float64 {
-		t.Helper()
-		status, body, _ := categoryCall(t, http.MethodPatch, base, payload, tokens["root"], "test-idem-opacity-"+key)
-		if status != http.StatusOK {
-			t.Fatalf("PATCH %s = %d: %s", payload, status, body)
+	// Opacity is a card field, set via PATCH.
+	status, body, _ := categoryCall(t, http.MethodPatch, lightBase, `{"bg_opacity":0.6}`, tokens["root"], "test-idem-dd-light-opacity")
+	if status != http.StatusOK {
+		t.Fatalf("PATCH light bg_opacity = %d: %s", status, body)
+	}
+
+	// A fresh GET returns the card with its bg URLs and opacity.
+	status, body = getAerun(t, lightBase)
+	if status != http.StatusOK {
+		t.Fatalf("GET light = %d: %s", status, body)
+	}
+	var light map[string]any
+	if err := json.Unmarshal(body, &light); err != nil {
+		t.Fatal(err)
+	}
+	if light["key"] != "light" {
+		t.Fatalf("light card key = %v, want light", light["key"])
+	}
+	for _, key := range []string{"bg_default_url", "bg_tablet_url", "bg_mobile_url"} {
+		url, _ := light[key].(string)
+		if !strings.HasPrefix(url, "/api/files/") || !strings.HasSuffix(url, ".png") {
+			t.Fatalf("light %s = %q, want /api/files/....png", key, url)
 		}
-		var patched map[string]any
-		if err := json.Unmarshal(body, &patched); err != nil {
-			t.Fatal(err)
+	}
+	if light["bg_opacity"] != float64(0.6) {
+		t.Fatalf("light bg_opacity = %v, want 0.6", light["bg_opacity"])
+	}
+
+	// The 'dark' card is untouched: no background on it, so with theme
+	// 'dark' ForumBackground renders no <picture> — the reported symptom.
+	status, body = getAerun(t, server.URL+"/api/aerun/default-designs/dark")
+	if status != http.StatusOK {
+		t.Fatalf("GET dark = %d: %s", status, body)
+	}
+	var dark map[string]any
+	if err := json.Unmarshal(body, &dark); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"bg_default_url", "bg_tablet_url", "bg_mobile_url"} {
+		if url, _ := dark[key].(string); url != "" {
+			t.Fatalf("dark %s = %q, want empty (uploads went to the light card)", key, url)
 		}
-		v, _ := patched["bg_opacity"].(float64)
-		return v
 	}
-	if got := patchOpacity(t, "zero", `{"bg_opacity":0}`); got != 0 {
-		t.Fatalf("PATCH bg_opacity=0 returned %v, want 0", got)
+}
+
+// TestDefaultDesignBackgroundFileServes reproduces the reported bug: the
+// upload answers a /api/files/... URL, but the file itself does not serve —
+// the browser's <img> gets an error and the background never appears even
+// though the light theme is active and the card resolves. A plain,
+// unauthenticated GET (exactly what a browser does for an <img> src) must
+// return 200 with the uploaded bytes.
+func TestDefaultDesignBackgroundFileServes(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	server := newTestServer(t, app)
+	defer server.Close()
+
+	st, raw := putFaviconMultipart(t, server.URL+"/api/aerun/default-designs/light/background/default", tokens["root"], "bg.png", uploadPNGBytes)
+	if st != http.StatusOK {
+		t.Fatalf("upload light background = %d: %s", st, raw)
 	}
-	if got := getOpacity(t); got != 0 {
-		t.Fatalf("GET after PATCH bg_opacity=0 returned %v, want 0", got)
+	var uploaded struct {
+		URL string `json:"bg_default_url"`
 	}
-	if got := patchOpacity(t, "quarter", `{"bg_opacity":0.25}`); got != 0.25 {
-		t.Fatalf("PATCH bg_opacity=0.25 returned %v, want 0.25", got)
+	if err := json.Unmarshal(raw, &uploaded); err != nil {
+		t.Fatal(err)
+	}
+	if uploaded.URL == "" {
+		t.Fatalf("upload returned no bg_default_url: %s", raw)
+	}
+
+	status, body := getAerun(t, server.URL+uploaded.URL)
+	if status != http.StatusOK {
+		t.Fatalf("GET %s = %d, want 200 (body %d bytes)", uploaded.URL, status, len(body))
+	}
+	if !bytes.Equal(body, uploadPNGBytes) {
+		t.Fatalf("GET %s returned %d bytes, want the %d uploaded PNG bytes", uploaded.URL, len(body), len(uploadPNGBytes))
+	}
+
+	// Same file, same URL shape, through the custom-design twin: the
+	// designs collection carries the same server-only rules, so if the
+	// default card fails here the custom card fails the same way.
+	id := createTestDesign(t, server.URL, tokens["root"], "BgServes")
+	st, raw = putFaviconMultipart(t, server.URL+"/api/aerun/designs/"+id+"/background/default", tokens["root"], "bg.png", uploadPNGBytes)
+	if st != http.StatusOK {
+		t.Fatalf("upload custom background = %d: %s", st, raw)
+	}
+	if err := json.Unmarshal(raw, &uploaded); err != nil {
+		t.Fatal(err)
+	}
+	status, body = getAerun(t, server.URL+uploaded.URL)
+	if status != http.StatusOK {
+		t.Fatalf("GET custom %s = %d, want 200 (body %d bytes)", uploaded.URL, status, len(body))
+	}
+	if !bytes.Equal(body, uploadPNGBytes) {
+		t.Fatalf("GET custom %s returned %d bytes, want the %d uploaded PNG bytes", uploaded.URL, len(body), len(uploadPNGBytes))
+	}
+}
+
+// TestActiveDesignEmbedsFullCard pins that the card embedded in the settings
+// snapshot is the WHOLE card, not an id: after customising the light card
+// (scalar fields via PATCH, background and placeholder via upload), the
+// snapshot a member with theme 'light' reads mirrors every value the chrome
+// needs — so no consumer has to fetch the lists to render it.
+//
+// File URLs stay exactly as stored (relative /api/files/...): the client
+// resolves them against pbUrl (resolveAvatarUrl pattern) — the server must
+// not absolutise them, or the dev-origin split (Vite :5173 vs PocketBase
+// :8090) breaks them.
+func TestActiveDesignEmbedsFullCard(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	server := newTestServer(t, app)
+	defer server.Close()
+
+	base := server.URL + "/api/aerun/default-designs/light"
+
+	status, body, _ := categoryCall(t, http.MethodPatch, base,
+		`{"header_html":"<p>Светлый хедер</p>","custom_footer_html":"<p>Светлый футер</p>","forum_title":"Светлый форум","favicon_url":"/api/files/light-favicon.png","css":".x{color:#fff}","js":"window.__light=1;","overwrite_header":true,"overwrite_footer":true,"overwrite_title":true,"overwrite_favicon":true,"overwrite_css":true,"overwrite_js":true}`,
+		tokens["root"], "test-idem-dd-active-full-patch")
+	if status != http.StatusOK {
+		t.Fatalf("PATCH light card = %d: %s", status, body)
+	}
+	st, raw := putFaviconMultipart(t, base+"/background/default", tokens["root"], "bg.png", uploadPNGBytes)
+	if st != http.StatusOK {
+		t.Fatalf("upload light background = %d: %s", st, raw)
+	}
+	st, raw = putFaviconMultipart(t, base+"/placeholder/deleted", tokens["root"], "ph.png", uploadPNGBytes)
+	if st != http.StatusOK {
+		t.Fatalf("upload light placeholder = %d: %s", st, raw)
+	}
+
+	setTestUserTheme(t, app, fixPlayerID, "light")
+	card := fetchSettingsActiveDesign(t, server.URL, tokens["player"])
+	if card["kind"] != "default" || card["key"] != "light" {
+		t.Fatalf("activeDesign = %v, want the light card", card)
+	}
+	want := map[string]any{
+		"header_html":        "<p>Светлый хедер</p>",
+		"custom_footer_html": "<p>Светлый футер</p>",
+		"forum_title":        "Светлый форум",
+		"favicon_url":        "/api/files/light-favicon.png",
+		"css":                ".x{color:#fff}",
+		"js":                 "window.__light=1;",
+	}
+	for key, value := range want {
+		if card[key] != value {
+			t.Errorf("activeDesign[%q] = %v, want %v", key, card[key], value)
+		}
+	}
+	for _, toggle := range []string{
+		"overwrite_header", "overwrite_footer", "overwrite_title",
+		"overwrite_favicon", "overwrite_css", "overwrite_js",
+	} {
+		if card[toggle] != true {
+			t.Errorf("activeDesign[%q] = %v, want true", toggle, card[toggle])
+		}
+	}
+	// Uploaded file URLs arrive as stored: relative /api/files/... paths,
+	// never absolutised server-side.
+	for _, field := range []string{"bg_default_url", "placeholder_deleted_url"} {
+		url, _ := card[field].(string)
+		if !strings.HasPrefix(url, "/api/files/") || !strings.HasSuffix(url, ".png") {
+			t.Errorf("activeDesign[%q] = %q, want a stored relative /api/files/....png URL", field, url)
+		}
+		if strings.HasPrefix(url, "http") {
+			t.Errorf("activeDesign[%q] = %q, must not be an absolute URL", field, url)
+		}
 	}
 }

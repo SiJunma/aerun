@@ -59,6 +59,11 @@ import { usePageTitle } from '../contexts/TitleProvider';
 // would otherwise make the form unsaveable.
 const KNOWN_PERMISSIONS = new Set(Object.values(PERMISSIONS));
 
+// The three Appearance pages (D): the old single 'designs' tab split into
+// Default Settings, Custom Designs and Built-in Designs. ?tab=designs still
+// resolves to the first of these (see the alias in AdminPage).
+const DESIGN_TABS = ['designs-defaults', 'designs-custom', 'designs-builtin'];
+
 // adminBulkMaxIds mirrors the server cap (adminBulkMaxIDs = 100): one bulk
 // request carries at most 100 ids, so a bigger selection must be trimmed
 // before the confirmation button unlocks.
@@ -162,8 +167,11 @@ const AdminPage = () => {
     [visibleNavGroups]
   );
   const requestedTab = searchParams.get('tab');
-  const activeTab = visibleTabPaths.includes(requestedTab)
-    ? requestedTab
+  // Backward compatibility: the old single 'designs' tab now lives as three
+  // pages; a bookmarked ?tab=designs lands on Default Settings.
+  const normalizedTab = requestedTab === 'designs' ? 'designs-defaults' : requestedTab;
+  const activeTab = visibleTabPaths.includes(normalizedTab)
+    ? normalizedTab
     : (visibleTabPaths[0] ?? 'settings');
   const setActiveTab = useCallback((k) => setSearchParams({ tab: k }, { replace: true }), [setSearchParams]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -502,7 +510,9 @@ const AdminPage = () => {
   const canAccessTab = useCallback((tab) => {
     switch (tab) {
       case 'settings': return hasPermission(PERMISSIONS.MANAGE_FORUM);
-      case 'designs': return hasPermission(PERMISSIONS.MANAGE_DESIGNS);
+      case 'designs-defaults':
+      case 'designs-custom':
+      case 'designs-builtin': return hasPermission(PERMISSIONS.MANAGE_DESIGNS);
       case 'users': return hasPermission(PERMISSIONS.APPROVE_USERS) || hasPermission(PERMISSIONS.BAN_USERS) || hasPermission(PERMISSIONS.CHANGE_ROLES);
       case 'roles': return hasPermission(PERMISSIONS.MANAGE_ROLES);
       case 'categories': return hasPermission(PERMISSIONS.MANAGE_CATEGORIES);
@@ -856,7 +866,7 @@ const AdminPage = () => {
 
   useEffect(() => {
     if (!canAccessTab(activeTab)) {
-      const tabs = ['settings', 'designs', 'users', 'roles', 'categories', 'visits', 'audit'];
+      const tabs = ['settings', 'designs-defaults', 'designs-custom', 'designs-builtin', 'users', 'roles', 'categories', 'visits', 'audit'];
       const firstAvailable = tabs.find(t => canAccessTab(t));
       if (firstAvailable) {
         setActiveTab(firstAvailable);
@@ -1040,11 +1050,14 @@ const AdminPage = () => {
     return () => { alive = false; };
   }, [activeTab, usersPage, usersSearch, usersRefreshNonce]);
 
-  // Designs (custom + default cards) render on the designs tab only. The
-  // Settings tab no longer reads the list — the default-design dropdown
-  // moved to surface 1 of the Designs tab.
+  // Designs (custom + default cards) render on the three designs pages only.
+  // The Settings tab no longer reads the list — the default-design dropdown
+  // moved to surface 1 of the Designs tab. These are LIST SUMMARIES
+  // (id/name/show_in_list/bg_default_url/is_active/base_theme): enough for
+  // the cards and the dropdowns; the edit modal and the clone load the FULL
+  // record with one single-record GET (see DesignsTab).
   useEffect(() => {
-    if (activeTab !== 'designs') return;
+    if (!DESIGN_TABS.includes(activeTab)) return;
     const unsubDesigns = subscribeToDesigns(setDesigns);
     const unsubDefaults = subscribeToDefaultDesigns(setDefaultDesigns);
     return () => {
@@ -3201,8 +3214,31 @@ const AdminPage = () => {
           />
 
           {activeTab === 'settings' && hasPermission(PERMISSIONS.MANAGE_FORUM) && renderSettings()}
-          {activeTab === 'designs' && hasPermission(PERMISSIONS.MANAGE_DESIGNS) && (
+          {activeTab === 'designs-defaults' && hasPermission(PERMISSIONS.MANAGE_DESIGNS) && (
             <DesignsTab
+              surface="defaults"
+              designs={designs}
+              defaultDesigns={defaultDesigns}
+              settings={settings}
+              setSettings={setSettings}
+              updateSettings={(newSettings) => updateGlobalSettings(newSettings, user.uid)}
+              userId={user.uid}
+            />
+          )}
+          {activeTab === 'designs-custom' && hasPermission(PERMISSIONS.MANAGE_DESIGNS) && (
+            <DesignsTab
+              surface="custom"
+              designs={designs}
+              defaultDesigns={defaultDesigns}
+              settings={settings}
+              setSettings={setSettings}
+              updateSettings={(newSettings) => updateGlobalSettings(newSettings, user.uid)}
+              userId={user.uid}
+            />
+          )}
+          {activeTab === 'designs-builtin' && hasPermission(PERMISSIONS.MANAGE_DESIGNS) && (
+            <DesignsTab
+              surface="builtin"
               designs={designs}
               defaultDesigns={defaultDesigns}
               settings={settings}
