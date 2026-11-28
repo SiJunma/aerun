@@ -78,6 +78,7 @@
 }
 
 .designs-card__cover {
+  position: relative;
   border-radius: 0.5rem;
   overflow: hidden;
 }
@@ -122,6 +123,18 @@
   flex-shrink: 0;
   justify-content: flex-end;
   gap: 0.5rem;
+}
+
+/* Badges float over the cover image, top-right corner, so the title below
+   takes the full card width. */
+.designs-card__cover .designs-card__badges {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+}
+
+.designs-card__cover .designs-card__badge {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
 }
 
 .designs-card__badge--default {

@@ -697,6 +697,22 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
     }
   };
 
+  // Built-in card badges ("Default design" + "Built-in"). They float over the
+  // cover image (absolute, top-right corner) so the title below takes the full
+  // card width; a card without a cover falls back to the header row.
+  const renderBuiltinBadges = (card) => (
+    <span className="designs-card__badges">
+      {settings?.defaultDesignId === card.key && (
+        <span className="designs-card__badge designs-card__badge--default">
+          {t('admin.designs.default_badge')}
+        </span>
+      )}
+      <span className="designs-card__badge designs-card__badge--builtin">
+        {t('admin.designs.builtin_badge')}
+      </span>
+    </span>
+  );
+
   const renderSurface1 = () => (
     <section className="designs-surface" aria-label={t('admin.designs.defaults_title')}>
       <p className="admin-form__hint">{t('admin.designs.defaults_desc')}</p>
@@ -1008,20 +1024,12 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
                       alt=""
                       className="designs-card__cover-img"
                     />
+                    {renderBuiltinBadges(card)}
                   </div>
                 ) : null}
                 <div className="designs-card__header">
                   <h5 className="designs-card__title">{card.name}</h5>
-                  <span className="designs-card__badges">
-                    {settings?.defaultDesignId === card.key && (
-                      <span className="designs-card__badge designs-card__badge--default">
-                        {t('admin.designs.default_badge')}
-                      </span>
-                    )}
-                    <span className="designs-card__badge designs-card__badge--builtin">
-                      {t('admin.designs.builtin_badge')}
-                    </span>
-                  </span>
+                  {!card.bgDefaultUrl && renderBuiltinBadges(card)}
                 </div>
 
                 <div className="designs-card__actions">
