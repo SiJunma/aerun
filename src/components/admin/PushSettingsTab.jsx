@@ -109,22 +109,28 @@ export default function PushSettingsTab() {
 
       {error && <div className="admin-form__error" role="alert">{error}</div>}
 
-      <h3 className="admin-subtitle">{t('admin.push.section_push')}</h3>
-      <label className="admin-switch">
-        <input
-          type="checkbox"
-          className="admin-switch__input"
-          checked={form.pushEnabled}
-          disabled={!loaded || saving}
-          onChange={(e) => setField('pushEnabled', e.target.checked)}
-        />
-        <span>{t('admin.push.push_enabled')}</span>
-      </label>
-      <div className="admin-form__hint">{t('admin.push.push_enabled_help')}</div>
+      <section className="admin-card">
+        <div className="admin-card__body admin-form">
+          <h3 className="admin-subtitle">{t('admin.push.section_push')}</h3>
+          <label className="admin-switch">
+            <input
+              type="checkbox"
+              className="admin-switch__input"
+              checked={form.pushEnabled}
+              disabled={!loaded || saving}
+              onChange={(e) => setField('pushEnabled', e.target.checked)}
+            />
+            <span>{t('admin.push.push_enabled')}</span>
+          </label>
+          <div className="admin-form__hint">{t('admin.push.push_enabled_help')}</div>
+        </div>
+      </section>
 
-      <h3 className="admin-subtitle">{t('admin.push.section_manifest')}</h3>
-      <div className="admin-form__hint">{t('admin.push.manifest_help')}</div>
-      {TEXT_FIELDS.map((field) => (
+      <section className="admin-card">
+        <div className="admin-card__body admin-form">
+          <h3 className="admin-subtitle">{t('admin.push.section_manifest')}</h3>
+          <div className="admin-form__hint">{t('admin.push.manifest_help')}</div>
+          {TEXT_FIELDS.map((field) => (
         <div className="admin-form__group" key={field.key}>
           <label className="admin-form__label" htmlFor={`pwa-${field.key}`}>
             {t(`admin.push.${field.labelKey}`)}
@@ -154,10 +160,14 @@ export default function PushSettingsTab() {
           )}
         </div>
       ))}
+        </div>
+      </section>
 
-      <h3 className="admin-subtitle">{t('admin.push.section_icons')}</h3>
-      <div className="admin-form__hint">{t('admin.push.icons_help')}</div>
-      {ICON_FIELDS.map((field) => (
+      <section className="admin-card">
+        <div className="admin-card__body admin-form">
+          <h3 className="admin-subtitle">{t('admin.push.section_icons')}</h3>
+          <div className="admin-form__hint">{t('admin.push.icons_help')}</div>
+          {ICON_FIELDS.map((field) => (
         <div className="admin-form__group" key={field.kind}>
           <label className="admin-form__label" htmlFor={`pwa-icon-${field.kind}`}>
             {t(`admin.push.${field.labelKey}`)}
@@ -173,6 +183,8 @@ export default function PushSettingsTab() {
           <div className="admin-form__hint">{t(`admin.push.${field.helpKey}`)}</div>
         </div>
       ))}
+        </div>
+      </section>
 
       <div className="admin-actions">
         <button
