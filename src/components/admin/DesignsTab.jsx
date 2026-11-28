@@ -699,7 +699,6 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
 
   const renderSurface1 = () => (
     <section className="designs-surface" aria-label={t('admin.designs.defaults_title')}>
-      <h4 className="admin-subtitle">{t('admin.designs.defaults_title')}</h4>
       <p className="admin-form__hint">{t('admin.designs.defaults_desc')}</p>
       <div className="admin-form">
         <div className="admin-form__group">
@@ -897,7 +896,6 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
       {/* Surface 2 — custom designs */}
       {(surface === 'custom' || surface === 'all') && (
       <section className="designs-surface" aria-label={t('admin.designs.custom_title')}>
-        <h4 className="admin-subtitle">{t('admin.designs.custom_title')}</h4>
         {designs.length === 0 ? (
           <div className="designs-empty">{t('admin.designs.empty_list')}</div>
         ) : (
@@ -996,7 +994,6 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
       {/* Surface 3 — built-in (default) designs */}
       {(surface === 'builtin' || surface === 'all') && (
       <section className="designs-surface" aria-label={t('admin.designs.default_designs_title')}>
-        <h4 className="admin-subtitle">{t('admin.designs.default_designs_title')}</h4>
         <p className="admin-form__hint">{t('admin.designs.default_designs_desc')}</p>
         {defaultDesigns.length === 0 ? (
           <div className="designs-empty">{t('admin.designs.empty_default_list')}</div>
@@ -1015,14 +1012,17 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
                 ) : null}
                 <div className="designs-card__header">
                   <h5 className="designs-card__title">{card.name}</h5>
-                  <span className="designs-card__badge designs-card__badge--builtin">
-                    {t('admin.designs.builtin_badge')}
+                  <span className="designs-card__badges">
+                    {settings?.defaultDesignId === card.key && (
+                      <span className="designs-card__badge designs-card__badge--default">
+                        {t('admin.designs.default_badge')}
+                      </span>
+                    )}
+                    <span className="designs-card__badge designs-card__badge--builtin">
+                      {t('admin.designs.builtin_badge')}
+                    </span>
                   </span>
                 </div>
-
-                {settings?.defaultDesignId === card.key && (
-                  <p className="designs-card__base">{t('admin.designs.default_badge')}</p>
-                )}
 
                 <div className="designs-card__actions">
                   <button
