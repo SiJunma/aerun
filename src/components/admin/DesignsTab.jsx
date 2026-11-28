@@ -23,6 +23,7 @@ import { uploadSettingsFavicon, uploadIdentityPlaceholder } from '../../api/admi
 import { validateCode } from './codeValidation';
 import { sanitizeHtml } from '../../utils/text';
 import { resolveAvatarUrl } from '../../api/avatars';
+import { builtinThemeLabel as cardBuiltinThemeLabel } from '../../utils/defaultDesignPicker';
 import FaviconUploader from './FaviconUploader';
 import AvatarUploader from '../common/AvatarUploader';
 import CodeEditorField from './CodeEditorField';
@@ -697,6 +698,14 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
     }
   };
 
+  // Built-in theme names come from the default-design cards and can change;
+  // the dictionary label is the fallback while the cards are loading.
+  // Shared with the ProfilePage member picker and the Navbar guest picker
+  // (src/utils/defaultDesignPicker.js). Admin selects always show all three
+  // keys — a card hidden from the user list stays usable as a base theme,
+  // a forum default and a deactivation replacement.
+  const builtinThemeLabel = (key) => cardBuiltinThemeLabel(defaultDesigns, t, key);
+
   // Built-in card badges ("Default design" + "Built-in"). They float over the
   // cover image (absolute, top-right corner) so the title below takes the full
   // card width; a card without a cover falls back to the header row.
@@ -848,9 +857,9 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
             onChange={(e) => setSettings((prev) => ({ ...prev, defaultDesignId: e.target.value }))}
           >
             <optgroup label={t('admin.settings.default_design_builtin')}>
-              <option value="dark">{t('profile.theme_dark')}</option>
-              <option value="light">{t('profile.theme_light')}</option>
-              <option value="neutral">{t('profile.theme_neutral')}</option>
+              <option value="dark">{builtinThemeLabel('dark')}</option>
+              <option value="light">{builtinThemeLabel('light')}</option>
+              <option value="neutral">{builtinThemeLabel('neutral')}</option>
             </optgroup>
             {designs.filter((d) => d.isActive).length > 0 && (
               <optgroup label={t('admin.settings.default_design_custom')}>
@@ -944,11 +953,7 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
                 </div>
 
                 <p className="designs-card__base">
-                  {t('admin.designs.modal_base_theme')}: {{
-                    dark: t('profile.theme_dark'),
-                    light: t('profile.theme_light'),
-                    neutral: t('profile.theme_neutral'),
-                  }[resolveDesignBaseTheme(design, settings)]}
+                  {t('admin.designs.modal_base_theme')}: {builtinThemeLabel(resolveDesignBaseTheme(design, settings))}
                 </p>
 
                 <div className="designs-card__actions">
@@ -1150,9 +1155,9 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
                 value={form.baseTheme}
                 onChange={(e) => setForm({ ...form, baseTheme: e.target.value })}
               >
-                <option value="dark">{t('profile.theme_dark')}</option>
-                <option value="light">{t('profile.theme_light')}</option>
-                <option value="neutral">{t('profile.theme_neutral')}</option>
+                <option value="dark">{builtinThemeLabel('dark')}</option>
+                <option value="light">{builtinThemeLabel('light')}</option>
+                <option value="neutral">{builtinThemeLabel('neutral')}</option>
               </select>
               <div className="admin-form__hint">
                 {t('admin.designs.modal_base_theme_help')}
@@ -1452,9 +1457,9 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
               }
             >
               <optgroup label={t('admin.settings.default_design_builtin') || 'Built-in Themes'}>
-                <option value="dark">{t('profile.theme_dark') || 'Dark'}</option>
-                <option value="light">{t('profile.theme_light') || 'Light'}</option>
-                <option value="neutral">{t('profile.theme_neutral') || 'Neutral'}</option>
+                <option value="dark">{builtinThemeLabel('dark') || 'Dark'}</option>
+                <option value="light">{builtinThemeLabel('light') || 'Light'}</option>
+                <option value="neutral">{builtinThemeLabel('neutral') || 'Neutral'}</option>
               </optgroup>
               {designs.filter((d) => d.isActive && d.id !== deactivateModal.designIdToDeactivate)
                 .length > 0 && (

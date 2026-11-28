@@ -1,7 +1,8 @@
 // Guest/member theme pickers: the three built-in theme names come from the
 // default-design cards and can change; the dictionary label is only the
 // fallback while the cards are loading. Shared by ProfilePage (member
-// picker) and Navbar (guest picker) so the two pickers cannot drift apart.
+// picker), Navbar (guest picker) and DesignsTab (admin selects and the
+// custom-card base-theme line) so the names cannot drift apart.
 //
 // A card is a LIST SUMMARY (id/key/name/showInList/...) — everything the
 // picker renders. Applying a choice never fetches a list: the choice is a
