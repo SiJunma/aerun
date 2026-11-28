@@ -43,10 +43,6 @@
   width: 100%;
   max-width: 100%;
   padding: 1rem;
-  /* Solid surface for the whole tab column (breadcrumbs included): without
-     it the active design's background photo shows through the admin
-     content and the text lies on the photo. Cards (--card-bg) sit on top. */
-  background-color: var(--bg-color);
 }
 
 @media (min-width: 993px) {
