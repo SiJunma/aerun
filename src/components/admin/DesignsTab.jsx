@@ -21,12 +21,12 @@ import {
 } from '../../api/designs';
 import { uploadSettingsFavicon, uploadIdentityPlaceholder } from '../../api/admin';
 import { validateCode } from './codeValidation';
-import { sanitizeHtml } from '../../utils/text';
 import { resolveAvatarUrl } from '../../api/avatars';
 import { builtinThemeLabel as cardBuiltinThemeLabel } from '../../utils/defaultDesignPicker';
 import FaviconUploader from './FaviconUploader';
 import AvatarUploader from '../common/AvatarUploader';
 import CodeEditorField from './CodeEditorField';
+import RawHtml from '../common/RawHtml';
 import './DesignsTab.css';
 
 const MAX_BACKGROUND_BYTES = 10 * 1024 * 1024;
@@ -636,7 +636,9 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
   // ── Surface 1: default settings (the fallback for every card) ──────────
   // Edits write straight into AdminPage's settings draft (the same pattern
   // as the Settings tab); Save PATCHes the whole snapshot via updateSettings.
-  const sanitizedFooterPreview = sanitizeHtml(settings?.customFooterHtml || '') || '';
+  // The footer preview renders through the same RawHtml component as the
+  // live footer in Layout, so what the admin sees is what visitors get
+  // (raw HTML, scripts executing).
 
   const handleSaveDefaults = async () => {
     const headerError = validateCode('html', settings?.headerHtml || '', t);
@@ -760,8 +762,8 @@ const DesignsTab = ({ surface = 'all', designs, defaultDesigns = [], settings, s
         />
         <div className="admin-form__group">
           <span className="admin-form__label">{t('admin.designs.footer_preview')}</span>
-          {sanitizedFooterPreview ? (
-            <div className="designs-preview" dangerouslySetInnerHTML={{ __html: sanitizedFooterPreview }} />
+          {settings?.customFooterHtml?.trim() ? (
+            <RawHtml className="designs-preview" html={settings.customFooterHtml} />
           ) : (
             <div className="designs-preview designs-preview--empty">{t('admin.designs.footer_preview_empty')}</div>
           )}

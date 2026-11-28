@@ -540,7 +540,7 @@ describe('revision gates: banner placeholder and summary-driven UI', () => {
     assert.doesNotMatch(layoutCss, /\.forum-banner\s*\{/, 'no .forum-banner rule in layout.css');
     assert.doesNotMatch(themeCss, /--forum-banner-/, 'no --forum-banner-* aliases in theme-variables.css');
     assert.match(layoutJsx, /id="forum-banner"/, 'Layout still renders #forum-banner');
-    assert.match(layoutJsx, /dangerouslySetInnerHTML=\{\{ __html: sanitizedHeader \}\}/, 'the header HTML still renders inside the placeholder');
+    assert.match(layoutJsx, /<RawHtml id="forum-banner" className="forum-banner" html=\{resolvedDesign\?\.headerHtml\} \/>/, 'the header HTML still renders inside the placeholder');
   });
 
   it('the admin cards render their background from the summary, and the modal loads full records', () => {

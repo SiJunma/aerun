@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import Navigation from './Navbar';
 import { Container } from 'react-bootstrap';
 import { useAuth } from '../../contexts/AuthProvider';
@@ -9,7 +9,8 @@ import { useLocation, Link } from 'react-router-dom';
 import ConnectionStatusBanner from '../common/ConnectionStatusBanner';
 import EmailVerificationBanner from '../common/EmailVerificationBanner';
 import ScrollButtons from '../common/ScrollButtons';
-import { sanitizeHtml, resolveField } from '../../utils/text';
+import RawHtml from '../common/RawHtml';
+import { resolveField } from '../../utils/text';
 
 const Layout = ({ children }) => {
   const { settings, PERMISSIONS } = useAuth();
@@ -18,13 +19,10 @@ const Layout = ({ children }) => {
   const location = useLocation();
   const isAdminRoute = location.pathname.startsWith('/admin');
 
-  const sanitizedHeader = useMemo(() => {
-    return sanitizeHtml(resolvedDesign?.headerHtml || '') || null;
-  }, [resolvedDesign?.headerHtml]);
-
-  const sanitizedFooter = useMemo(() => {
-    return sanitizeHtml(resolvedDesign?.footerHtml || '') || null;
-  }, [resolvedDesign?.footerHtml]);
+  // The header/footer HTML renders raw, without sanitization — see
+  // RawHtml. Both fields are admin-only, and an admin can already run
+  // arbitrary JS in every visitor's browser through the design JS field
+  // (DesignProvider), so raw rendering does not expand the trust boundary.
 
   // forumName is a plain string now; resolveField keeps the defensive
   // object fallback for a snapshot that still carries the old {en, ru} shape.
@@ -51,8 +49,8 @@ const Layout = ({ children }) => {
 
           <EmailVerificationBanner />
 
-          {sanitizedHeader && location.pathname === '/' && (
-            <div id="forum-banner" className="forum-banner" dangerouslySetInnerHTML={{ __html: sanitizedHeader }} />
+          {location.pathname === '/' && (
+            <RawHtml id="forum-banner" className="forum-banner" html={resolvedDesign?.headerHtml} />
           )}
 
           {isAdminRoute ? (
@@ -72,9 +70,7 @@ const Layout = ({ children }) => {
         {!isAdminRoute && (
           <footer id="forum-about" className="forum-about footer-custom py-2 text-center">
             <Container>
-              {sanitizedFooter && (
-                <div className="forum-custom-footer" dangerouslySetInnerHTML={{ __html: sanitizedFooter }} />
-              )}
+              <RawHtml className="forum-custom-footer" html={resolvedDesign?.footerHtml} />
               <p className="mb-0 small">
                 &copy; {new Date().getFullYear()} {forumTitle}
               </p>
